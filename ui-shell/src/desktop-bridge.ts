@@ -58,9 +58,32 @@ export interface MarketRuntime {
 /** 在线插件运行期控制的 services 注册名（提供方 app 装配层，消费方 market 插件） */
 export const MARKET_RUNTIME_SERVICE = 'shell.market-runtime'
 
-/** 宿主桥总面：主题偏好发布 + 在线插件安装管理 */
+/** 设置持久化控制器（提供方 app 装配层，消费方设置行/插件）：
+ * 内存缓存 + 经宿主桥落盘 userData/preferences.json（无宿主桥时降级为仅内存）。
+ * 键语义归消费方解释（建议前缀 `<owner>.<key>` 防跨插件撞键） */
+export interface PreferencesController {
+  /** 持久化读回是否已完成（完成前 get 只返回 fallback / set 仅入内存） */
+  readonly ready: Promise<void>
+  /** 读偏好：未读回或无此键时返回 fallback */
+  get<T>(key: string, fallback: T): T
+  /** 写偏好：立即通知订阅者并异步落盘（写盘失败不回滚内存，仅告警） */
+  set(key: string, value: unknown): void
+  /** 订阅某键变化（set 触发；返回退订函数） */
+  subscribe(key: string, listener: (value: unknown) => void): () => void
+}
+
+/** 设置持久化控制器的 services 注册名（提供方 app 装配层） */
+export const PREFERENCES_SERVICE = 'shell.preferences'
+
+/** 宿主桥总面：主题偏好发布 + 设置持久化 + 在线插件安装管理 */
 export interface MxDesktopBridge {
   setNativeThemeSource(mode: string): Promise<boolean>
+  preferences: {
+    /** 读整表（机械校验与代际分流在主进程侧执行） */
+    getAll(): Promise<Record<string, unknown> | null>
+    /** 合并写单键（原子写由主进程保证） */
+    set(key: string, value: unknown): Promise<boolean>
+  }
   plugins: {
     list(): Promise<InstalledPluginView[] | null>
     installFromFile(): Promise<PluginInstallResult>

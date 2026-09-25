@@ -21,9 +21,13 @@ interface PluginInstallResult {
   message?: string
 }
 
-/** 主题偏好发布通道 + 在线插件安装桥（语义校验在渲染侧加载前统一执行，见 plugins.ts 头注） */
+/** 主题偏好发布通道 + 设置持久化桥 + 在线插件安装桥（语义校验在渲染侧加载前统一执行，见 plugins.ts 头注） */
 contextBridge.exposeInMainWorld('mxDesktop', {
   setNativeThemeSource: (mode: string) => ipcRenderer.invoke('mx:native-theme-set', mode),
+  preferences: {
+    getAll: (): Promise<Record<string, unknown> | null> => ipcRenderer.invoke('mx:preferences-get'),
+    set: (key: string, value: unknown): Promise<boolean> => ipcRenderer.invoke('mx:preferences-set', key, value),
+  },
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
     installFromFile: (): Promise<PluginInstallResult> => ipcRenderer.invoke('plugins:install-from-file'),

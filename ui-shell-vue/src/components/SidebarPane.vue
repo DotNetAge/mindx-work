@@ -5,7 +5,7 @@
  * 三段布局：Header 固定区（Logo / 折叠按钮）→ 滚动区（节 + 行）→ Footer 固定区（固定操作）。
  * 全部几何对齐 DSH SidebarRoot.module.css 真实值（逐项注明行号）：
  * 根 padding 6/12（L14）、行 min-height 36 / padding 7 8 / margin 0 2 / radius 12（L468-484）、
- * 选中 = interactive-bg-hover（L490-493）、折叠 rail 56px / 36 盒 / 12px 节奏（L31-35,514-526）。
+ * 选中 = interactive-bg-hover（L490-493）、折叠 rail 80px / 36 盒 / 12px 节奏（L31-35,514-526 宽度本地化）。
  * 宽度可拖拽调节（契约"几何由壳计算"——拖拽属壳的几何职责，
  * 宽度为适配器本地状态，双击手柄重置；折叠态禁用拖拽）。
  */
@@ -118,7 +118,7 @@ function onResizeStart(event: PointerEvent) {
 
 <style module>
 /* 根：填充 + 1px 右边框（SidebarRoot L1-2 注释：边框由布局列绘制，此处等效承载）；
-   padding 6px 12px（L14），折叠 18px 10px 6px（L35） */
+   padding 6px 12px（L14），折叠 18px 22px 6px（L35，宽度 80 对齐 DSH 官方桌面端折叠栏） */
 .sidebar {
   position: relative;
   display: flex;
@@ -155,10 +155,13 @@ function onResizeStart(event: PointerEvent) {
   transition: none;
 }
 
-/* 折叠 rail（L31-35 rail 几何）：56px 宽、10px 侧 padding、12px 垂直节奏 */
+/* 折叠 rail：80px 宽（DSH 官方桌面端折叠栏实测 ≈78px，对齐其观感——
+ * 恰好容纳 macOS 红绿灯三按钮：trafficLightPosition x=16 + 直径12×3 + 间距8×2 = 68，
+ * 右侧再留 12px 与左 inset 平衡；56px 时第三颗按钮溢出到内容区）。
+ * 36 盒居中 → 22px 侧 padding；12px 垂直节奏不变 */
 .collapsed {
-  width: 56px;
-  padding: 18px 10px 6px;
+  width: 80px;
+  padding: 18px 22px 6px;
 }
 
 .collapsed .scroll {

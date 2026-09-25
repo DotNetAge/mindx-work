@@ -5,15 +5,24 @@
  * 箭头列（L75-87）：绝对定位 right 8 / 缺省 opacity 0、hover 与 focus-within 显示
  * （用 opacity 而非 visibility——按钮保持可聚焦，键盘 focus 也能唤出）；
  * 箭头 chip（L92-104）：17x12 / radius 3 / layer-1 75% 洗色、hover 全 layer-1。
- * demo 本地状态（12–18，步进 2），无真实配置模型。 */
+ * 字号值经 shell.preferences 服务持久化（键 demo.font-size），重启后恢复——
+ * 插件消费内置持久化的范式：行组件只 get/set，落盘机制归壳。 */
 import { ref } from 'vue'
+import { useService, type PreferencesController } from '@mindx-work/ui-shell-vue'
+
+const preferences = useService<PreferencesController>('shell.preferences')
 
 const MIN = 12
 const MAX = 18
-const value = ref(14)
+const value = ref(preferences.get('demo.font-size', 14))
+// 读回晚于本组件挂载时（在线插件先激活），以落盘值校正
+void preferences.ready.then(() => {
+  value.value = preferences.get('demo.font-size', value.value)
+})
 
 function step(delta: number) {
   value.value = Math.min(MAX, Math.max(MIN, value.value + delta))
+  preferences.set('demo.font-size', value.value)
 }
 </script>
 

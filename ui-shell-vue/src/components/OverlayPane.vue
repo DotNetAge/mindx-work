@@ -44,11 +44,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
       </button>
     </div>
   </div>
-  <div v-if="data.modal" :class="$style.modalMask">
-    <div :class="$style.modalCard">
-      <component :is="data.modal.component" />
+  <!-- Transition 只负责退场：leave 动画播完（animationend）才真正卸载；
+    入场由元素自身 animation 驱动，无需 enter class -->
+  <Transition :leave-active-class="$style.modalLeaveActive">
+    <div v-if="data.modal" :class="$style.modalMask">
+      <div :class="$style.modalCard">
+        <component :is="data.modal.component" />
+      </div>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <style module>
@@ -96,8 +100,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
   padding: var(--mx-space-6);
   background: var(--mx-bg-elevated);
   border-radius: var(--mx-radius-window);
-  box-shadow: 0 8px 32px color-mix(in srgb, var(--mx-text) 24%, transparent);
-  animation: overlay-in var(--mx-duration-motion) var(--mx-ease-standard);
+  /* 边界靠 shadow-lv3 首段 1px 实色描边（锐利边界）——曾用 text 色手拼 32px 大扩散光晕，
+   * 暗色主题 text 近白导致卡片边缘一圈白雾、边界感不清晰 */
+  box-shadow: var(--mx-shadow-lv3);
+  animation: modal-in var(--mx-duration-motion) var(--mx-ease-standard);
 }
 
 @keyframes overlay-in {
@@ -111,6 +117,39 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
   }
 }
 
+/* modal 入场：仿 Apple 从小到大放大（0.82 → 1）+ 上浮，标准减速曲线 */
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* modal 退场 = 入场倒放：遮罩淡出 + 卡片缩小上浮淡出（同曲线同时长） */
+@keyframes mask-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes card-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.82);
+  }
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -120,11 +159,22 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
   }
 }
 
-/* 动效只用于状态过渡；偏好减弱动效时关闭入场动画 */
+/* modal 退场挂载类：Transition 加在遮罩根元素上，animationend 后才真正卸载；
+ * 卡片退场经后代选择器触发——两动画同曲线同时长同帧结束，卸载时机以根元素为准。
+ * 置于文件末尾以覆盖常驻入场动画（同 specificity 后定义者胜） */
+.modalLeaveActive {
+  animation: mask-out var(--mx-duration-motion) var(--mx-ease-standard) forwards;
+}
+.modalLeaveActive .modalCard {
+  animation: card-out var(--mx-duration-motion) var(--mx-ease-standard) forwards;
+}
+
+/* 动效只用于状态过渡；偏好减弱动效时关闭入场/退场动画（退场无动画时长即瞬时卸载） */
 @media (prefers-reduced-motion: reduce) {
   .banners,
   .modalMask,
-  .modalCard {
+  .modalCard,
+  .modalLeaveActive {
     animation: none;
   }
 }

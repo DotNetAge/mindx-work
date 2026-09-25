@@ -1,7 +1,7 @@
 /** 组装入口：执行预置插件清单 + 主题机制挂载 + 在线插件激活 + Vue 挂载 */
 
 import { createApp } from '@mindx-work/ui-shell'
-import { createThemeController, mountVueApp } from '@mindx-work/ui-shell-vue'
+import { createPreferencesController, createThemeController, mountVueApp } from '@mindx-work/ui-shell-vue'
 import { h } from 'vue'
 import { demoPlugin, marketPlugin } from '@mindx-work/plugins'
 import { createMarketRuntime, loadMarketPlugins } from './loader'
@@ -9,8 +9,21 @@ import { createMarketRuntime, loadMarketPlugins } from './loader'
 // 启动装配：插件冲突与依赖缺失在启动期暴露（契约第 7 节）
 const shell = createApp([demoPlugin, marketPlugin])
 
-// 主题机制归壳所有（军规 2/3）：控制器以服务形式供设置界面消费
-shell.services.provide('shell.theme', createThemeController())
+// 设置持久化归壳所有：控制器以服务形式供设置行与插件消费（键建议 <owner>.<key> 前缀）
+const preferences = createPreferencesController()
+shell.services.provide('shell.preferences', preferences)
+
+// 主题机制归壳所有（军规 2/3）：控制器以服务形式供设置界面消费；
+// 档位持久化闭环也归壳——读回后恢复，变化即落盘（设置行零感知持久化）
+const theme = createThemeController()
+shell.services.provide('shell.theme', theme)
+void preferences.ready.then(() => {
+  const saved = preferences.get<'light' | 'dark' | 'auto' | null>('shell.theme.mode', null)
+  if (saved) theme.setMode(saved)
+})
+theme.subscribe((mode) => {
+  preferences.set('shell.theme.mode', mode)
+})
 
 // 在线插件运行期控制以服务形式供 market 插件消费（启停/切版/卸载先行停用）
 const marketRuntime = createMarketRuntime(shell)

@@ -20,6 +20,8 @@ export {
   type MarketVersionView,
   type MxDesktopBridge,
   type PluginInstallResult,
+  type PreferencesController,
+  PREFERENCES_SERVICE,
 } from './desktop-bridge'
 export {
   GENERAL_PAGE_ID,

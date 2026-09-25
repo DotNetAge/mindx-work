@@ -80,6 +80,11 @@
   --mx-space-5: 20px;
   --mx-space-6: 24px;
   --mx-space-7: 32px;
+  /* 24 栏栅格：gutter 缺省列距；断点仅供 JS matchMedia 对齐（media query 内不可用 var()） */
+  --mx-gutter: 16px;
+  --mx-breakpoint-sm: 768px;
+  --mx-breakpoint-md: 992px;
+  --mx-breakpoint-lg: 1200px;
 
   /* 圆角三档（对齐 DSH 更圆润的控制圆角） */
   --mx-radius-control: 8px;

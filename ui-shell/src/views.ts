@@ -266,10 +266,11 @@ export function createPreferences<C>(hub: ChangeHub): PreferencesApi<C> {
   let isOpen = false
   let activePageId = GENERAL_PAGE_ID
 
-  // 壳自带"通用"页：承接未指定 page 的行（契约第 4 节定稿）
+  // 壳自带"通用"页：承接未指定 page 的行（契约第 4 节定稿）；齿轮图标为固有项视觉身份
   pages.add({
     id: GENERAL_PAGE_ID,
     title: '通用',
+    icon: 'lucide:settings',
     // 壳自带页无内容组件，契约特例：置空由壳渲染空态
     component: null as unknown as C,
   })

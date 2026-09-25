@@ -5,6 +5,7 @@ import './styles/controls.css'
 
 export { mountVueApp, type VueAppHandle } from './mountVueApp'
 export { createThemeController, type ThemeController, type ThemeMode } from './theme'
+export { createPreferencesController, type PreferencesController } from './preferences'
 export {
   SHELL_KEY,
   useService,

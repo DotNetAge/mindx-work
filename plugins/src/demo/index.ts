@@ -65,15 +65,8 @@ const demoPlugin: VuePlugin = (app) => {
 
   // Overlay：条目运行期经编排 API 注册（总览页触发），启动期不注册
 
-  // Preferences：四页（对齐 DSH 设置导航结构），每页至少一行
-  // （"插件"页归 market 插件注册，demo 不占位）
-  app.Settings.page({
-    id: 'appearance',
-    title: '外观',
-    icon: 'lucide:sun-moon',
-    // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费
-    component: ThemeRow,
-  })
+  // Preferences：三页 + 壳自带"通用"页（主题/语言/字号/版本四行，注册序即显示序）
+  // （"插件"页归 market 插件注册，demo 不占位；主题是通用页的一项，不另立外观页）
   app.Settings.page({ id: 'model', title: '模型', icon: 'lucide:bot', component: ModelRow })
   app.Settings.page({
     id: 'agent',
@@ -87,7 +80,7 @@ const demoPlugin: VuePlugin = (app) => {
     icon: 'lucide:monitor',
     component: DesktopRow,
   })
-  app.Settings.row({ id: 'pref-theme', page: 'appearance', component: ThemeRow })
+  app.Settings.row({ id: 'pref-theme', component: ThemeRow })
   app.Settings.row({ id: 'pref-language', component: LanguageRow })
   app.Settings.row({ id: 'pref-font-size', component: FontSizeRow })
   app.Settings.row({ id: 'pref-version', component: VersionRow })
