@@ -1,0 +1,10 @@
+packages:
+  - ui-shell
+  - ui-shell-vue
+  - plugins
+  - app
+  - electron
+
+# electron 的二进制下载依赖 postinstall 脚本，须显式批准
+onlyBuiltDependencies:
+  - electron

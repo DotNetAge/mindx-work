@@ -1,0 +1,167 @@
+/**
+ * 主题 token（军规 3）。
+ * 色板对齐 DeepSeek Harness design-platform：中性灰走 bluish 灰阶，
+ * 品牌色走 deepseek 蓝阶；亮色为缺省值，暗色经根节点 data-mx-theme 覆盖。
+ * 组件永不感知当前主题名，只消费语义 token。
+ */
+
+:root {
+  /* 字族：系统栈，macOS 上即 SF Pro + 苹方 */
+  --mx-font-family: -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", Roboto, sans-serif;
+
+  /* 字阶 5 级（正文基准 14，DSH 侧栏根 font-size 14px / 行高 22px） */
+  --mx-font-title: 600 20px/28px var(--mx-font-family);
+  --mx-font-heading: 600 15px/22px var(--mx-font-family);
+  --mx-font-body: 400 14px/22px var(--mx-font-family);
+  --mx-font-caption: 400 11px/16px var(--mx-font-family);
+  --mx-font-micro: 500 10px/14px var(--mx-font-family);
+
+  /* 颜色语义 token（亮色 = DSH design-platform 亮色别名） */
+  --mx-bg-window: rgb(255, 255, 255);        /* bg-base: neutral-bluish-00 */
+  --mx-bg-surface: rgb(249, 250, 251);       /* sidebar-fill: neutral-bluish-50 */
+  --mx-bg-elevated: rgb(255, 255, 255);      /* layer-1/2/3 均为 00 */
+  --mx-separator: rgba(0, 0, 0, 0.1);        /* border-l2 */
+  --mx-separator-soft: rgba(0, 0, 0, 0.04);  /* border-l1 */
+  --mx-border-strong: rgba(0, 0, 0, 0.12);   /* border-l3 */
+  --mx-border-l4: rgba(0, 0, 0, 0.16);       /* border-l4（三卡描边） */
+  --mx-mask: rgba(0, 0, 0, 0.24);            /* bg-mask-1（设置面板遮罩） */
+  --mx-mask-blur: blur(2px);                 /* mask-blur（遮罩背景模糊，双主题同值） */
+  --mx-state-error: rgb(236, 19, 19);        /* static-red-600 */
+  --mx-state-warn: rgb(245, 158, 11);        /* static-amber-500 */
+  --mx-state-success: rgb(34, 197, 94);      /* static-green-500 */
+  --mx-state-idle: rgb(212, 212, 212);       /* static-neutral-300 */
+  --mx-tooltip-bg: rgb(44, 44, 46);          /* static-neutral-bluish-850 */
+  --mx-menu-bg: rgba(248, 249, 250, 0.58);   /* specific-menu */
+  --mx-backdrop-menu: blur(40px) saturate(150%); /* menu-backdrop-filter（菜单/浮层本体） */
+  --mx-module: rgb(245, 246, 247);           /* bg-module-platform: neutral-bluish-60 */
+  --mx-static-white: rgb(255, 255, 255);     /* static-neutral-bluish-00（tooltip 字，双主题同值） */
+  --mx-elevation-stroke: 0 0 0 0.5px var(--mx-separator-soft); /* elevation-stroke: 0.5px border-l1 */
+  --mx-shadow-panel: var(--mx-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.03),
+    0 0 16px 0 rgba(0, 0, 0, 0.02);          /* elevation-panel（浮层面板） */
+  --mx-shadow-prominent: var(--mx-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.04),
+    0 0 20px 0 rgba(0, 0, 0, 0.05);          /* elevation-prominent（菜单卡，双主题同值） */
+  --mx-nav-active: rgb(235, 238, 242);       /* sidebar-nav-item-active: neutral-bluish-100 */
+  --mx-business: rgb(65, 118, 230);          /* static-deepseek-500（信息/业务蓝） */
+  --mx-state-success-soft: rgb(230, 250, 237); /* static-green-100（success 淡底） */
+  --mx-state-warn-soft: rgb(254, 245, 231);  /* static-amber-100（warn 淡底） */
+  --mx-state-warn-label: rgb(221, 134, 41);  /* static-amber-600（warn 深字，双主题同值） */
+  --mx-toast-bg: rgb(53, 54, 56);            /* static-neutral-bluish-800（toast 双主题恒暗） */
+  --mx-hovercard-bg: rgb(44, 44, 46);        /* hovercard #2C2C2E（双主题同值） */
+  --mx-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02),
+    0 12px 32px 0 rgba(0, 0, 0, 0.08);      /* shadow-lv3（双主题同值） */
+  --mx-nav-hover: rgb(241, 243, 245);        /* sidebar-nav-item-hover: neutral-bluish-75 */
+  --mx-border-selected: rgb(173, 178, 184);  /* 三卡选中描边: neutral-bluish-400 */
+  --mx-text: rgb(15, 17, 21);                /* label-primary: neutral-bluish-1000 */
+  --mx-text-secondary: rgb(97, 102, 107);    /* label-secondary: neutral-bluish-700 */
+  --mx-text-tertiary: rgb(129, 133, 140);    /* label-tertiary: neutral-bluish-600 */
+  --mx-text-caption: rgb(173, 178, 184);     /* label-caption: neutral-bluish-400 */
+  --mx-text-on-accent: rgb(255, 255, 255);
+  --mx-accent: rgb(65, 118, 230);            /* deepseek-500（亮色品牌蓝） */
+  --mx-success: rgb(34, 197, 94);            /* green-500 */
+  --mx-warning: rgb(245, 158, 11);           /* amber-500 */
+  --mx-danger: rgb(239, 68, 68);             /* red-500 */
+
+  /* 交互灰底（interactive-bg-*：带蓝调的中性灰；DSH 选中态 panelActive 复用 hover，非独立实色） */
+  --mx-hover: rgba(38, 49, 72, 0.06);        /* interactive-bg-hover */
+  --mx-active: rgba(38, 49, 72, 0.1);        /* interactive-bg-active */
+  --mx-hover-solid: rgb(241, 243, 245);      /* interactive-bg-hover-solid: neutral-bluish-75 */
+  --mx-btn-elevated: rgb(255, 255, 255);     /* button-elevated-fill: neutral-bluish-00 */
+  --mx-font-brand: 600 18px/24px var(--mx-font-family); /* brandName 18px/600/lh24（SidebarRoot L281-291） */
+
+  /* 间距：4pt 网格 */
+  --mx-space-1: 4px;
+  --mx-space-2: 8px;
+  --mx-space-3: 12px;
+  --mx-space-4: 16px;
+  --mx-space-5: 20px;
+  --mx-space-6: 24px;
+  --mx-space-7: 32px;
+
+  /* 圆角三档（对齐 DSH 更圆润的控制圆角） */
+  --mx-radius-control: 8px;
+  --mx-radius-card: 12px;
+  --mx-radius-window: 14px;
+
+  /* 动效 */
+  --mx-ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --mx-duration-fast: 150ms;
+  --mx-duration-motion: 300ms;
+}
+
+/* 暗色覆盖（仅换值，语义名不变；数值 = DSH design-platform 暗色别名） */
+:root[data-mx-theme='dark'] {
+  --mx-bg-window: rgb(21, 21, 23);           /* bg-base: neutral-bluish-950 */
+  --mx-bg-surface: rgb(27, 27, 28);          /* sidebar-fill: neutral-bluish-900 */
+  --mx-bg-elevated: rgb(44, 44, 46);         /* layer-2: neutral-bluish-850 */
+  --mx-separator: rgba(255, 255, 255, 0.12); /* border-l2 */
+  --mx-separator-soft: rgba(255, 255, 255, 0.06); /* border-l1 */
+  --mx-border-strong: rgba(255, 255, 255, 0.16);  /* border-l3 */
+  --mx-border-l4: rgba(255, 255, 255, 0.2);       /* border-l4 */
+  --mx-mask: rgba(0, 0, 0, 0.5);                  /* bg-mask-1 暗色 */
+  --mx-mask-blur: blur(2px);                      /* mask-blur */
+  --mx-state-error: rgb(242, 90, 90);             /* static-red-400 */
+  --mx-state-warn: rgb(245, 158, 11);             /* static-amber-500 */
+  --mx-state-success: rgb(34, 197, 94);           /* static-green-500 */
+  --mx-state-idle: rgb(84, 85, 87);               /* static-neutral-600 */
+  --mx-tooltip-bg: rgb(67, 69, 74);               /* static-neutral-bluish-750 */
+  --mx-menu-bg: rgba(48, 49, 54, 0.5);            /* specific-menu 暗色 */
+  --mx-backdrop-menu: blur(40px) saturate(150%);  /* menu-backdrop-filter */
+  --mx-module: rgb(53, 54, 56);                   /* bg-module-platform: neutral-bluish-800 */
+  --mx-nav-active: rgb(67, 69, 74);               /* sidebar-nav-item-active: neutral-bluish-750 */
+  --mx-business: rgb(122, 170, 255);              /* static-deepseek-400 */
+  --mx-state-success-soft: rgb(35, 60, 44);       /* static-green-900 */
+  --mx-state-warn-soft: rgb(39, 36, 31);          /* static-amber-900 */
+  --mx-state-warn-label: rgb(221, 134, 41);       /* static-amber-600（双主题同值） */
+  --mx-toast-bg: rgb(67, 69, 74);                 /* static-neutral-bluish-750 */
+  --mx-hovercard-bg: rgb(44, 44, 46);             /* 双主题同值 */
+  --mx-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02),
+    0 12px 32px 0 rgba(0, 0, 0, 0.08);           /* shadow-lv3 */
+  --mx-nav-hover: rgb(44, 44, 46);                /* sidebar-nav-item-hover: neutral-bluish-850 */
+  --mx-border-selected: rgb(173, 178, 184);       /* neutral-bluish-400（双主题同值） */
+  --mx-text: rgb(249, 250, 251);             /* label-primary: neutral-bluish-50 */
+  --mx-text-secondary: rgb(207, 211, 214);   /* label-secondary: neutral-bluish-300 */
+  --mx-text-tertiary: rgb(173, 178, 184);    /* label-tertiary: neutral-bluish-400 */
+  --mx-text-caption: rgb(129, 133, 140);     /* label-caption: neutral-bluish-600 */
+  --mx-text-on-accent: rgb(15, 17, 21);      /* 暗色品牌底变亮蓝，文字转深色 */
+  --mx-accent: rgb(122, 170, 255);           /* deepseek-400（暗色品牌蓝） */
+  --mx-success: rgb(34, 197, 94);
+  --mx-warning: rgb(245, 158, 11);
+  --mx-danger: rgb(242, 90, 90);             /* red-400（暗色错误色） */
+
+  --mx-hover: rgba(255, 255, 255, 0.08);
+  --mx-active: rgba(255, 255, 255, 0.14);
+  --mx-hover-solid: rgb(53, 54, 56);         /* neutral-bluish-800 */
+  --mx-btn-elevated: rgb(67, 69, 74);        /* button-elevated-fill: neutral-bluish-750 */
+}
+
+/* 全局底座 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+/* macOS Electron 壳：页面背景透明，让窗口原生 vibrancy 透出（web 层只"让开"，
+   毛玻璃发生在 OS 窗口合成器；对齐 DSH web/src/base.css 的平台分支策略） */
+html[data-platform='darwin'] body {
+  background: transparent;
+}
+
+body {
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+  background: var(--mx-bg-window);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  height: 100%;
+}

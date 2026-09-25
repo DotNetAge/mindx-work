@@ -1,0 +1,18 @@
+{
+  "name": "@mindx-work/ui-shell-vue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@iconify-json/lucide": "^1.2.44",
+    "@iconify/vue": "^5.0.0",
+    "@mindx-work/ui-shell": "workspace:*",
+    "pinia": "^3.0.2",
+    "vue": "^3.5.13"
+  }
+}

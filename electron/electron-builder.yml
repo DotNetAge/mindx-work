@@ -1,0 +1,62 @@
+# electron-builder 打包配置（cwd = electron/ 子包：主包 = 含 main 入口的包，
+# electron-builder 据此定位应用 package.json；pnpm workspace 根跑会被误判成 app 包——实测踩坑）
+# 打包前由 scripts/pack.mjs 完成构建：pnpm build（vite 产物 app/dist + tsc 产物 electron/dist）
+# 版本号由 pack.mjs 从 git tag 解析后经 -c.extraMetadata.version 注入，不依赖手工维护。
+appId: com.mindx.work
+productName: MindX Work
+directories:
+  buildResources: ../resources
+  output: ../dist
+# 纯静态产物：asar 内只有 dist（main.js + preload.js）；前端 vite 产物经 extraResources
+# 放到 Contents/Resources/app-dist（files 的 ../ 越界 glob 会被静默忽略——实测踩坑）。
+# electron 主进程零运行时 dependencies，node_modules 不会被打入。
+files:
+  - dist/**
+  - '!**/.DS_Store'
+extraResources:
+  - from: ../app/dist
+    to: app-dist
+  # 系统驻留图标（macOS 模板图 + Windows 彩色图），主进程经 process.resourcesPath/tray 定位
+  - from: ../resources/tray
+    to: tray
+# 上传发布另行处理（当前 CI 只产出 artifact，不上传 Release）：
+# pack.mjs 固定 --publish never，此处不配置 publish，杜绝意外发版。
+mac:
+  category: public.app-category.developer-tools
+  icon: ../resources/icon.png
+  target:
+    # 双架构分包（x64=Intel，arm64=Apple Silicon），不用 universal2：体积翻倍且 Electron 兼容性一般
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    # zip 供后续 electron-updater 更新使用，dmg 供手动安装
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  # 公证（Notarization，electron-builder v26 布尔开关），凭据全部走环境变量、不写死在本仓库：
+  #   Apple ID 方式（CI 推荐）：APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
+  #   keychain profile 方式（本机已 notarytool 存档凭据时）：APPLE_KEYCHAIN_PROFILE + APPLE_TEAM_ID
+  # 两者都未提供时 electron-builder 跳过公证仅告警（本地未签名构建可用）。
+  # 签名证书（Developer ID Application）须提前导入钥匙串（CI 由 workflow 完成）；
+  # 无证书时 electron-builder 退化为 ad-hoc 签名，产物可本机运行但不可分发。
+  hardenedRuntime: true
+  entitlements: ../resources/entitlements.mac.plist
+  entitlementsInherit: ../resources/entitlements.mac.plist
+  notarize: true
+win:
+  icon: ../resources/icon.png
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+# Linux：AppImage 通用 + deb 供 Debian 系；未配置签名（后续按需扩展）
+linux:
+  icon: ../resources/icon.png
+  category: Development
+  target:
+    - AppImage
+    - deb
+npmRebuild: false

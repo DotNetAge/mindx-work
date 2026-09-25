@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.base.json",
+  "include": ["src", "../ui-shell/src", "../ui-shell-vue/src", "../plugins/src"]
+}

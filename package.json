@@ -1,0 +1,21 @@
+{
+  "name": "mindx-work",
+  "private": true,
+  "version": "0.1.0",
+  "main": "electron/dist/main.js",
+  "scripts": {
+    "dev": "pnpm --filter @mindx-work/app dev",
+    "build": "pnpm --filter @mindx-work/app build && pnpm --filter @mindx-work/electron build",
+    "typecheck": "vue-tsc --noEmit -p app/tsconfig.json",
+    "pack": "node scripts/pack.mjs --mac --win --linux",
+    "pack:mac": "node scripts/pack.mjs --mac",
+    "pack:win": "node scripts/pack.mjs --win",
+    "pack:linux": "node scripts/pack.mjs --linux"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.2",
+    "vue-tsc": "^3.0.4"
+  }
+}

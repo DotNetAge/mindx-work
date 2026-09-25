@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 430" font-family="'PingFang SC','Hiragino Sans GB','Helvetica Neue',Arial,sans-serif">
+  <!-- Overlay：全局浮层，虚线 banner -->
+  <rect x="60" y="18" width="460" height="26" rx="8" fill="none" stroke="#0FDC78" stroke-width="1.2" stroke-dasharray="6 6"/>
+  <text x="290" y="35" text-anchor="middle" font-size="12" fill="#52525B">Overlay 契约 · modal 互斥 / banner 可叠</text>
+
+  <!-- 主窗口 -->
+  <rect x="60" y="56" width="460" height="320" rx="12" fill="#F7F7F8" stroke="#D9D9DE"/>
+  <text x="290" y="80" text-anchor="middle" font-size="12" fill="#52525B">Toolbar 契约 · leading｜trailing 两席位</text>
+  <line x1="60" y1="92" x2="520" y2="92" stroke="#D9D9DE"/>
+
+  <!-- Sidebar 列 -->
+  <rect x="61" y="93" width="123" height="282" rx="10" fill="#EFEFF2" stroke="#D9D9DE"/>
+  <text x="122" y="122" text-anchor="middle" font-size="14" font-weight="500" fill="#171717">Sidebar</text>
+  <text x="122" y="146" text-anchor="middle" font-size="12" fill="#52525B">分节导航</text>
+  <text x="122" y="166" text-anchor="middle" font-size="12" fill="#52525B">行 = 数据模型</text>
+  <text x="122" y="186" text-anchor="middle" font-size="12" fill="#52525B">行 id → Content</text>
+  <text x="122" y="206" text-anchor="middle" font-size="12" fill="#52525B">折叠 = rail</text>
+
+  <!-- Content 列（主焦点，brand 淡底） -->
+  <rect x="185" y="93" width="218" height="282" rx="10" fill="#E9FBF2" stroke="#9AE6C4" stroke-width="1.2"/>
+  <text x="294" y="122" text-anchor="middle" font-size="14" font-weight="500" fill="#171717">Content</text>
+  <text x="294" y="146" text-anchor="middle" font-size="12" fill="#004D26">单活动视图</text>
+  <text x="294" y="166" text-anchor="middle" font-size="12" fill="#004D26">activeId 壳唯一持有</text>
+  <text x="294" y="186" text-anchor="middle" font-size="12" fill="#004D26">title 呈现于 Toolbar</text>
+
+  <!-- Detail 列 -->
+  <rect x="404" y="93" width="115" height="282" rx="10" fill="#EFEFF2" stroke="#D9D9DE"/>
+  <text x="461" y="122" text-anchor="middle" font-size="14" font-weight="500" fill="#171717">Detail</text>
+  <text x="461" y="146" text-anchor="middle" font-size="12" fill="#52525B">tabs 多插件</text>
+  <text x="461" y="166" text-anchor="middle" font-size="12" fill="#52525B">轨道让位</text>
+  <text x="461" y="186" text-anchor="middle" font-size="12" fill="#52525B">show / hide</text>
+
+  <!-- Settings 独立面板（虚线） -->
+  <rect x="560" y="120" width="120" height="130" rx="10" fill="none" stroke="#C9C9CF" stroke-width="1.2" stroke-dasharray="5 5"/>
+  <text x="620" y="150" text-anchor="middle" font-size="14" font-weight="500" fill="#171717">Settings</text>
+  <text x="620" y="174" text-anchor="middle" font-size="12" fill="#52525B">页 + 行注册</text>
+  <text x="620" y="194" text-anchor="middle" font-size="12" fill="#52525B">由壳自动生成</text>
+
+  <!-- 底部通用契约注 -->
+  <text x="360" y="410" text-anchor="middle" font-size="12" fill="#52525B">通用契约：Entry { id, order, component } · ViewProps { active, compact } · 主题 --mx-* token</text>
+</svg>

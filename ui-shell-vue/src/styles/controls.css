@@ -1,0 +1,783 @@
+/**
+ * 界面套件基础控件层（军规 7：插件首先选用主题样式）。
+ * 全局类，mx- 前缀防冲突；全部交互伪类显式定义（军规 5），取色自 token（军规 6）。
+ */
+
+/* ---------- 按钮 ---------- */
+
+.mx-btn {
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+  background: var(--mx-bg-elevated);
+  border: 1px solid var(--mx-separator);
+  border-radius: var(--mx-radius-control);
+  padding: var(--mx-space-1) var(--mx-space-3);
+  cursor: pointer;
+  transition:
+    background-color var(--mx-duration-fast) var(--mx-ease-standard),
+    border-color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.mx-btn:hover {
+  background: var(--mx-hover);
+}
+
+.mx-btn:active {
+  background: var(--mx-active);
+}
+
+.mx-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mx-accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.mx-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mx-btn--primary {
+  color: var(--mx-text-on-accent);
+  background: var(--mx-accent);
+  border-color: transparent;
+}
+
+.mx-btn--primary:hover {
+  background: color-mix(in srgb, var(--mx-accent) 88%, var(--mx-text-on-accent));
+}
+
+.mx-btn--primary:active {
+  background: color-mix(in srgb, var(--mx-accent) 78%, var(--mx-text-on-accent));
+}
+
+.mx-btn--primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------- 图标按钮（工具栏 / 行尾） ---------- */
+
+.mx-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--mx-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--mx-radius-control);
+  cursor: pointer;
+  transition:
+    background-color var(--mx-duration-fast) var(--mx-ease-standard),
+    color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.mx-icon-btn:hover {
+  color: var(--mx-text);
+  background: var(--mx-hover);
+}
+
+.mx-icon-btn:active {
+  background: var(--mx-active);
+}
+
+.mx-icon-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mx-accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.mx-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------- 输入框 ---------- */
+
+.mx-input {
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+  background: var(--mx-bg-window);
+  border: 1px solid var(--mx-separator);
+  border-radius: var(--mx-radius-control);
+  padding: var(--mx-space-1) var(--mx-space-2);
+  transition:
+    border-color var(--mx-duration-fast) var(--mx-ease-standard),
+    background-color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.mx-input::placeholder {
+  color: var(--mx-text-tertiary);
+}
+
+.mx-input:hover {
+  border-color: color-mix(in srgb, var(--mx-text) 20%, transparent);
+}
+
+.mx-input:focus-visible {
+  outline: none;
+  border-color: var(--mx-accent);
+}
+
+.mx-input:disabled {
+  background: var(--mx-bg-surface);
+  color: var(--mx-text-tertiary);
+  cursor: default;
+}
+
+/* ---------- 徽标 ---------- */
+
+.mx-badge {
+  font: var(--mx-font-micro);
+  color: var(--mx-text-on-accent);
+  background: var(--mx-accent);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 16px;
+  min-width: 16px;
+  text-align: center;
+}
+
+/* ---------- 卡片容器 ---------- */
+
+.mx-card {
+  background: var(--mx-bg-surface);
+  border-radius: var(--mx-radius-card);
+  padding: var(--mx-space-4);
+}
+
+/* ---------- 设置行（页内行的通用骨架） ---------- */
+
+/* 标准设置行（GeneralSection.module.css 行结构）：label+说明左、控件右，
+   padding 16 0，0.5px 分隔线由设置面板行容器统一提供 */
+.mx-pref-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mx-space-4);
+  padding: 16px 0;
+}
+
+/* label 列：标题 14/22 + 说明 12/18 tertiary */
+.mx-pref-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mx-pref-title {
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+}
+
+.mx-pref-desc {
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
+}
+
+/* 行内下拉 chip（PermissionSelect.module.css L1-32）：28 高 / radius 24 /
+   13px 500 / 透明底 / hover 交互灰 / focus 2px 边框环 */
+.mx-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 4px 0 8px;
+  border: none;
+  border-radius: 24px;
+  background: transparent;
+  font: 500 13px/20px var(--mx-font-family);
+  color: var(--mx-text-secondary);
+  cursor: pointer;
+  transition: background-color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.mx-pill:hover:not(:disabled) {
+  background: var(--mx-hover);
+}
+
+.mx-pill:active:not(:disabled) {
+  background: var(--mx-active);
+}
+
+.mx-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--mx-border-strong);
+}
+
+.mx-pill:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ============ 开关（Switch） ============
+ * 出处：ui-primitives/Switch.module.css（L10-49）。
+ * 状态由 aria-checked 驱动（视觉态与无障碍读数不可分叉）；轨道胶囊 36x20，
+ * radius 即半高；滑块 16 圆形、选中右移 16px、120ms。使用方式：
+ * <button class="mx-switch" role="switch" :aria-checked="v" @click="v=!v">
+ *   <span class="mx-switch-thumb" /> </button> */
+.mx-switch {
+  box-sizing: border-box;
+  position: relative;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+  padding: 2px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--mx-border-strong); /* alias-border-l3 */
+  cursor: pointer;
+  transition: background-color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.mx-switch[aria-checked='true'] {
+  background: var(--mx-accent);
+}
+
+.mx-switch:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.mx-switch:focus-visible {
+  outline: 2px solid var(--mx-accent);
+  outline-offset: 2px;
+}
+
+.mx-switch-thumb {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--mx-text-on-accent); /* alias-label-primary-foreground */
+  transition: transform 120ms ease;
+}
+
+.mx-switch[aria-checked='true'] .mx-switch-thumb {
+  transform: translateX(16px);
+}
+
+/* ============ 复选框（Checkbox） ============
+ * 出处：ui-primitives/Checkbox.module.css（L1-27）。
+ * 原生 input + accent-color 着色；标签 14/20；禁用 0.5。 */
+.mx-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+  cursor: pointer;
+}
+
+.mx-checkbox input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--mx-accent);
+  cursor: inherit;
+}
+
+.mx-checkbox input:focus-visible {
+  outline: 2px solid var(--mx-accent);
+  outline-offset: 2px;
+}
+
+.mx-checkbox:has(input:disabled) {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* ============ 菜单卡（Menu） ============
+ * 出处：ui-primitives/Menu.module.css（L7-60, 98-170）。
+ * 卡：padding 3 / radius 16 / specific-menu 半透明底 + blur(40px) saturate(150%)
+ * 背景模糊 / min-width 144 / max 360 / top = 锚点下 4px。
+ * 行：min-height 34 / padding 6 8 / radius 8 / 13/20 / gap 6；
+ * hover 与键盘 focus 同填 interactive-bg-hover；禁用 0.4。 */
+/* macOS Electron 壳：透明窗口会让 backdrop-filter 失效（Chromium 对透明根合成时
+ * blur 渲染为空），菜单浮层改用近不透明底补偿，防止底层文字透出 */
+html[data-platform='darwin'] .mx-menu {
+  background: rgb(248, 249, 250, 0.94);
+}
+
+html[data-platform='darwin'][data-mx-theme='dark'] .mx-menu {
+  background: rgb(48, 49, 54, 0.94);
+}
+
+.mx-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  box-sizing: border-box;
+  min-width: 144px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  border-radius: 16px;
+  background: var(--mx-menu-bg);
+  backdrop-filter: var(--mx-backdrop-menu);
+  box-shadow: var(--mx-shadow-prominent); /* elevation-prominent */
+}
+
+.mx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font: 500 13px/20px var(--mx-font-family);
+  color: var(--mx-text);
+  text-align: left;
+  transition: background-color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.mx-menu-item:hover:not(:disabled),
+.mx-menu-item:focus-visible:not(:disabled) {
+  background: var(--mx-hover);
+  outline: none;
+}
+
+.mx-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ============ 工具提示气泡（Tooltip） ============
+ * 出处：ui-primitives/Tooltip.module.css（L1-48）。
+ * padding 3 7 / radius 8 / tooltip-bg 实色 / 13/20 / 白墨 / 150ms 淡入；
+ * width: max-content + max-width 50vw 防右缘提前换行。 */
+.mx-tooltip {
+  position: fixed;
+  z-index: 100;
+  width: max-content;
+  max-width: 50vw;
+  padding: 3px 7px;
+  border-radius: 8px;
+  background: var(--mx-tooltip-bg);
+  color: var(--mx-static-white); /* static-neutral-bluish-00，双主题同值 */
+  font: 400 13px/20px var(--mx-font-family);
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  animation: mx-tooltip-in 150ms var(--mx-ease-standard);
+}
+
+@keyframes mx-tooltip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ============ 状态点（StateDot） ============
+ * 出处：ui-primitives/StateDot.module.css（L1-32）。
+ * 10px 槽位、::after 内缩 20% 画 6px currentColor 核；data-state 四态换色。
+ * 使用：<span class="mx-dot" data-state="done" style="color: var(--mx-state-success)" /> */
+.mx-dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+
+.mx-dot::after {
+  content: '';
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ============ 标签（Tag，九种色调） ============
+ * 胶囊几何固定（radius 999 / padding 1 8 / 11·17·500），只有色调变化；
+ * 色调走 background/border/color 三件，使用方可用自身类定位而不碰配色。 */
+.mx-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font: 500 11px/17px var(--mx-font-family);
+  white-space: nowrap;
+}
+
+.mx-tag[data-tone='outline'] {
+  border: 0.5px solid var(--mx-border-l4);
+  color: var(--mx-text-tertiary);
+}
+
+.mx-tag[data-tone='solid'] {
+  background: var(--mx-text);
+  color: var(--mx-bg-elevated);
+}
+
+.mx-tag[data-tone='neutral'] {
+  background: var(--mx-module);
+  color: var(--mx-text-secondary);
+}
+
+.mx-tag[data-tone='quiet'] {
+  color: var(--mx-text-tertiary);
+}
+
+.mx-tag[data-tone='success'] {
+  background: color-mix(in srgb, var(--mx-state-success) 10%, transparent);
+  color: var(--mx-state-success);
+}
+
+.mx-tag[data-tone='info'] {
+  background: color-mix(in srgb, var(--mx-business) 10%, transparent);
+  color: var(--mx-business);
+}
+
+.mx-tag[data-tone='warning'] {
+  background: color-mix(in srgb, var(--mx-state-warn) 12%, transparent);
+  color: var(--mx-state-warn);
+}
+
+.mx-tag[data-tone='danger'] {
+  background: color-mix(in srgb, var(--mx-state-error) 10%, transparent);
+  color: var(--mx-state-error);
+}
+
+/* ============ 分段页签（SegmentedTabs） ============
+ * 外槽：padding 4 / radius 12 / module 底；指示器绝对定位 0.5px 描边 + 层底，
+ * 位移 180ms 由 JS 算 transform。页签：高 34 / padding 0 12 / radius 8 / 14·20。
+ * 状态由 aria-selected 驱动；focus 用下划线（不与指示器叠加）。 */
+.mx-tabs {
+  position: relative;
+  display: grid;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--mx-module);
+}
+
+.mx-tabs-indicator {
+  position: absolute;
+  inset: 4px auto 4px 4px;
+  box-sizing: border-box;
+  border: 0.5px solid var(--mx-border-strong);
+  border-radius: 8px;
+  background: var(--mx-bg-elevated);
+  transition: transform 180ms ease;
+  pointer-events: none;
+}
+
+.mx-tab {
+  position: relative;
+  justify-content: center;
+  height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  font: 400 14px/20px var(--mx-font-family);
+  background: transparent;
+  color: var(--mx-text-secondary);
+  cursor: pointer;
+  transition: color 180ms ease;
+}
+
+.mx-tab:hover,
+.mx-tab[aria-selected='true'] {
+  background: transparent;
+  color: var(--mx-text);
+}
+
+.mx-tab[aria-selected='true'] {
+  font-weight: 600;
+}
+
+.mx-tab:focus-visible {
+  outline: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+/* ============ 展开行头（DisclosureRow） ============
+ * 行：高 24；前导 16px 盒（图标 14）+ gap 6 + 标题 13px secondary。
+ * 悬停时静态图标淡出、chevron 淡入（双图标叠放交叉过渡 100ms）。 */
+.mx-disclosure {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.mx-disclosure-row {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  min-width: 0;
+}
+
+.mx-disclosure-row[data-expandable] {
+  cursor: pointer;
+}
+
+.mx-disclosure-leading {
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--mx-text-tertiary);
+}
+
+button.mx-disclosure-leading {
+  cursor: pointer;
+}
+
+.mx-disclosure-idle {
+  display: inline-flex;
+  opacity: 1;
+  transition: opacity 100ms ease;
+}
+
+.mx-disclosure-chevron {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.mx-disclosure-row:hover .mx-disclosure-idle {
+  opacity: 0;
+}
+
+.mx-disclosure-row:hover .mx-disclosure-chevron {
+  opacity: 1;
+}
+
+.mx-disclosure-title {
+  flex: none;
+  font: 400 13px/24px var(--mx-font-family);
+  color: var(--mx-text-secondary);
+}
+
+/* ============ 轻提示条（Toast，双主题恒暗面） ============
+ * fixed 顶 40 居中 / max-width min(640, vw-48) / padding 12 16 / radius 14 /
+ * toast-bg 恒暗 + 白字 + shadow-lv3；入场 160ms 上滑，停留
+ * --mx-toast-hold（缺省 3000ms）后 1000ms 淡出（--mx-toast-hold 由使用方
+ * 经 CSS 变量传入以对齐卸载计时器）。动作字 business 蓝、pointer-events:auto。 */
+.mx-toast {
+  position: fixed;
+  top: 40px;
+  left: 50%;
+  z-index: 1100;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 48px));
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--mx-toast-bg);
+  color: var(--mx-static-white);
+  font: 400 14px/22px var(--mx-font-family);
+  box-shadow: var(--mx-shadow-lv3);
+  transform: translateX(-50%);
+  animation:
+    mx-toast-in 160ms ease-out,
+    mx-toast-fade 1000ms ease var(--mx-toast-hold, 3000ms) forwards;
+}
+
+.mx-toast-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--mx-state-warn-label);
+}
+
+.mx-toast-icon[data-tone='success'] {
+  color: var(--mx-state-success);
+}
+
+.mx-toast-action {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mx-business);
+  font: inherit;
+  cursor: pointer;
+  margin-inline: 3px;
+  pointer-events: auto;
+}
+
+.mx-toast-action:hover {
+  opacity: 0.8;
+}
+
+.mx-toast-action:focus-visible {
+  outline: 2px solid var(--mx-business);
+  outline-offset: 2px;
+}
+
+@keyframes mx-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes mx-toast-fade {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* ============ 连接指示胶囊（ConnectionIndicator） ============
+ * 28 高 / radius 13 / 12·18·500 / 14px 图标 + 4px 列距；
+ * warning：warn-soft 底 + warn-label 深字 + 20% 描边，hover/active 各掺 6%/10% 主色；
+ * success：success-soft 底 + success 字。省略号三点用 step-end 逐点显现（1.5s）。 */
+.mx-indicator {
+  flex: none;
+  display: inline-grid;
+  grid-template-columns: 14px max-content;
+  align-items: center;
+  column-gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  font: 500 12px/18px var(--mx-font-family);
+  white-space: nowrap;
+  transition:
+    background-color 160ms ease-out,
+    color 160ms ease-out,
+    border-color 160ms ease-out,
+    opacity 150ms ease-out;
+  animation: mx-indicator-enter 150ms ease-out;
+}
+
+@keyframes mx-indicator-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+.mx-indicator[data-tone='warning'] {
+  background: var(--mx-state-warn-soft);
+  color: var(--mx-state-warn-label);
+  border-color: color-mix(in srgb, var(--mx-state-warn-label) 20%, transparent);
+  cursor: pointer;
+}
+
+.mx-indicator[data-tone='warning']:hover {
+  background: color-mix(in srgb, var(--mx-state-warn-soft), var(--mx-state-warn) 6%);
+}
+
+.mx-indicator[data-tone='warning']:active {
+  background: color-mix(in srgb, var(--mx-state-warn-soft), var(--mx-state-warn) 10%);
+}
+
+.mx-indicator[data-tone='warning']:focus-visible {
+  outline: 2px solid var(--mx-state-warn-label);
+  outline-offset: 2px;
+}
+
+.mx-indicator[data-tone='success'] {
+  background: var(--mx-state-success-soft);
+  color: var(--mx-state-success);
+  border-color: color-mix(in srgb, var(--mx-state-success) 20%, transparent);
+}
+
+.mx-indicator-icon {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+
+.mx-indicator-dots {
+  display: inline-block;
+  width: 1em;
+  text-align: left;
+}
+
+.mx-indicator-dot2 {
+  animation: mx-dot2 1.5s step-end infinite;
+}
+
+.mx-indicator-dot3 {
+  animation: mx-dot3 1.5s step-end infinite;
+}
+
+@keyframes mx-dot2 {
+  0%, 33.32% { opacity: 0; }
+  33.33%, 100% { opacity: 1; }
+}
+
+@keyframes mx-dot3 {
+  0%, 66.65% { opacity: 0; }
+  66.66%, 100% { opacity: 1; }
+}
+
+/* ============ 微光文本（TextShimmer） ============
+ * 用背景渐变裁切文字做流光；使用方必传 --mx-text-shimmer-spread
+ * （光带半宽，如 5em）。文本色 = currentColor，服从主题。 */
+.mx-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    currentColor calc(50% - var(--mx-text-shimmer-spread)),
+    color-mix(in oklab, currentColor 50%, transparent),
+    currentColor calc(50% + var(--mx-text-shimmer-spread))
+  );
+  background-position: 100% center;
+  background-repeat: no-repeat;
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: mx-shimmer 1.5s cubic-bezier(0.33, 0, 0.67, 1) infinite;
+}
+
+@keyframes mx-shimmer {
+  66.6667%, 100% { background-position: 0% center; }
+}
+
+/* ============ 悬停卡（HoverCard） ============
+ * 宿主 display:block（内联会收缩整行）；卡 fixed 244 宽 / padding 12 16 /
+ * radius 12 / hovercard-bg（双主题同值恒暗）+ shadow-lv3；
+ * 卡可命中（悬停其上保持打开，勿设 pointer-events:none）。 */
+.mx-hovercard-host {
+  position: relative;
+  display: block;
+}
+
+.mx-hovercard {
+  position: fixed;
+  z-index: 100;
+  box-sizing: border-box;
+  width: 244px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--mx-hovercard-bg);
+  box-shadow: var(--mx-shadow-lv3);
+}
+

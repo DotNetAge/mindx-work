@@ -1,0 +1,93 @@
+# mindx-work CI 发布：三平台产物构建（macOS 含签名与公证），上传 GitHub Release 暂不启用，
+# 产物以 workflow artifact 形式保留。机制复刻 mindx-desktop（pack.mjs tag 驱动版本 +
+# 镜像注入 + --publish never），公证凭据全部来自仓库 secrets，缺失时自动降级为未签名打包。
+name: release
+
+on:
+  push:
+    tags: ['v*'] # 发布构建：git tag v1.2.3 推送即触发（版本号 = tag 去 v 前缀）
+  workflow_dispatch: {} # 手动触发（验证 CI 链路用，无 tag 时回退 package.json version）
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            pack_args: --mac
+          - os: windows-latest
+            pack_args: --win
+          - os: ubuntu-latest
+            pack_args: --linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # git tag 版本解析依赖完整 tag 历史
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # ── macOS 签名：Developer ID Application 证书导入临时钥匙串 ──
+      # 未配置 secrets 时跳过（electron-builder 退化为 ad-hoc 签名，产物仅本机可跑）。
+      # 需要 secrets：
+      #   MAC_CERT_P12_BASE64  — Developer ID Application 证书 .p12 的 base64
+      #                          （base64 -i cert.p12 | pbcopy 生成）
+      #   MAC_CERT_PASSWORD    — 导出 .p12 时设置的密码
+      #   KEYCHAIN_PASSWORD    — CI 临时钥匙串密码（任意强口令即可）
+      - name: 导入签名证书（macOS）
+        if: runner.os == 'macOS'
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "$MAC_CERT_P12_BASE64" ]; then
+            echo "未配置 MAC_CERT_P12_BASE64，跳过签名导入（产出 ad-hoc 签名包）"
+            exit 0
+          fi
+          CERT_PATH=$RUNNER_TEMP/cert.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
+          echo -n "$MAC_CERT_P12_BASE64" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MAC_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          # 允许 codesign 无交互访问钥匙串私钥（缺这步签名会卡权限弹窗/失败）
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
+
+      # ── 打包（pack.mjs 内部：构建 → tag 解析版本 → electron-builder --publish never）──
+      # 公证凭据经环境变量透传给 electron-builder v26 notarize（Apple ID 方式）：
+      #   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
+      # 任一缺失时 electron-builder 跳过公证仅告警；keychain profile 方式仅适用于
+      # 本机（CI 无预存 profile），见 electron-builder.yml mac 段注释。
+      - name: 打包
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node scripts/pack.mjs ${{ matrix.pack_args }}
+
+      # ── 产物收集（artifact 保留供下载；Release 上传后续接入 publish-github 机制）──
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindx-work-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
