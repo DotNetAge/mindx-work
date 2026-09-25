@@ -15,8 +15,23 @@ if (document.documentElement) {
   window.addEventListener('DOMContentLoaded', mark)
 }
 
-/** 主题偏好发布通道：渲染层 → 主进程 nativeTheme.themeSource，
- * 让 vibrancy 材质跟随应用主题（取值合法性由主进程校验） */
+/** 渲染侧插件安装回执（含错误消息，中文） */
+interface PluginInstallResult {
+  ok: boolean
+  message?: string
+}
+
+/** 主题偏好发布通道 + 在线插件安装桥（语义校验在渲染侧加载前统一执行，见 plugins.ts 头注） */
 contextBridge.exposeInMainWorld('mxDesktop', {
   setNativeThemeSource: (mode: string) => ipcRenderer.invoke('mx:native-theme-set', mode),
+  plugins: {
+    list: () => ipcRenderer.invoke('plugins:list'),
+    installFromFile: (): Promise<PluginInstallResult> => ipcRenderer.invoke('plugins:install-from-file'),
+    marketList: (): Promise<unknown> => ipcRenderer.invoke('plugins:market-list'),
+    installFromUrl: (url: string, sha256?: string): Promise<PluginInstallResult> =>
+      ipcRenderer.invoke('plugins:install-from-url', url, sha256),
+    uninstall: (id: string) => ipcRenderer.invoke('plugins:uninstall', id),
+    setEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke('plugins:set-enabled', id, enabled),
+    setActiveVersion: (id: string, version: string) => ipcRenderer.invoke('plugins:set-active-version', id, version),
+  },
 })

@@ -7,6 +7,8 @@
     "dev": "pnpm --filter @mindx-work/app dev",
     "build": "pnpm --filter @mindx-work/app build && pnpm --filter @mindx-work/electron build",
     "typecheck": "vue-tsc --noEmit -p app/tsconfig.json",
+    "lint": "oxlint",
+    "test": "node --test \"scripts/*.spec.mjs\"",
     "pack": "node scripts/pack.mjs --mac --win --linux",
     "pack:mac": "node scripts/pack.mjs --mac",
     "pack:win": "node scripts/pack.mjs --win",
@@ -15,6 +17,7 @@
   "devDependencies": {
     "electron": "^33.2.0",
     "electron-builder": "^26.0.12",
+    "oxlint": "^1.85.0",
     "typescript": "^5.9.2",
     "vue-tsc": "^3.0.4"
   }

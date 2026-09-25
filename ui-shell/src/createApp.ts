@@ -77,13 +77,15 @@ export function createApp<C>(plugins: readonly Plugin<C>[]): AppShell<C> {
   }
 
   // 启动期校验：硬约束在此暴露（契约第 10 节）
-  validateOrThrow(shell)
+  validateShellConstraints(shell)
 
   return shell
 }
 
-/** 启动期校验：Sidebar 行 id → Content 条目映射、Preferences 行 → 页归属 */
-function validateOrThrow<C>(shell: AppShell<C>): void {
+/** 契约硬约束校验：Sidebar 行 id → Content 条目映射、Preferences 行 → 页归属。
+ * 启动期由 createApp 调用一次；动态插件注册完成后由 loader 复调
+ * （契约 §18.1 六区契约对动态插件完全适用——激活期违规同样要暴露） */
+export function validateShellConstraints<C>(shell: AppShell<C>): void {
   const contentIds = new Set(shell.Content.entries.map((entry) => entry.id))
   for (const section of shell.Sidebar.entries) {
     for (const row of section.rows) {

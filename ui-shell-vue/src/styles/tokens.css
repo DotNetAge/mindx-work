@@ -32,6 +32,10 @@
   --mx-state-idle: rgb(212, 212, 212);       /* static-neutral-300 */
   --mx-tooltip-bg: rgb(44, 44, 46);          /* static-neutral-bluish-850 */
   --mx-menu-bg: rgba(248, 249, 250, 0.58);   /* specific-menu */
+  --mx-menu-bg-opaque: rgba(248, 249, 250, 0.94); /* specific-menu 近不透明（macOS 透明窗 backdrop-filter 失效补偿） */
+  /* macOS vibrancy wash 基色（DSH AppFrame 实测；rgb(var(--mx-wash-*) / α) 三元组按需配 alpha，双主题同值） */
+  --mx-wash-blue: 122 155 240;
+  --mx-wash-mauve: 143 137 184;
   --mx-backdrop-menu: blur(40px) saturate(150%); /* menu-backdrop-filter（菜单/浮层本体） */
   --mx-module: rgb(245, 246, 247);           /* bg-module-platform: neutral-bluish-60 */
   --mx-static-white: rgb(255, 255, 255);     /* static-neutral-bluish-00（tooltip 字，双主题同值） */
@@ -105,6 +109,7 @@
   --mx-state-idle: rgb(84, 85, 87);               /* static-neutral-600 */
   --mx-tooltip-bg: rgb(67, 69, 74);               /* static-neutral-bluish-750 */
   --mx-menu-bg: rgba(48, 49, 54, 0.5);            /* specific-menu 暗色 */
+  --mx-menu-bg-opaque: rgba(48, 49, 54, 0.94);    /* specific-menu 近不透明暗色 */
   --mx-backdrop-menu: blur(40px) saturate(150%);  /* menu-backdrop-filter */
   --mx-module: rgb(53, 54, 56);                   /* bg-module-platform: neutral-bluish-800 */
   --mx-nav-active: rgb(67, 69, 74);               /* sidebar-nav-item-active: neutral-bluish-750 */

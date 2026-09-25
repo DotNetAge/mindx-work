@@ -10,7 +10,17 @@ export type {
   Unsubscribe,
   ViewProps,
 } from './types'
-export { createApp, type AppShell } from './createApp'
+export { createApp, validateShellConstraints, type AppShell } from './createApp'
+export { MX_API_VERSION, manifestIssues, type PluginManifest } from './plugin-manifest'
+export {
+  MARKET_RUNTIME_SERVICE,
+  type InstalledPluginView,
+  type MarketPluginView,
+  type MarketRuntime,
+  type MarketVersionView,
+  type MxDesktopBridge,
+  type PluginInstallResult,
+} from './desktop-bridge'
 export {
   GENERAL_PAGE_ID,
   type ContentEntry,

@@ -10,6 +10,7 @@
  */
 import { app, BrowserWindow, ipcMain, nativeTheme, Menu, Tray, nativeImage } from 'electron'
 import path from 'node:path'
+import { registerPluginBridge, registerPluginProtocol } from './plugins'
 
 /** 开发模式连接 Vite 服务（MX_DEV_URL 可覆盖）；产物模式加载 app 构建目录 */
 const DEV_URL = 'http://localhost:5273'
@@ -134,7 +135,9 @@ function createTray(): void {
 }
 
 app.whenReady().then(() => {
+  registerPluginProtocol()
   registerNativeThemeBridge()
+  registerPluginBridge()
   createWindow()
   createTray()
   // dock 点击（macOS）/ 任务栏重开（Windows）：有窗口则唤出，无则重建

@@ -37,13 +37,6 @@ export const ModelRow = createInfoRow({
   value: 'mindx-chat',
 })
 
-/** 插件页行示例 */
-export const PluginsRow = createInfoRow({
-  title: '已启用插件',
-  desc: '管理运行中的功能插件',
-  value: 'demo',
-})
-
 /** Agent 预设页行示例 */
 export const AgentRow = createInfoRow({
   title: '默认预设',

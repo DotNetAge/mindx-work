@@ -15,16 +15,8 @@ export interface ThemeController {
 
 const THEME_ATTR = 'data-mx-theme'
 
-/** 桌面桥（preload 注入，纯 Web 环境不存在）：发布主题偏好给原生材质层 */
-interface DesktopBridge {
-  setNativeThemeSource(mode: 'light' | 'dark' | 'system'): Promise<boolean>
-}
-
-declare global {
-  interface Window {
-    mxDesktop?: DesktopBridge
-  }
-}
+/** Window.mxDesktop 总声明在 app/src/env.d.ts（组装者是宿主环境声明的唯一家），
+ * 此处仅以最小面使用主题方法（发布偏好给原生材质层） */
 
 export function createThemeController(): ThemeController {
   const media = window.matchMedia('(prefers-color-scheme: dark)')
@@ -53,7 +45,10 @@ export function createThemeController(): ThemeController {
     setMode(next) {
       mode = next
       apply()
-      for (const listener of [...listeners]) listener(mode)
+      // 先复制订阅者再投递（快照语义，非多余转换——行内豁免 lint 误报）
+      for (const listener of
+        // oxlint-disable-next-line unicorn/no-useless-spread
+        [...listeners]) listener(mode)
     },
     subscribe(listener) {
       listeners.add(listener)

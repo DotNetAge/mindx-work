@@ -41,9 +41,12 @@ function onResizeStart(event: PointerEvent) {
     dragging.value = false
     target.removeEventListener('pointermove', onMove)
     target.removeEventListener('pointerup', onUp)
+    target.removeEventListener('pointercancel', onUp)
   }
   target.addEventListener('pointermove', onMove)
   target.addEventListener('pointerup', onUp)
+  // pointercancel（手势被系统接管/打断）同样终止拖拽，避免 dragging 卡死与监听泄漏
+  target.addEventListener('pointercancel', onUp)
 }
 </script>
 
@@ -122,7 +125,8 @@ function onResizeStart(event: PointerEvent) {
   width: 6px;
   height: 100%;
   cursor: col-resize;
-  z-index: 1;
+  /* 高于主区 dragBand（z-index 5）：否则顶部 48px 的手柄条被拖动带盖住无法抓取 */
+  z-index: 6;
 }
 
 .resizer:hover {

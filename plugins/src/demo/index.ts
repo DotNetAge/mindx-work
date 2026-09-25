@@ -13,7 +13,7 @@ import FontSizeRow from './prefs/FontSizeRow.vue'
 import LanguageRow from './prefs/LanguageRow.vue'
 import ThemeRow from './prefs/ThemeRow.vue'
 import VersionRow from './prefs/VersionRow.vue'
-import { AgentRow, DesktopRow, ModelRow, PluginsRow } from './prefs/InfoRows'
+import { AgentRow, DesktopRow, ModelRow } from './prefs/InfoRows'
 import SidebarHeader from './sidebar/SidebarHeader.vue'
 import SidebarFooter from './sidebar/SidebarFooter.vue'
 
@@ -65,7 +65,8 @@ const demoPlugin: VuePlugin = (app) => {
 
   // Overlay：条目运行期经编排 API 注册（总览页触发），启动期不注册
 
-  // Preferences：五页（对齐 DSH 设置导航结构），每页至少一行
+  // Preferences：四页（对齐 DSH 设置导航结构），每页至少一行
+  // （"插件"页归 market 插件注册，demo 不占位）
   app.Settings.page({
     id: 'appearance',
     title: '外观',
@@ -74,7 +75,6 @@ const demoPlugin: VuePlugin = (app) => {
     component: ThemeRow,
   })
   app.Settings.page({ id: 'model', title: '模型', icon: 'lucide:bot', component: ModelRow })
-  app.Settings.page({ id: 'plugins', title: '插件', icon: 'lucide:puzzle', component: PluginsRow })
   app.Settings.page({
     id: 'agent',
     title: 'Agent 预设',

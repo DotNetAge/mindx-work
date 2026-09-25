@@ -24,7 +24,8 @@ export function createRegistry<E extends { id: string; order?: number }>(
 
   return {
     get entries() {
-      return list
+      // 只读快照：返回拷贝，外部无法改写内部数组，remove 换引用后旧持有者也不受影响
+      return list.slice()
     },
     has: (id) => index.has(id),
     add(entry) {

@@ -20,7 +20,17 @@ export function createChangeHub(): ChangeHub {
     bump() {
       version += 1
       // 先复制订阅者再投递，避免投递过程中的增删干扰本轮遍历
-      for (const listener of [...listeners]) listener()
+      // （快照语义，非多余转换——行内豁免 lint 误报）
+      for (const listener of
+        // oxlint-disable-next-line unicorn/no-useless-spread
+        [...listeners]) {
+        // 异常隔离：单个订阅者抛错不中断其余订阅者的本轮通知（后续 bump 不受影响）
+        try {
+          listener()
+        } catch (error) {
+          console.error('ChangeHub 订阅者执行失败：', error instanceof Error ? error.message : error)
+        }
+      }
     },
     subscribe(listener) {
       listeners.add(listener)

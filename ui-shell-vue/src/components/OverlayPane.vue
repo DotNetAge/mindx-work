@@ -4,6 +4,7 @@
  * 只有 modal（互斥，遮罩 + 居中卡片）与 banner（顶部可堆叠）；
  * 条目在注册表中即呈现，关闭 = 移除。
  */
+import { onMounted, onUnmounted } from 'vue'
 import { useShell, useShellData } from '../reactivity'
 import MxIcon from '../MxIcon.vue'
 
@@ -12,6 +13,20 @@ const data = useShellData(() => ({
   banners: shell.Overlay.entries.filter((entry) => entry.kind === 'banner'),
   modal: shell.Overlay.entries.find((entry) => entry.kind === 'modal') ?? null,
 }))
+
+/** Esc 分层（契约 §14 层级表）：modal（z-index 70）在设置面板（60）之上，
+ * Esc 先关最上层的 modal，不得穿透关闭下层面板。捕获期监听 + 停止传播，
+ * 使设置面板的 Esc 监听（冒泡期）在 modal 存在时不会被触发 */
+function onKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  const modal = data.value.modal
+  if (!modal) return
+  shell.Overlay.remove(modal.id)
+  event.preventDefault()
+  event.stopPropagation()
+}
+onMounted(() => window.addEventListener('keydown', onKeydown, true))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
 </script>
 
 <template>
@@ -61,7 +76,9 @@ const data = useShellData(() => ({
 }
 
 /* 遮罩：对齐设置页双层模糊标准——bg-mask token 底色 + mask-blur 背景高斯模糊，
- * 后方内容透过遮罩呈现柔焦；禁止只用半透明色（遮挡层无模糊 = 与设置页观感割裂） */
+ * 后方内容透过遮罩呈现柔焦；禁止只用半透明色（遮挡层无模糊 = 与设置页观感割裂）。
+ * z-index 70：modal 是互斥阻塞层，必须高于设置面板（60）——设置面板内打开的
+ * 确认 modal 曾被面板盖住（50 < 60），点击穿透到面板行区 */
 .modalMask {
   position: fixed;
   inset: 0;
@@ -69,7 +86,7 @@ const data = useShellData(() => ({
   place-items: center;
   background: var(--mx-mask);
   backdrop-filter: var(--mx-mask-blur);
-  z-index: 50;
+  z-index: 70;
   animation: fade-in var(--mx-duration-motion) var(--mx-ease-standard);
 }
 

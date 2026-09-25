@@ -145,17 +145,14 @@ export function createSidebarView<C>(hub: ChangeHub): SidebarViewApi<C> {
 
 export function createContentView<C>(hub: ChangeHub): ContentViewApi<C> {
   const registry = createRegistry<ContentEntry<C>>(hub, 'Content')
+  // null = 用户尚未选择：activeId 由 getter 动态回退到 order 最小条目（契约 §4），
+  // 装配期不受注册顺序影响；activate 后固定为用户选择
   let activeId: string | null = null
   return {
-    add: (entry) => {
-      registry.add(entry)
-      // 初始 = order 最小条目（registry 排序后首位）
-      if (activeId === null) {
-        activeId = registry.entries[0]?.id ?? null
-      }
-    },
+    add: registry.add,
     remove: (id) => {
       registry.remove(id)
+      // 移除的正是已固定的活动条目时，回退并固定到 order 最小条目
       if (activeId === id) {
         activeId = registry.entries[0]?.id ?? null
       }
@@ -165,7 +162,7 @@ export function createContentView<C>(hub: ChangeHub): ContentViewApi<C> {
       return registry.entries
     },
     get activeId() {
-      return activeId
+      return activeId ?? registry.entries[0]?.id ?? null
     },
     activate(id) {
       if (!registry.has(id)) {
@@ -200,10 +197,11 @@ export function createDetailView<C>(hub: ChangeHub): DetailViewApi<C> {
       return activeTabId
     },
     show(id) {
-      activeTabId = id ?? registry.entries[0]?.id ?? null
+      // 先校验后赋值（对齐 setActiveTab）：非法 id 不得污染 activeTabId
       if (id && !registry.has(id)) {
         throw new Error(`Detail 不存在条目：${id}`)
       }
+      activeTabId = id ?? registry.entries[0]?.id ?? null
       shown = true
       hub.bump()
     },
