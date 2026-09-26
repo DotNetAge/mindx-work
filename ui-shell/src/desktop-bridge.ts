@@ -75,7 +75,7 @@ export interface PreferencesController {
 /** 设置持久化控制器的 services 注册名（提供方 app 装配层） */
 export const PREFERENCES_SERVICE = 'shell.preferences'
 
-/** 宿主桥总面：主题偏好发布 + 设置持久化 + 在线插件安装管理 */
+/** 宿主桥总面：主题偏好发布 + 设置持久化 + 系统文件对话框 + 在线插件安装管理 */
 export interface MxDesktopBridge {
   setNativeThemeSource(mode: string): Promise<boolean>
   preferences: {
@@ -83,6 +83,12 @@ export interface MxDesktopBridge {
     getAll(): Promise<Record<string, unknown> | null>
     /** 合并写单键（原子写由主进程保证） */
     set(key: string, value: unknown): Promise<boolean>
+  }
+  dialog: {
+    /** 系统保存文件对话框（defaultName 为缺省文件名）；取消返回 null */
+    saveFile(defaultName: string): Promise<string | null>
+    /** 选择技能分发包（.mindpkg）；取消返回 null */
+    openMindpkg(): Promise<string | null>
   }
   plugins: {
     list(): Promise<InstalledPluginView[] | null>

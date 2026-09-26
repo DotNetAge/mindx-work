@@ -1,13 +1,27 @@
 /** 组装入口：执行预置插件清单 + 主题机制挂载 + 在线插件激活 + Vue 挂载 */
 
 import { createApp } from '@mindx-work/ui-shell'
-import { createPreferencesController, createThemeController, mountVueApp } from '@mindx-work/ui-shell-vue'
+import {
+  createPreferencesController,
+  createThemeController,
+  ElementPlus,
+  ElementPlusZhCn,
+  mountVueApp,
+} from '@mindx-work/ui-shell-vue'
 import { h } from 'vue'
-import { demoPlugin, marketPlugin } from '@mindx-work/plugins'
+import { marketPlugin } from '@mindx-work/plugins'
 import { createMarketRuntime, loadMarketPlugins } from './loader'
+import { connectionPlugin } from '@mindx-work/plugins/connection'
+import { modelsPlugin } from '@mindx-work/plugins/models'
+import { connectorsPlugin } from '@mindx-work/plugins/connectors'
+import { skillsPlugin } from '@mindx-work/plugins/skills'
+import { agentsPlugin } from '@mindx-work/plugins/agents'
+import { phonePairPlugin } from '@mindx-work/plugins/phone-pair'
+import { shellChromePlugin } from '@mindx-work/plugins/shell-chrome'
 
 // 启动装配：插件冲突与依赖缺失在启动期暴露（契约第 7 节）
-const shell = createApp([demoPlugin, marketPlugin])
+// demo 插件已下线（源码保留作范式参考）：当前装配仅 market 插件
+const shell = createApp([marketPlugin, connectionPlugin, modelsPlugin, connectorsPlugin, skillsPlugin, agentsPlugin, phonePairPlugin, shellChromePlugin])
 
 // 设置持久化归壳所有：控制器以服务形式供设置行与插件消费（键建议 <owner>.<key> 前缀）
 const preferences = createPreferencesController()
@@ -53,5 +67,9 @@ void (async () => {
   } catch (error) {
     console.error('在线插件加载异常：', error)
   }
-  mountVueApp(shell, '#app')
+  mountVueApp(shell, '#app', (vueApp) => {
+    // Element Plus 壳单例装配（军规：组件库统一经 @mindx-work/ui-shell-vue 消费）：
+    // zIndex 初值 3000 与既有 mx 层断带（壳 60/70、tooltip/menu 1100、插件 FLIP 2000/2001）
+    vueApp.use(ElementPlus, { locale: ElementPlusZhCn, zIndex: 3000 })
+  })
 })()

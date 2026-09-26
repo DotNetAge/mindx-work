@@ -28,6 +28,11 @@ contextBridge.exposeInMainWorld('mxDesktop', {
     getAll: (): Promise<Record<string, unknown> | null> => ipcRenderer.invoke('mx:preferences-get'),
     set: (key: string, value: unknown): Promise<boolean> => ipcRenderer.invoke('mx:preferences-set', key, value),
   },
+  dialog: {
+    saveFile: (defaultName: string): Promise<string | null> =>
+      ipcRenderer.invoke('mx:dialog-save-file', defaultName),
+    openMindpkg: (): Promise<string | null> => ipcRenderer.invoke('mx:dialog-open-mindpkg'),
+  },
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
     installFromFile: (): Promise<PluginInstallResult> => ipcRenderer.invoke('plugins:install-from-file'),

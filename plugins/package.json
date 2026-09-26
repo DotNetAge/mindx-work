@@ -7,11 +7,20 @@
   "exports": {
     ".": "./src/index.ts",
     "./demo": "./src/demo/index.ts",
-    "./market": "./src/market/index.ts"
+    "./market": "./src/market/index.ts",
+    "./connection": "./src/connection/index.ts",
+    "./models": "./src/models/index.ts",
+    "./connectors": "./src/connectors/index.ts",
+    "./skills": "./src/skills/index.ts",
+    "./agents": "./src/agents/index.ts",
+    "./phone-pair": "./src/phone-pair/index.ts",
+    "./shell-chrome": "./src/shell-chrome/index.ts"
   },
   "dependencies": {
     "@mindx-work/ui-shell": "workspace:*",
     "@mindx-work/ui-shell-vue": "workspace:*",
+    "dompurify": "^3.2.5",
+    "marked": "^14.0.0",
     "pinia": "^3.0.2",
     "vue": "^3.5.13"
   }

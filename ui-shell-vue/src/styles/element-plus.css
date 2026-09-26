@@ -1,0 +1,176 @@
+/**
+ * Element Plus 主题桥接表（军规：组件库唯一桥，全部 --el-* 跟随 --mx-* token）。
+ *
+ * 机制定稿：
+ * - 覆写全部落在 :root，加载顺序晚于 theme-chalk（index.ts 保证），同为 :root 声明后者胜；
+ * - 官方暗色包 dark/css-vars.css 不引（挂 html.dark，与本壳 data-mx-theme 机制冲突且成双变量源）；
+ * - 中性板全组值为 var(--mx-*) 引用，主题切换时自动解析暗值，暗色块只写例外项；
+ * - 禁止在本文件外书写任何 --el-* 覆写（唯一桥原则）。
+ *
+ * 映射口径（--el-* → --mx-*）：
+ * - 品牌 primary/success/warning/danger/info → accent/success/warning/danger/business
+ *   （info 语义色实证取 --mx-business，同壳 mx-tag[data-tone='info'] 口径；error 为 danger 别名组）
+ * - 梯度 light-3/5/7/8/9 与 dark-2 经 color-mix 派生（EP 官方 SCSS mix 公式同构）
+ * - --el-color-*-rgb 六个三元组变量不映射：全量样式实证零消费；若未来组件开始消费，
+ *   需以字面三元组与对应 --mx-* 亮暗值手工同步（CSS 无法从 var() 颜色派生逗号三元组）
+ * - --el-disabled-* 三项为 var 引用链（derive 自 fill/text/border），自动跟随，不重写
+ */
+
+:root {
+  /* ── 品牌色板（五组 × 基色/梯度/dark-2，亮色向白混、dark-2 向黑混） ── */
+  --el-color-primary: var(--mx-accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--mx-accent) 70%, #fff);
+  --el-color-primary-light-5: color-mix(in srgb, var(--mx-accent) 50%, #fff);
+  --el-color-primary-light-7: color-mix(in srgb, var(--mx-accent) 30%, #fff);
+  --el-color-primary-light-8: color-mix(in srgb, var(--mx-accent) 20%, #fff);
+  --el-color-primary-light-9: color-mix(in srgb, var(--mx-accent) 10%, #fff);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--mx-accent) 80%, #000);
+
+  --el-color-success: var(--mx-success);
+  --el-color-success-light-3: color-mix(in srgb, var(--mx-success) 70%, #fff);
+  --el-color-success-light-5: color-mix(in srgb, var(--mx-success) 50%, #fff);
+  --el-color-success-light-7: color-mix(in srgb, var(--mx-success) 30%, #fff);
+  --el-color-success-light-8: color-mix(in srgb, var(--mx-success) 20%, #fff);
+  --el-color-success-light-9: color-mix(in srgb, var(--mx-success) 10%, #fff);
+  --el-color-success-dark-2: color-mix(in srgb, var(--mx-success) 80%, #000);
+
+  --el-color-warning: var(--mx-warning);
+  --el-color-warning-light-3: color-mix(in srgb, var(--mx-warning) 70%, #fff);
+  --el-color-warning-light-5: color-mix(in srgb, var(--mx-warning) 50%, #fff);
+  --el-color-warning-light-7: color-mix(in srgb, var(--mx-warning) 30%, #fff);
+  --el-color-warning-light-8: color-mix(in srgb, var(--mx-warning) 20%, #fff);
+  --el-color-warning-light-9: color-mix(in srgb, var(--mx-warning) 10%, #fff);
+  --el-color-warning-dark-2: color-mix(in srgb, var(--mx-warning) 80%, #000);
+
+  --el-color-danger: var(--mx-danger);
+  --el-color-danger-light-3: color-mix(in srgb, var(--mx-danger) 70%, #fff);
+  --el-color-danger-light-5: color-mix(in srgb, var(--mx-danger) 50%, #fff);
+  --el-color-danger-light-7: color-mix(in srgb, var(--mx-danger) 30%, #fff);
+  --el-color-danger-light-8: color-mix(in srgb, var(--mx-danger) 20%, #fff);
+  --el-color-danger-light-9: color-mix(in srgb, var(--mx-danger) 10%, #fff);
+  --el-color-danger-dark-2: color-mix(in srgb, var(--mx-danger) 80%, #000);
+
+  /* error 与 danger 同源（EP 内为别名组，两套变量都须覆写） */
+  --el-color-error: var(--mx-danger);
+  --el-color-error-light-3: color-mix(in srgb, var(--mx-danger) 70%, #fff);
+  --el-color-error-light-5: color-mix(in srgb, var(--mx-danger) 50%, #fff);
+  --el-color-error-light-7: color-mix(in srgb, var(--mx-danger) 30%, #fff);
+  --el-color-error-light-8: color-mix(in srgb, var(--mx-danger) 20%, #fff);
+  --el-color-error-light-9: color-mix(in srgb, var(--mx-danger) 10%, #fff);
+  --el-color-error-dark-2: color-mix(in srgb, var(--mx-danger) 80%, #000);
+
+  --el-color-info: var(--mx-business);
+  --el-color-info-light-3: color-mix(in srgb, var(--mx-business) 70%, #fff);
+  --el-color-info-light-5: color-mix(in srgb, var(--mx-business) 50%, #fff);
+  --el-color-info-light-7: color-mix(in srgb, var(--mx-business) 30%, #fff);
+  --el-color-info-light-8: color-mix(in srgb, var(--mx-business) 20%, #fff);
+  --el-color-info-light-9: color-mix(in srgb, var(--mx-business) 10%, #fff);
+  --el-color-info-dark-2: color-mix(in srgb, var(--mx-business) 80%, #000);
+
+  /* ── 中性板：文字 ── */
+  --el-text-color-primary: var(--mx-text);
+  --el-text-color-regular: var(--mx-text-secondary);
+  --el-text-color-secondary: var(--mx-text-tertiary);
+  --el-text-color-placeholder: var(--mx-text-caption);
+  --el-text-color-disabled: var(--mx-text-caption);
+
+  /* ── 中性板：边框（hover 对齐 .mx-input:hover 口径） ── */
+  --el-border-color: var(--mx-separator);
+  --el-border-color-light: var(--mx-separator);
+  --el-border-color-lighter: var(--mx-separator-soft);
+  --el-border-color-extra-light: var(--mx-separator-soft);
+  --el-border-color-dark: var(--mx-border-strong);
+  --el-border-color-darker: var(--mx-border-strong);
+  --el-border-color-hover: color-mix(in srgb, var(--mx-text) 20%, transparent);
+
+  /* ── 中性板：填充（disabled 底取实色 --mx-module，交互底取半透明 --mx-hover/--mx-active） ── */
+  --el-fill-color: var(--mx-hover-solid);
+  --el-fill-color-light: var(--mx-module);
+  --el-fill-color-lighter: var(--mx-hover);
+  --el-fill-color-extra-light: var(--mx-hover);
+  --el-fill-color-dark: var(--mx-active);
+  --el-fill-color-darker: var(--mx-active);
+  --el-fill-color-blank: var(--mx-bg-elevated);
+
+  /* ── 中性板：背景 / 蒙版 / 遮罩（--el-mask-color 是白蒙版语义：image-viewer 等，取 --mx-static-white；
+        黑遮罩语义在 --el-overlay-*，取 --mx-mask 与壳设置面板遮罩同口径） ── */
+  --el-bg-color: var(--mx-bg-elevated);
+  --el-bg-color-page: var(--mx-bg-surface);
+  --el-bg-color-overlay: var(--mx-bg-elevated);
+  --el-mask-color: var(--mx-static-white);
+  --el-mask-color-extra-light: color-mix(in srgb, var(--mx-static-white) 30%, transparent);
+  --el-overlay-color: var(--mx-mask);
+  --el-overlay-color-light: var(--mx-mask);
+  --el-overlay-color-lighter: var(--mx-mask);
+
+  /* ── 几何 / 字体 / 阴影 / 动效 ── */
+  --el-font-family: var(--mx-font-family);
+  --el-font-weight-primary: 600; /* 对齐 --mx-font-heading 字重 */
+  --el-border-radius-base: var(--mx-radius-control);
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 999px;
+  --el-component-size: 32px; /* 显式固定：与 .mx-btn/.mx-input 实高一致 */
+  --el-box-shadow: var(--mx-shadow-lv3);
+  --el-box-shadow-light: var(--mx-shadow-panel);
+  --el-box-shadow-lighter: var(--mx-shadow-panel);
+  --el-box-shadow-dark: var(--mx-shadow-prominent);
+  --el-transition-duration: var(--mx-duration-fast);
+  --el-transition-duration-fast: var(--mx-duration-fast);
+  --el-transition-function-ease-in-out-bezier: var(--mx-ease-standard);
+  --el-transition-function-fast-bezier: var(--mx-ease-standard);
+
+  /* ── 层级：与 app.use(ElementPlus, { zIndex }) 初值对齐（军规：EP 弹层分带 ≥3000） ── */
+  --el-index-popper: 3000;
+}
+
+/* ── 暗色例外项（其余全组经 var() 引用随 data-mx-theme 自动换暗值，不重写） ── */
+:root[data-mx-theme='dark'] {
+  /* white/black 语义反转兜底（EP 暗色惯例） */
+  --el-color-white: var(--mx-bg-elevated);
+  --el-color-black: var(--mx-text);
+
+  /* 品牌梯度基色重指：暗色下向暗底混（亮色公式向白混会过曝——暗色 accent 已是亮蓝）；
+     基色取 --mx-bg-window（暗值 rgb(21,21,23)），dark-2 向白提亮。success/warning 亮暗同值，
+     但梯度基色同样需要换暗底（淡底梯度在暗底上应趋深而非趋白） */
+  --el-color-primary-light-3: color-mix(in srgb, var(--mx-accent) 70%, var(--mx-bg-window));
+  --el-color-primary-light-5: color-mix(in srgb, var(--mx-accent) 50%, var(--mx-bg-window));
+  --el-color-primary-light-7: color-mix(in srgb, var(--mx-accent) 30%, var(--mx-bg-window));
+  --el-color-primary-light-8: color-mix(in srgb, var(--mx-accent) 20%, var(--mx-bg-window));
+  --el-color-primary-light-9: color-mix(in srgb, var(--mx-accent) 10%, var(--mx-bg-window));
+  --el-color-primary-dark-2: color-mix(in srgb, var(--mx-accent) 80%, var(--mx-static-white));
+
+  --el-color-success-light-3: color-mix(in srgb, var(--mx-success) 70%, var(--mx-bg-window));
+  --el-color-success-light-5: color-mix(in srgb, var(--mx-success) 50%, var(--mx-bg-window));
+  --el-color-success-light-7: color-mix(in srgb, var(--mx-success) 30%, var(--mx-bg-window));
+  --el-color-success-light-8: color-mix(in srgb, var(--mx-success) 20%, var(--mx-bg-window));
+  --el-color-success-light-9: color-mix(in srgb, var(--mx-success) 10%, var(--mx-bg-window));
+  --el-color-success-dark-2: color-mix(in srgb, var(--mx-success) 80%, var(--mx-static-white));
+
+  --el-color-warning-light-3: color-mix(in srgb, var(--mx-warning) 70%, var(--mx-bg-window));
+  --el-color-warning-light-5: color-mix(in srgb, var(--mx-warning) 50%, var(--mx-bg-window));
+  --el-color-warning-light-7: color-mix(in srgb, var(--mx-warning) 30%, var(--mx-bg-window));
+  --el-color-warning-light-8: color-mix(in srgb, var(--mx-warning) 20%, var(--mx-bg-window));
+  --el-color-warning-light-9: color-mix(in srgb, var(--mx-warning) 10%, var(--mx-bg-window));
+  --el-color-warning-dark-2: color-mix(in srgb, var(--mx-warning) 80%, var(--mx-static-white));
+
+  --el-color-danger-light-3: color-mix(in srgb, var(--mx-danger) 70%, var(--mx-bg-window));
+  --el-color-danger-light-5: color-mix(in srgb, var(--mx-danger) 50%, var(--mx-bg-window));
+  --el-color-danger-light-7: color-mix(in srgb, var(--mx-danger) 30%, var(--mx-bg-window));
+  --el-color-danger-light-8: color-mix(in srgb, var(--mx-danger) 20%, var(--mx-bg-window));
+  --el-color-danger-light-9: color-mix(in srgb, var(--mx-danger) 10%, var(--mx-bg-window));
+  --el-color-danger-dark-2: color-mix(in srgb, var(--mx-danger) 80%, var(--mx-static-white));
+
+  --el-color-error-light-3: color-mix(in srgb, var(--mx-danger) 70%, var(--mx-bg-window));
+  --el-color-error-light-5: color-mix(in srgb, var(--mx-danger) 50%, var(--mx-bg-window));
+  --el-color-error-light-7: color-mix(in srgb, var(--mx-danger) 30%, var(--mx-bg-window));
+  --el-color-error-light-8: color-mix(in srgb, var(--mx-danger) 20%, var(--mx-bg-window));
+  --el-color-error-light-9: color-mix(in srgb, var(--mx-danger) 10%, var(--mx-bg-window));
+  --el-color-error-dark-2: color-mix(in srgb, var(--mx-danger) 80%, var(--mx-static-white));
+
+  --el-color-info-light-3: color-mix(in srgb, var(--mx-business) 70%, var(--mx-bg-window));
+  --el-color-info-light-5: color-mix(in srgb, var(--mx-business) 50%, var(--mx-bg-window));
+  --el-color-info-light-7: color-mix(in srgb, var(--mx-business) 30%, var(--mx-bg-window));
+  --el-color-info-light-8: color-mix(in srgb, var(--mx-business) 20%, var(--mx-bg-window));
+  --el-color-info-light-9: color-mix(in srgb, var(--mx-business) 10%, var(--mx-bg-window));
+  --el-color-info-dark-2: color-mix(in srgb, var(--mx-business) 80%, var(--mx-static-white));
+}

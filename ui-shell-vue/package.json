@@ -12,6 +12,7 @@
     "@iconify-json/lucide": "^1.2.44",
     "@iconify/vue": "^5.0.0",
     "@mindx-work/ui-shell": "workspace:*",
+    "element-plus": "^2.14.6",
     "pinia": "^3.0.2",
     "vue": "^3.5.13"
   }
