@@ -2,31 +2,75 @@
  * daemon 连接运行时（服务本体）：mindx-work → mindx-daemon 的唯一连接源。
  * 形态对齐 shell.theme / shell.market-runtime 先例——机制性控制器以服务提供，
  * 消费方（models 插件与后续功能）经 useService('daemon.connection') 拿同一份响应式状态。
- * 本期仅本地模式（规格定稿）：端点固定 LOCAL_DAEMON_URL，装配即自动连接，零配置。
+ * 双模式：本地（端点固定 LOCAL_DAEMON_URL）/ 远程（地址自配置，见 RemoteAddressRow）。
+ * 模式与远程地址持久化在 localStorage——它们是"连接到谁"的前置条件，
+ * 不能存在被连接方（daemon 不可达时无法读取）。
  */
 
+import { ref } from 'vue'
 import { DaemonSocket, LOCAL_DAEMON_URL, type ConnectionState } from './daemon'
 
 export type { ConnectionState }
 
+/** 连接模式：local = 本机 daemon；remote = 远程智能体主机 */
+export type DaemonMode = 'local' | 'remote'
+
 /** 服务注册名（消费方以纯字符串引用，插件间禁止 import） */
 export const DAEMON_CONNECTION_SERVICE = 'daemon.connection'
+
+const MODE_KEY = 'mindx.daemon.mode'
+const REMOTE_URL_KEY = 'mindx.daemon.remoteUrl'
+
+function readInitialMode(): DaemonMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'remote' ? 'remote' : 'local'
+  } catch {
+    return 'local'
+  }
+}
+
+function readRemoteUrl(): string {
+  try {
+    return localStorage.getItem(REMOTE_URL_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function persist(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // 存储不可用（隐私模式等）：本次会话内仍生效，刷新后回落缺省
+  }
+}
 
 export interface DaemonConnection {
   /** 连接状态（响应式） */
   readonly state: ConnectionState
   /** 最近一次错误文案（无错误为 null） */
   readonly lastError: string | null
-  /** 连接模式；本期仅 'local'（远程模式为后续迭代预留语义位，当前无 UI） */
-  readonly mode: 'local'
+  /** 连接模式（响应式） */
+  readonly mode: DaemonMode
+  /** 远程机器地址（响应式；空 = 尚未配置） */
+  readonly remoteUrl: string
+  /** 切换连接模式：按模式选端点立即重连并持久化；远程未配地址时回落本地端点保持可用 */
+  switchMode(mode: DaemonMode): void
+  /** 保存远程机器地址并持久化；当前处于远程模式时立即按新地址重连 */
+  setRemoteUrl(url: string): void
   /** JSON-RPC 调用 */
   call<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
+  /** JSON-RPC 通知发送（无 id 无响应；user.message 发消息等通知型通道用）。未连接返回 false */
+  notify(method: string, params?: unknown): boolean
   /** 订阅 daemon 通知（如 skills_changed 热重载广播）；返回退订函数 */
   onNotification(method: string, cb: (params: unknown) => void): () => void
 }
 
 export function createDaemonConnection(): DaemonConnection & { dispose(): void } {
-  const socket = new DaemonSocket(LOCAL_DAEMON_URL)
+  const mode = ref<DaemonMode>(readInitialMode())
+  const remoteUrl = ref(readRemoteUrl())
+  // 启动即按持久化模式连接：远程未配地址时回落本地端点（无地址的远程不可连）
+  const socket = new DaemonSocket(mode.value === 'remote' && remoteUrl.value ? remoteUrl.value : LOCAL_DAEMON_URL)
   socket.connect()
 
   return {
@@ -36,9 +80,29 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
     get lastError() {
       return socket.lastError.value
     },
-    mode: 'local',
+    get mode() {
+      return mode.value
+    },
+    get remoteUrl() {
+      return remoteUrl.value
+    },
+    switchMode(next: DaemonMode): void {
+      if (mode.value === next) return
+      mode.value = next
+      persist(MODE_KEY, next)
+      const target = next === 'remote' && remoteUrl.value ? remoteUrl.value : LOCAL_DAEMON_URL
+      socket.reconnectTo(target)
+    },
+    setRemoteUrl(url: string): void {
+      remoteUrl.value = url
+      persist(REMOTE_URL_KEY, url)
+      if (mode.value === 'remote') {
+        socket.reconnectTo(url || LOCAL_DAEMON_URL)
+      }
+    },
     call: <T,>(method: string, params?: unknown, timeoutMs?: number) =>
       socket.call<T>(method, params, timeoutMs),
+    notify: (method: string, params?: unknown) => socket.notify(method, params),
     onNotification: (method: string, cb: (params: unknown) => void) =>
       socket.onNotification(method, cb),
     dispose: () => socket.dispose(),
@@ -60,4 +124,3 @@ export function stateText(state: ConnectionState): string {
       return '未连接'
   }
 }
-

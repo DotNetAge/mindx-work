@@ -64,7 +64,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown, true))
   display: flex;
   flex-direction: column;
   gap: var(--mx-space-2);
-  z-index: 40;
+  /* z-index 65：通知必须可见——高于设置面板（60），设置页内操作的结果通知
+   * 曾被面板盖住（40 < 60，"通知栏永远会被遮挡"）；低于 modal（70，互斥阻塞层） */
+  z-index: 65;
   animation: overlay-in var(--mx-duration-motion) var(--mx-ease-standard);
 }
 

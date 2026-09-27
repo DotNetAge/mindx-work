@@ -20,6 +20,11 @@ const active = useShellData(
 .content {
   flex: 1;
   min-width: 0;
+  /* 纵向 flex + overflow 兜底：满高型页面（对话流等）以 flex:1 + min-height:0
+     撑满视口并自滚动，输入区钉底不被内容挤出；普通文档型页面高度自然，
+     超高时仍由本容器整体滚动（滚动语义向后兼容） */
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   background: var(--mx-bg-window);
 }
@@ -44,6 +49,8 @@ const active = useShellData(
   top: 0;
   z-index: 5;
   height: 48px;
+  /* flex 纵向容器内不被压缩，满高页面的 flex:1 计算才准确让位 48px */
+  flex-shrink: 0;
   -webkit-app-region: drag;
 }
 </style>

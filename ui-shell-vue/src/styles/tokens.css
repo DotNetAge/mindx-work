@@ -15,6 +15,16 @@
   --mx-font-body: 400 14px/22px var(--mx-font-family);
   --mx-font-caption: 400 11px/16px var(--mx-font-family);
   --mx-font-micro: 500 10px/14px var(--mx-font-family);
+  /* 等宽字族（chatflow 移植二期 A 登记，附录 A.2 留痕）：系统 mono 栈，
+     对齐 tokens.css 系统栈原则；代码/终端/耗时徽标消费 */
+  --mx-font-mono: ui-monospace, "SF Mono", Menlo, "JetBrains Mono", monospace;
+
+  /* 终端配色（chatflow 移植二期 A 登记，附录 A.4 留痕）：对齐 monaco-vscode-api
+     workbench 集成终端主题变量（随工作台主题联动），缺省回落 desktop 同款定值；
+     终端面板恒暗，双主题同值 */
+  --mx-terminal-bg: var(--vscode-terminal-background, #0d1117);
+  --mx-terminal-fg: var(--vscode-terminal-foreground, #c9d1d9);
+  --mx-terminal-cursor: var(--vscode-terminalCursor-foreground, #58a6ff);
 
   /* 颜色语义 token（亮色 = DSH design-platform 亮色别名） */
   --mx-bg-window: rgb(255, 255, 255);        /* bg-base: neutral-bluish-00 */

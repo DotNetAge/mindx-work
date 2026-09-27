@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 数字员工管理行："数字员工"设置页唯一自定义行，承载完整管理器（skills 管理行先例）。
+ * 团队管理行："团队"设置页唯一自定义行，承载完整管理器（skills 管理行先例）。
  * 布局为上下结构（桌面端左右结构移植改形）：
  * 上 = 员工卡片网格（团队视图：已招募员工；市场视图：agent 类型分发包货架），
  * 下 = 选中员工的配置面板（头部 + 指令/技能/云技能/工具四区）。
@@ -66,7 +66,7 @@ function openLicense(name: string, content: string): void {
   openModal(MODAL_AGENTS_LICENSE, LicenseModal)
 }
 
-// ── 视图切换：团队 / 数字劳工市场（市场懒加载：首次切到才拉清单） ──
+// ── 视图切换：团队 / 市场（市场懒加载：首次切到才拉清单） ──
 const view = ref<'team' | 'market'>('team')
 
 watch(view, (v) => {
@@ -734,7 +734,7 @@ onMounted(() => {
     <!-- 节头：标题 + 说明 -->
     <div :class="$style.sectionHead">
       <div :class="$style.headText">
-        <span :class="$style.sectionTitle">数字员工</span>
+        <span :class="$style.sectionTitle">团队</span>
         <span :class="$style.sectionHint">配置员工的基本能力与技能；点击员工卡片展开配置，到市场招募新员工</span>
       </div>
     </div>
@@ -742,12 +742,12 @@ onMounted(() => {
     <!-- 工具栏：页签独占一行居中，搜索独占一行全宽（计数与手动刷新冗余，已删） -->
     <div :class="$style.tabsRow">
       <div ref="viewTabsRef" class="mx-tabs" :class="$style.viewTabs">
-        <span data-indicator aria-hidden="true" />
+        <span data-indicator aria-hidden="true" :class="$style.tabsIndicator" />
         <button type="button" class="mx-tab" role="tab" :aria-selected="view === 'team' ? 'true' : 'false'" @click="view = 'team'">
           团队
         </button>
         <button type="button" class="mx-tab" role="tab" :aria-selected="view === 'market' ? 'true' : 'false'" @click="view = 'market'">
-          数字劳工市场
+          市场
         </button>
       </div>
     </div>
@@ -791,43 +791,27 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- ── 团队视图（上：已招募员工卡片网格；下：选中员工配置面板） ── -->
+    <!-- ── 团队视图（上：已招募员工迷你卡横排（供应商品牌卡同款）；下：选中员工配置面板） ── -->
     <template v-if="view === 'team'">
-      <p v-if="store.loading && !store.loaded" :class="$style.hint">正在加载员工清单…</p>
-      <div v-else-if="teamCards.length > 0" :class="$style.grid">
+      <p v-if="store.loading && !store.loaded" :class="[$style.hint, 'mx-text-loading']">正在加载员工清单…</p>
+      <div v-else-if="teamCards.length > 0" :class="$style.strip">
         <div
           v-for="a in teamCards"
           :key="a.name"
           role="button"
           tabindex="0"
-          :class="[$style.card, { [$style.cardSelected]: a.name === selectedName }]"
+          :class="$style.mCard"
+          :data-active="a.name === selectedName ? 'true' : 'false'"
           @click="selectedName = a.name"
           @keydown.enter.prevent="selectedName = a.name"
         >
-          <div :class="$style.cardTop">
-            <span :class="$style.avatar">{{ (agentDisplayName(a) || '?').charAt(0).toUpperCase() }}</span>
-            <div :class="$style.titleCol">
-              <span :class="$style.name" :title="a.name">{{ agentDisplayName(a) }}</span>
-              <span :class="$style.id">{{ a.name }}</span>
-            </div>
-            <span class="mx-tag" data-tone="success">已招募</span>
-          </div>
-          <p :class="$style.desc" :title="a.description">{{ a.description || '暂无描述' }}</p>
-          <div :class="$style.tagRow">
+          <span :class="$style.mAvatar">{{ (agentDisplayName(a) || '?').charAt(0).toUpperCase() }}</span>
+          <span :class="$style.mName" :title="a.name">{{ agentDisplayName(a) }}</span>
+          <!-- 分类与市场统计标签：挪到卡片右端（原散伙按钮位）；散伙入口收进配置面板头部 -->
+          <div :class="$style.mTags">
             <span v-if="(a.category || '').trim()" class="mx-tag" data-tone="info">{{ (a.category || '').trim() }}</span>
             <span v-if="ratingsOf(a) > 0" class="mx-tag" data-tone="neutral">★ {{ ratingsOf(a) }}</span>
             <span v-if="(a.skills || []).length" class="mx-tag" data-tone="warning">{{ (a.skills || []).length }} 个技能</span>
-          </div>
-          <div :class="$style.cardFoot" @click.stop>
-            <span></span>
-            <button
-              type="button"
-              class="mx-btn"
-              :disabled="store.operating === a.name"
-              @click="onFire(a.name, agentDisplayName(a))"
-            >
-              {{ store.operating === a.name ? '执行中…' : '散伙' }}
-            </button>
           </div>
         </div>
       </div>
@@ -855,14 +839,15 @@ onMounted(() => {
             :disabled="store.operating === selectedAgent.name"
             @click="onFire(selectedAgent.name, agentDisplayName(selectedAgent))"
           >
-            {{ store.operating === selectedAgent.name ? '执行中…' : '散伙' }}
+            <span v-if="store.operating === selectedAgent.name" class="mx-text-loading">执行中…</span>
+            <template v-else>散伙</template>
           </button>
         </div>
 
         <!-- 四区页签 + 编辑操作 -->
         <div :class="$style.cfgTabsRow">
           <div ref="configTabsRef" class="mx-tabs" :class="$style.cfgTabs">
-            <span data-indicator aria-hidden="true" />
+            <span data-indicator aria-hidden="true" :class="$style.tabsIndicator" />
             <button type="button" class="mx-tab" role="tab" :aria-selected="editorTab === 'instructions' ? 'true' : 'false'" @click="editorTab = 'instructions'">
               指令
             </button>
@@ -907,7 +892,7 @@ onMounted(() => {
               行为准则
             </button>
           </div>
-          <p v-if="detailLoading" :class="$style.hint">正在加载指令正文…</p>
+          <p v-if="detailLoading" :class="[$style.hint, 'mx-text-loading']">正在加载指令正文…</p>
           <template v-else>
             <div v-show="activeChip === 'identity'" :class="$style.instructionBlock">
               <textarea
@@ -1121,9 +1106,9 @@ onMounted(() => {
       </div>
     </template>
 
-    <!-- ── 数字劳工市场视图（agent 类型分发包货架） ── -->
+    <!-- ── 市场视图（agent 类型分发包货架） ── -->
     <template v-else>
-      <p v-if="store.marketLoading && !store.marketLoaded" :class="$style.hint">正在加载市场清单…</p>
+      <p v-if="store.marketLoading && !store.marketLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载市场清单…</p>
       <div v-else-if="marketCards.length > 0" :class="$style.grid">
         <div
           v-for="pkg in marketCards"
@@ -1140,23 +1125,13 @@ onMounted(() => {
               <span :class="$style.name" :title="pkg.name">{{ marketPkgDisplayName(pkg) }}</span>
               <span :class="$style.id">{{ pkg.name }}</span>
             </div>
-            <span class="mx-tag" :data-tone="hiredNames.has(pkg.name) ? 'success' : 'info'">
-              {{ hiredNames.has(pkg.name) ? '已招募' : '未招募' }}
-            </span>
-          </div>
-          <p :class="$style.desc" :title="pkg.description">{{ pkg.description || '暂无描述' }}</p>
-          <div :class="$style.tagRow">
-            <span v-if="(pkg.category || '').trim()" class="mx-tag" data-tone="info">{{ (pkg.category || '').trim() }}</span>
-            <span v-if="(pkg.skills || []).length" class="mx-tag" data-tone="warning">{{ (pkg.skills || []).length }} 个技能</span>
-          </div>
-          <div :class="$style.cardFoot" @click.stop>
-            <span></span>
+            <!-- 招募/散伙动作上移至右上角取代状态标签（与团队卡片同款） -->
             <button
               v-if="!hiredNames.has(pkg.name)"
               type="button"
               class="mx-btn mx-btn--primary"
               :disabled="store.installing === pkg.name"
-              @click="onRecruit(pkg)"
+              @click.stop="onRecruit(pkg)"
             >
               {{ store.installing === pkg.name ? '招募中…' : '招募' }}
             </button>
@@ -1165,10 +1140,16 @@ onMounted(() => {
               type="button"
               class="mx-btn"
               :disabled="store.operating === pkg.name"
-              @click="onMarketFire(pkg)"
+              @click.stop="onMarketFire(pkg)"
             >
-              {{ store.operating === pkg.name ? '执行中…' : '散伙' }}
+              <span v-if="store.operating === pkg.name" class="mx-text-loading">执行中…</span>
+              <template v-else>散伙</template>
             </button>
+          </div>
+          <p :class="$style.desc" :title="pkg.description">{{ pkg.description || '暂无描述' }}</p>
+          <div :class="$style.tagRow">
+            <span v-if="(pkg.category || '').trim()" class="mx-tag" data-tone="info">{{ (pkg.category || '').trim() }}</span>
+            <span v-if="(pkg.skills || []).length" class="mx-tag" data-tone="warning">{{ (pkg.skills || []).length }} 个技能</span>
           </div>
         </div>
       </div>
@@ -1245,7 +1226,8 @@ onMounted(() => {
                 :disabled="store.operating === zoomed.name"
                 @click="fireFromZoom(zoomed)"
               >
-                {{ store.operating === zoomed.name ? '执行中…' : '散伙' }}
+                <span v-if="store.operating === zoomed.name" class="mx-text-loading">执行中…</span>
+                <template v-else>散伙</template>
               </button>
               <button type="button" class="mx-btn" :class="$style.zoomClose" @click="closeZoom">关闭</button>
             </div>
@@ -1291,6 +1273,20 @@ onMounted(() => {
 .tabsRow {
   display: flex;
   justify-content: center;
+}
+
+/* 分段页签指示器：与 skills 管理行同款（此前裸 span 无样式，选中态不可见） */
+.tabsIndicator {
+  position: absolute;
+  inset: 4px auto 4px 4px;
+  box-sizing: border-box;
+  border: 0.5px solid var(--mx-border-strong);
+  border-radius: 8px;
+  background: var(--mx-bg-elevated);
+  transition:
+    transform 180ms ease,
+    width 180ms ease;
+  pointer-events: none;
 }
 
 /* 视图页签：两档等宽（grid 1fr 平分），indicator 与 .mx-tabs-indicator 同几何 */
@@ -1394,9 +1390,73 @@ onMounted(() => {
   outline-offset: 1px;
 }
 
+/* 团队迷你卡横排（供应商品牌卡同款）：一行滚动，点击在下方配置面板展开 */
+.strip {
+  display: flex;
+  gap: var(--mx-space-2);
+  overflow-x: auto;
+  padding: 2px;
+  /* 隐藏水平滚动条（保留滚轮/触控板横向滚动） */
+  scrollbar-width: none;
+}
+
+.strip::-webkit-scrollbar {
+  display: none;
+}
+
+.mCard {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-2);
+  box-sizing: border-box;
+  padding: var(--mx-space-2) var(--mx-space-3);
+  background: var(--mx-bg-surface);
+  border: 0.5px solid var(--mx-separator-soft);
+  border-radius: var(--mx-radius-card);
+  cursor: pointer;
+  transition:
+    background-color var(--mx-duration-fast) var(--mx-ease-standard),
+    border-color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
 /* 选中员工：accent 描边（配置面板数据源指示） */
-.cardSelected {
+.mCard[data-active='true'] {
   border-color: var(--mx-accent);
+  background: var(--mx-hover);
+}
+
+.mCard:focus-visible {
+  outline: 2px solid var(--mx-accent);
+  outline-offset: 1px;
+}
+
+.mAvatar {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--mx-module);
+  font: var(--mx-font-caption);
+  color: var(--mx-text-secondary);
+}
+
+.mName {
+  min-width: 0;
+  max-width: 120px;
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mTags {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-1);
 }
 
 .cardTop {

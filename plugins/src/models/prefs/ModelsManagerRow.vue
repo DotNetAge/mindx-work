@@ -201,6 +201,12 @@ function onDeleteModel(model: ModelConfig) {
   gap: var(--mx-space-2);
   overflow-x: auto;
   padding: 2px;
+  /* 隐藏水平滚动条（保留滚轮/触控板横向滚动） */
+  scrollbar-width: none;
+}
+
+.strip::-webkit-scrollbar {
+  display: none;
 }
 
 /* 供应商卡：选中描边（border-selected）+ 交互灰；动作按钮悬停/聚焦显现（opacity 保键盘可达） */

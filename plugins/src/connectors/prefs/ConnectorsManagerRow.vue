@@ -133,7 +133,7 @@ async function onRefresh() {
     </div>
 
     <!-- 内容区 -->
-    <p v-if="!store.loaded" :class="$style.hint">正在加载连接器清单…</p>
+    <p v-if="!store.loaded" :class="[$style.hint, 'mx-text-loading']">正在加载连接器清单…</p>
     <div v-else-if="filteredServers.length > 0" :class="$style.grid">
       <div
         v-for="server in filteredServers"

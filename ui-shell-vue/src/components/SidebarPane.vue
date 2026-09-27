@@ -77,6 +77,11 @@ function onResizeStart(event: PointerEvent) {
         <div v-if="section.title && !data.collapsed" :class="$style.sectionTitle">
           {{ section.title }}
         </div>
+        <!-- 分节组件席位：rows 为空且提供 component 时整节由组件渲染（契约：行数据模型优先，
+             rows 非空时组件不渲染）。折叠成 rail 时经 compact 传参由组件自适配 -->
+        <div v-if="section.component && !section.rows.length" :class="$style.sectionComponent">
+          <component :is="section.component" :compact="data.collapsed" />
+        </div>
         <button
           v-for="row in section.rows"
           :key="row.id"
@@ -167,6 +172,22 @@ function onResizeStart(event: PointerEvent) {
 .collapsed .scroll {
   gap: var(--mx-space-3);
   align-items: center;
+}
+
+/* 分节组件席位：组件填满滚动区剩余高度，内部滚动与布局由组件自管
+   （Tasks 会话列表等富分节）；折叠 rail 时收窄为 36px 盒对齐折叠行节奏 */
+.sectionComponent {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.collapsed .sectionComponent {
+  flex: none;
+  width: 36px;
+  align-self: center;
 }
 
 /* 节标题（sectionHeader，WorkspaceBrowser L45-58）：高 36 / 14px tertiary 字 /

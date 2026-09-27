@@ -87,7 +87,8 @@ async function install() {
         :disabled="!selected || store.busyId !== null"
         @click="install()"
       >
-        {{ store.busyId ? '安装中…' : '安装' }}
+        <span v-if="store.busyId" class="mx-text-loading">安装中…</span>
+        <template v-else>安装</template>
       </button>
     </div>
   </div>

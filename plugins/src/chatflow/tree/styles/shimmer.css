@@ -1,0 +1,19 @@
+/* 共享流光样式（PR §3.4：desktop 现役在 ThinkingView 与 ProcessView 各自重复定义，
+ * 树视图实现时抽为共享样式类——PendingRow 与 NodeCard executing 形态共用）。
+ * 用法：元素加 .shimmer-text 类。
+ * 颜色全走 --mx-* token（移植计划附录 A：--text-secondary→--mx-text-secondary、
+ * --accent-cyan→--mx-accent）。 */
+
+.shimmer-text {
+  background: linear-gradient(90deg, var(--mx-text-secondary) 0%, var(--mx-text-secondary) 35%, var(--mx-accent) 50%, var(--mx-text-secondary) 65%, var(--mx-text-secondary) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: tree-shimmer-sweep 1.8s linear infinite;
+}
+
+@keyframes tree-shimmer-sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}

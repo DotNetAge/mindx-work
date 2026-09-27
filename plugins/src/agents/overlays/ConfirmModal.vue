@@ -49,7 +49,8 @@ async function confirm(): Promise<void> {
     <div :class="$style.actions">
       <button type="button" class="mx-btn" @click="cancel">取消</button>
       <button type="button" class="mx-btn mx-btn--primary" :disabled="busy" @click="confirm()">
-        {{ busy ? '执行中…' : pending.confirmText }}
+        <span v-if="busy" class="mx-text-loading">执行中…</span>
+        <template v-else>{{ pending.confirmText }}</template>
       </button>
     </div>
   </div>

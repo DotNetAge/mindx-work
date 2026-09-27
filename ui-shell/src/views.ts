@@ -15,6 +15,8 @@ export type SidebarEntry<C> = Entry<C> & {
   /** 折叠成 rail 时的替身 */
   icon?: Glyph
   rows: SidebarRow<C>[]
+  // 分节组件席位：rows 为空且提供 component（继承自 Entry）时整节由组件渲染，
+  // 折叠成 rail 时组件经 ViewProps.compact 自适配；rows 非空时行数据模型优先
 }
 
 export type ContentEntry<C> = Entry<C> & {

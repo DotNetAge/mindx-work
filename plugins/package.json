@@ -14,13 +14,22 @@
     "./skills": "./src/skills/index.ts",
     "./agents": "./src/agents/index.ts",
     "./phone-pair": "./src/phone-pair/index.ts",
-    "./shell-chrome": "./src/shell-chrome/index.ts"
+    "./shell-chrome": "./src/shell-chrome/index.ts",
+    "./chatflow": "./src/chatflow/index.ts",
+    "./chatflow-slot": "./src/chatflow/slot/index.ts"
   },
   "dependencies": {
     "@mindx-work/ui-shell": "workspace:*",
     "@mindx-work/ui-shell-vue": "workspace:*",
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/extension-placeholder": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "@tiptap/vue-3": "^3.31.3",
     "dompurify": "^3.2.5",
+    "element-plus": "^2.14.6",
+    "highlight.js": "^11.10.0",
     "marked": "^14.0.0",
+    "mermaid": "^11.4.1",
     "pinia": "^3.0.2",
     "vue": "^3.5.13"
   }

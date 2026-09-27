@@ -45,7 +45,7 @@ async function add(item: OnlineModelInfo): Promise<void> {
 <template>
   <div :class="$style.body">
     <span :class="$style.title">{{ vendor?.label ?? '在线模型' }}</span>
-    <p v-if="store.onlineLoading" :class="$style.hint">正在拉取在线模型清单…</p>
+    <p v-if="store.onlineLoading" :class="[$style.hint, 'mx-text-loading']">正在拉取在线模型清单…</p>
     <div v-else-if="store.onlineModels.length" :class="$style.list">
       <div v-for="item in store.onlineModels" :key="item.id" :class="$style.row">
         <div :class="$style.rowText">

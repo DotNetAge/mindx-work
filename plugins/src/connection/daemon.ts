@@ -30,7 +30,7 @@ interface JsonRpcResponse {
 
 export class DaemonSocket {
   private ws: WebSocket | null = null
-  private readonly url: string
+  private url: string
   private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
   /** daemon 通知订阅表：method → 订阅回调集合（如 skills_changed 热重载广播） */
   private notificationHandlers = new Map<string, Set<(params: unknown) => void>>()
@@ -45,6 +45,34 @@ export class DaemonSocket {
 
   constructor(url: string) {
     this.url = url
+  }
+
+  /** 当前连接端点 */
+  get endpoint(): string {
+    return this.url
+  }
+
+  /** 切换端点重连：废弃当前连接/在途退避与未决调用，立即按新地址重连（本地/远程模式切换用） */
+  reconnectTo(url: string): void {
+    if (url === this.url && (this.ws?.readyState === WebSocket.OPEN || this.state.value === 'connecting')) {
+      return
+    }
+    this.stopHeartbeat()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.reconnectAttempts = 0
+    this.pending.forEach(({ reject }) => reject(new Error('连接端点已切换')))
+    this.pending.clear()
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.onerror = null
+      this.ws.close(1000, '切换连接端点')
+      this.ws = null
+    }
+    this.url = url
+    this.connect()
   }
 
   /** 建立连接；已在途/已连接时幂等返回 */
@@ -104,6 +132,17 @@ export class DaemonSocket {
       })
       this.ws.send(JSON.stringify(request))
     })
+  }
+
+  /** JSON-RPC 通知发送（无 id、无响应）：user.message 等通知型通道用
+   *  （协议实证：desktop services/websocket.ts notify → {"jsonrpc":"2.0",method,params} 帧）。
+   *  未连接时返回 false 由调用方处理，不做排队重发（desktop 同语义）。 */
+  notify(method: string, params?: unknown): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false
+    }
+    this.ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
+    return true
   }
 
   /** 订阅 daemon 通知（无 id 消息按 method 分发）；返回退订函数 */

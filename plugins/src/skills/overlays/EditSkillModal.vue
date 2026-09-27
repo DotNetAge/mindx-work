@@ -52,7 +52,7 @@ async function save(): Promise<void> {
 <template>
   <div :class="$style.body">
     <span :class="$style.title">编辑技能：{{ editingName }}</span>
-    <p v-if="loading" :class="$style.hint">正在读取 SKILL.md…</p>
+    <p v-if="loading" :class="[$style.hint, 'mx-text-loading']">正在读取 SKILL.md…</p>
     <textarea
       v-else
       v-model="store.editContent"

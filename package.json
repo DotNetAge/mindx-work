@@ -5,6 +5,7 @@
   "main": "electron/dist/main.js",
   "scripts": {
     "dev": "pnpm --filter @mindx-work/app dev",
+    "mac": "pnpm --parallel --filter @mindx-work/app --filter @mindx-work/electron dev",
     "build": "pnpm --filter @mindx-work/app build && pnpm --filter @mindx-work/electron build",
     "typecheck": "vue-tsc --noEmit -p app/tsconfig.json",
     "lint": "oxlint",

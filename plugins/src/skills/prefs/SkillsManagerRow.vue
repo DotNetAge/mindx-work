@@ -500,7 +500,7 @@ onMounted(syncIndicator)
 
     <!-- ── 本地视图 ── -->
     <template v-if="view === 'local'">
-      <p v-if="store.loading && !store.loaded" :class="$style.hint">正在加载技能清单…</p>
+      <p v-if="store.loading && !store.loaded" :class="[$style.hint, 'mx-text-loading']">正在加载技能清单…</p>
       <div v-else-if="filteredSkills.length > 0" :class="$style.grid">
         <div
           v-for="skill in filteredSkills"
@@ -555,7 +555,7 @@ onMounted(syncIndicator)
 
     <!-- ── 在线市场视图（skill 类型分发包，安装进全局库） ── -->
     <template v-else>
-      <p v-if="store.marketLoading && !store.marketLoaded" :class="$style.hint">正在加载市场清单…</p>
+      <p v-if="store.marketLoading && !store.marketLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载市场清单…</p>
       <div v-else-if="filteredMarketPackages.length > 0" :class="$style.grid">
         <div
           v-for="pkg in filteredMarketPackages"
@@ -572,23 +572,20 @@ onMounted(syncIndicator)
               <span :class="$style.name" :title="pkg.name">{{ store.marketDisplayName(pkg) }}</span>
               <span :class="$style.id">{{ pkg.name }}</span>
             </div>
-            <span class="mx-tag" :data-tone="store.installedNames.has(pkg.name) ? 'success' : 'info'">
-              {{ store.installedNames.has(pkg.name) ? '已安装' : '未安装' }}
-            </span>
+            <!-- 安装动作上移至右上角取代状态标签；已安装仅显示标签，覆盖安装走详情弹层 -->
+            <button
+              v-if="!store.installedNames.has(pkg.name)"
+              type="button"
+              class="mx-btn mx-btn--primary"
+              :disabled="store.installing === pkg.name"
+              @click.stop="onInstall(pkg)"
+            >
+              <span v-if="store.installing === pkg.name" class="mx-text-loading">安装中…</span>
+              <template v-else>安装</template>
+            </button>
+            <span v-else class="mx-tag" data-tone="success">已安装</span>
           </div>
           <p :class="$style.desc" :title="pkg.description">{{ pkg.description || '(无描述)' }}</p>
-          <div :class="$style.cardFoot" @click.stop>
-            <span></span>
-            <button
-              type="button"
-              class="mx-btn"
-              :class="{ 'mx-btn--primary': !store.installedNames.has(pkg.name) }"
-              :disabled="store.installing === pkg.name"
-              @click="onInstall(pkg)"
-            >
-              {{ store.installing === pkg.name ? '安装中…' : store.installedNames.has(pkg.name) ? '覆盖安装' : '安装' }}
-            </button>
-          </div>
         </div>
       </div>
       <p v-else-if="store.marketLoaded" :class="$style.hint">市场暂无可安装的技能。</p>
@@ -619,7 +616,7 @@ onMounted(syncIndicator)
 
           <!-- SKILL.md 正文：markdown 渲染；加载 / 失败 / 正文三态 -->
           <div :class="$style.zoomContent">
-            <p v-if="zoomContentLoading" :class="$style.hint">正在加载内容…</p>
+            <p v-if="zoomContentLoading" :class="[$style.hint, 'mx-text-loading']">正在加载内容…</p>
             <p v-else-if="zoomContentError" :class="$style.warning">内容预览失败：{{ zoomContentError }}</p>
             <!-- 渲染结果经 DOMPurify 消毒（markdown.ts 统一防线） -->
             <div v-else-if="zoomContentHtml" :class="$style.markdown" v-html="zoomContentHtml"></div>
@@ -638,7 +635,8 @@ onMounted(syncIndicator)
                 :disabled="store.installing === zoomed.name"
                 @click="installFromZoom(zoomed)"
               >
-                {{ store.installing === zoomed.name ? '安装中…' : store.installedNames.has(zoomed.name) ? '覆盖安装' : '安装' }}
+                <span v-if="store.installing === zoomed.name" class="mx-text-loading">安装中…</span>
+                <template v-else>{{ store.installedNames.has(zoomed.name) ? '覆盖安装' : '安装' }}</template>
               </button>
               <button type="button" class="mx-btn" :class="$style.zoomClose" @click="closeZoom">关闭</button>
             </div>

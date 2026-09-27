@@ -18,10 +18,12 @@ import { skillsPlugin } from '@mindx-work/plugins/skills'
 import { agentsPlugin } from '@mindx-work/plugins/agents'
 import { phonePairPlugin } from '@mindx-work/plugins/phone-pair'
 import { shellChromePlugin } from '@mindx-work/plugins/shell-chrome'
+import { chatflowPlugin } from '@mindx-work/plugins/chatflow'
 
 // 启动装配：插件冲突与依赖缺失在启动期暴露（契约第 7 节）
 // demo 插件已下线（源码保留作范式参考）：当前装配仅 market 插件
-const shell = createApp([marketPlugin, connectionPlugin, modelsPlugin, connectorsPlugin, skillsPlugin, agentsPlugin, phonePairPlugin, shellChromePlugin])
+// 清单顺序即设置导航顺序（壳自带「通用」恒居首）：插件 → 模型 → 团队 → 技能 → 连接器 → 连接
+const shell = createApp([marketPlugin, modelsPlugin, agentsPlugin, skillsPlugin, connectorsPlugin, connectionPlugin, phonePairPlugin, shellChromePlugin, chatflowPlugin])
 
 // 设置持久化归壳所有：控制器以服务形式供设置行与插件消费（键建议 <owner>.<key> 前缀）
 const preferences = createPreferencesController()

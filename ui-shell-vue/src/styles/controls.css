@@ -46,6 +46,52 @@
   background: color-mix(in srgb, var(--mx-accent) 88%, var(--mx-text-on-accent));
 }
 
+/* ── 流光加载文字：加载/进行中态文字的统一效果——次级墨底色上一道高光周期扫过 ──
+ * 用法：<span class="mx-text-loading">正在加载…</span>
+ * 亮暗主题自动跟随（端点均为 token）；主色按钮内自动换反色基准（见下方覆写）；
+ * prefers-reduced-motion 时退化为静态次级墨 */
+.mx-text-loading {
+  --mx-shimmer-base: var(--mx-text-secondary);
+  --mx-shimmer-glow: var(--mx-text);
+  background: linear-gradient(
+    90deg,
+    var(--mx-shimmer-base) 0%,
+    var(--mx-shimmer-base) 35%,
+    var(--mx-shimmer-glow) 50%,
+    var(--mx-shimmer-base) 65%,
+    var(--mx-shimmer-base) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: mx-shimmer 1.8s linear infinite;
+}
+
+/* 主色按钮内：按钮底色为主色，基准改为反色半透明、高光为全量反色 */
+.mx-btn--primary .mx-text-loading {
+  --mx-shimmer-base: color-mix(in srgb, var(--mx-text-on-accent) 62%, transparent);
+  --mx-shimmer-glow: var(--mx-text-on-accent);
+}
+
+@keyframes mx-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mx-text-loading {
+    animation: none;
+    background: none;
+    color: var(--mx-shimmer-base);
+  }
+}
+
 .mx-btn--primary:active {
   background: color-mix(in srgb, var(--mx-accent) 78%, var(--mx-text-on-accent));
 }

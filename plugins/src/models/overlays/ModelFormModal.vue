@@ -73,7 +73,7 @@ onMounted(() => {
   <!-- Ollama 分支：本地模型同步选择器 -->
   <div v-if="store.modelFormMode === 'ollama'" :class="$style.body">
     <span :class="$style.title">添加 Ollama 模型</span>
-    <p v-if="store.ollamaLoading" :class="$style.hint">正在同步本地 Ollama 模型…</p>
+    <p v-if="store.ollamaLoading" :class="[$style.hint, 'mx-text-loading']">正在同步本地 Ollama 模型…</p>
     <div v-else-if="store.ollamaModels.length" :class="$style.ollamaList">
       <button
         v-for="m in store.ollamaModels"
