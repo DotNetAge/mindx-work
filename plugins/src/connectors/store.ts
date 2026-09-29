@@ -1,5 +1,5 @@
 /**
- * connectors 插件内部状态（Model）：MCP 连接器清单 + 开关/测连 + 表单与确认状态。
+ * connectors 插件内部状态（Model）：MCP 连接器清单 + 开关 + 表单与确认状态。
  * 数据读写全部经 daemon.connection 服务（daemon 为唯一连接源）；
  * 壳编排（Overlay 开合、banner 推送）归组件，本 store 只持数据与 RPC 调用。
  * 动作失败一律抛错由调用方呈现（banner），不做静默降级。
@@ -81,22 +81,6 @@ export const useConnectorsStore = defineStore('connectors-store', () => {
       return null
     } finally {
       switching.value = ''
-    }
-  }
-
-  // ---------- 手动测试连接 ----------
-  /** 正在测试的连接器名（按钮 loading，防连点） */
-  const testing = ref('')
-
-  /** 手动测连：失败抛错由调用方呈现 */
-  async function test(server: MCPServerListEntry): Promise<void> {
-    if (testing.value) return
-    testing.value = server.name
-    try {
-      const r = await daemon.call<{ ok: boolean; error?: string }>('mcp.server.test', { name: server.name })
-      if (!r.ok) throw new Error(r.error || '连接失败')
-    } finally {
-      testing.value = ''
     }
   }
 
@@ -202,11 +186,9 @@ export const useConnectorsStore = defineStore('connectors-store', () => {
     servers,
     loaded,
     refresh,
-    // 开关与测连
+    // 开关
     switching,
     toggle,
-    testing,
-    test,
     // 表单
     form,
     editingName,

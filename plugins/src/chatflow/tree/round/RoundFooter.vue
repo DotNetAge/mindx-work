@@ -11,9 +11,10 @@
 // 承载上下文用量展示。
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MxIcon } from '@mindx-work/ui-shell-vue'
+import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import LangBadge from '../nodes/shared/LangBadge.vue'
 import { basename, formatCompactNumber, formatDuration, tryOpenFile } from '../../toolViewUtils'
+import { useChatflowStore } from '../../store'
 import type { TurnUsage } from '../types/content'
 
 /** 轮内文件变更（父组件从 write/edit 节点 resultMeta 聚合，纯数据） */
@@ -33,15 +34,23 @@ const props = defineProps<{
 // ── 文件变更卡片（取舍 16：聚合 write/edit resultMeta，不聚合 pending diff） ──
 // 形态：头行（图标 + 计数 + 聚合 ± 行数 + 折叠 chevron）+ 每文件明细行，头行点击切换折叠
 
-const detailExpanded = ref(true)
+const detailExpanded = ref(false)
 
 const changeAdd = computed(() => props.fileChanges.reduce((s, f) => s + f.additions, 0))
 const changeDel = computed(() => props.fileChanges.reduce((s, f) => s + f.deletions, 0))
 
-/** 变更卡文件行点击：desktop 为 vscode.diff 对照查看；work 编辑器 diff 通道四期接线，
- * 二期 A 走文件打开占位通道（tryOpenFile 内部提示待接入） */
-async function openRowDiff(path: string): Promise<void> {
-  await tryOpenFile(path)
+/** 变更卡文件行点击：跳转 Details「变更」面板定位该文件（diffFocusPath 通道）；
+ *  变更面板未注册（插件停用）时降级原文件打开行为 */
+const shell = useShell()
+const chatStore = useChatflowStore()
+
+function openRowDiff(path: string): void {
+  if (shell.Detail.entries.some((e) => e.id === 'diff-detail')) {
+    chatStore.diffFocusPath = path
+    shell.Detail.show('diff-detail')
+    return
+  }
+  void tryOpenFile(path)
 }
 
 // ── 用量统计行（数据源 = 轮跨度聚合的 turnUsage，由父组件传入） ───────────

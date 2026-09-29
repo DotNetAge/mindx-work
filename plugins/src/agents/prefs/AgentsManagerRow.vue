@@ -14,7 +14,9 @@ import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import {
   useAgentsStore,
   agentDisplayName,
+  agentRoleSubtitle,
   marketPkgDisplayName,
+  marketPkgRoleSubtitle,
   skillDisplayName,
   skillLocaleDesc,
   AgentExistsError,
@@ -70,16 +72,20 @@ function openLicense(name: string, content: string): void {
 const view = ref<'team' | 'market'>('team')
 
 watch(view, (v) => {
-  if (v === 'market' && !store.marketLoaded && !store.marketLoading) {
-    void onMarketRefresh()
-  }
+  if (v !== 'market' || store.marketLoading) return
+  // 每次切入都重拉：已有清单先渲染旧数据，后台静默刷新（stale-while-revalidate），
+  // 避免 daemon/线上清单更新后前端内存旧分类永不失效
+  void onMarketRefresh()
 })
 
 async function onMarketRefresh() {
   try {
     await store.loadMarket()
   } catch (err: unknown) {
-    pushNotice(shell, 'error', err instanceof Error ? err.message : '市场清单加载失败，请检查网络连接')
+    // 已有数据的静默刷新失败不打扰（旧清单仍可浏览），仅首拉失败提示
+    if (!store.marketLoaded) {
+      pushNotice(shell, 'error', err instanceof Error ? err.message : '市场清单加载失败，请检查网络连接')
+    }
   }
 }
 
@@ -119,7 +125,7 @@ watch(
 )
 
 // ── 配置区编辑态（技能 / 工具 / 云技能勾选的本地副本，保存时统一写回） ──
-const editorTab = ref<'instructions' | 'skills' | 'cloud' | 'tools'>('instructions')
+const editorTab = ref<'instructions' | 'skills' | 'cloud' | 'tools' | 'team'>('instructions')
 const isEditing = ref(false)
 const localSkills = ref<string[]>([])
 const localEnabledTools = ref<Set<string>>(new Set())
@@ -142,6 +148,9 @@ const identityBody = ref('')
 const soulBody = ref('')
 const identityDirty = ref(false)
 const soulDirty = ref(false)
+/** 团队职责（TEAM.md 正文，仅负责人可编辑） */
+const teamBody = ref('')
+const teamDirty = ref(false)
 const detailLoading = ref(false)
 /** 请求序号：快速切换员工时丢弃过期响应 */
 let detailReqSeq = 0
@@ -150,8 +159,10 @@ async function loadAgentBodies(name: string): Promise<void> {
   const seq = ++detailReqSeq
   identityBody.value = ''
   soulBody.value = ''
+  teamBody.value = ''
   identityDirty.value = false
   soulDirty.value = false
+  teamDirty.value = false
   if (!name) {
     allowedBaseline.value = new Set()
     localAllowedServers.value = new Set()
@@ -163,6 +174,7 @@ async function loadAgentBodies(name: string): Promise<void> {
     if (seq !== detailReqSeq || name !== selectedName.value) return
     identityBody.value = String(res?.introduction ?? '')
     soulBody.value = String(res?.soul ?? '')
+    teamBody.value = String(res?.team_duty ?? '')
     // allows_tools 条目为 "mcp:<server>"，解析出 server 名集合作为云技能勾选基线
     const allowed = new Set<string>()
     for (const raw of res?.allows_tools || []) {
@@ -189,16 +201,17 @@ watch(selectedName, (name) => {
   void nextTick(() => syncIndicator(configTabsRef.value))
 })
 
-// ── 指令保存（身份写 identity_body，行为准则写 soul；独立于全局编辑态） ──
-async function saveBody(section: 'identity' | 'soul'): Promise<void> {
+// ── 指令保存（身份写 identity_body，行为准则写 soul，团队职责写 team_duty；独立于全局编辑态） ──
+async function saveBody(section: 'identity' | 'soul' | 'team'): Promise<void> {
   const name = selectedName.value
   if (!name) return
-  const field = section === 'identity' ? 'identity_body' : 'soul'
-  const value = section === 'identity' ? identityBody.value : soulBody.value
+  const field = section === 'identity' ? 'identity_body' : section === 'soul' ? 'soul' : 'team_duty'
+  const value = section === 'identity' ? identityBody.value : section === 'soul' ? soulBody.value : teamBody.value
   try {
     await store.updateAgent({ name, [field]: value })
     if (section === 'identity') identityDirty.value = false
-    else soulDirty.value = false
+    else if (section === 'soul') soulDirty.value = false
+    else teamDirty.value = false
     pushNotice(shell, 'success', 'Agent 保存成功')
   } catch (err: unknown) {
     pushNotice(shell, 'error', err instanceof Error ? err.message : 'Agent 保存失败')
@@ -388,6 +401,127 @@ const enabledToolGroups = computed(() =>
 const enabledStandaloneTools = computed(() =>
   STANDALONE_AGENT_TOOLS.filter((t) => localEnabledTools.value.has(t.name)),
 )
+
+// ── 散伙守卫：系统至少保留一个已招募智能体（daemon agent.fire 同源守卫，UI 先禁用防误点）──
+const canFire = computed(() => store.agents.filter((a) => a.hired).length > 1)
+
+// ── 昵称编辑（配置头部标识行点击触发）：agent.update nick_name（空串清空，展示回退 role/name）──
+const editingNick = ref(false)
+const nickDraft = ref('')
+const nickInputEl = ref<HTMLInputElement | null>(null)
+
+function startNickEdit(): void {
+  if (!selectedAgent.value || store.operating === selectedAgent.value.name) return
+  nickDraft.value = selectedAgent.value.nick_name || ''
+  editingNick.value = true
+  nextTick(() => nickInputEl.value?.focus())
+}
+
+function cancelNick(): void {
+  editingNick.value = false
+}
+
+async function saveNick(): Promise<void> {
+  if (!editingNick.value || !selectedAgent.value) return
+  const agent = selectedAgent.value
+  const next = nickDraft.value.trim()
+  if (next === (agent.nick_name || '')) {
+    editingNick.value = false // 未变化直接退出编辑
+    return
+  }
+  editingNick.value = false
+  store.operating = agent.name
+  try {
+    await store.updateAgent({ name: agent.name, nick_name: next })
+    await store.refreshAgents()
+    pushNotice(shell, 'success', next ? `昵称已更新为「${next}」` : '昵称已清除')
+  } catch (err: unknown) {
+    pushNotice(shell, 'error', err instanceof Error ? err.message : '昵称更新失败')
+  } finally {
+    store.operating = ''
+  }
+}
+
+// ── 团队（配置头部）：成员头像堆叠（Leader 取 members，成员取同 team 同伴）；
+// 非团队显示「组队」入口，弹层写 team + members（members 非空即自任负责人） ──
+interface TeamStackAvatar {
+  name: string
+  displayName: string
+  icon?: string
+}
+
+const teamMemberAvatars = computed<TeamStackAvatar[]>(() => {
+  const agent = selectedAgent.value
+  if (!agent) return []
+  let names: string[]
+  if (agent.is_leader && agent.members?.length) {
+    names = agent.members
+  } else if (agent.team) {
+    names = store.agents.filter((a) => a.team === agent.team && a.name !== agent.name).map((a) => a.name)
+  } else {
+    return []
+  }
+  return names
+    .map((name) => {
+      const meta = store.agents.find((a) => a.name === name)
+      return { name, displayName: meta ? agentDisplayName(meta) : name, icon: meta?.icon }
+    })
+    .filter((m) => !!m)
+})
+
+// ── 组队对话框（非团队 agent 的「组队」入口）：队名 +「+」添加成员 + 成员头像预览；
+// 全程草稿态（draftMembers），保存时一次写 team + members（含自己即自任负责人） ──
+const teamModalOpen = ref(false)
+const teamNameDraft = ref('')
+const draftMembers = ref<string[]>([])
+const memberPickerOpen = ref(false)
+const memberPicks = ref<string[]>([])
+
+const hireableMembers = computed(() => store.agents.filter((a) => a.hired && a.name !== selectedAgent.value?.name))
+
+/** 对话框内成员头像预览（草稿名单 → 清单匹配头像/展示名） */
+const draftMemberAvatars = computed(() =>
+  draftMembers.value.map((name) => {
+    const meta = store.agents.find((a) => a.name === name)
+    return { name, displayName: meta ? agentDisplayName(meta) : name, icon: meta?.icon }
+  })
+)
+
+function openTeamModal(): void {
+  teamNameDraft.value = ''
+  draftMembers.value = []
+  memberPickerOpen.value = false
+  memberPicks.value = []
+  teamModalOpen.value = true
+}
+
+/** 浮层「确定」：勾选并入草稿名单（对话框内头像即时预览） */
+function confirmPicks(): void {
+  draftMembers.value = Array.from(new Set([...draftMembers.value, ...memberPicks.value]))
+  memberPicks.value = []
+  memberPickerOpen.value = false
+}
+
+async function saveTeam(): Promise<void> {
+  const agent = selectedAgent.value
+  if (!agent) return
+  const team = teamNameDraft.value.trim()
+  if (!team) {
+    pushNotice(shell, 'error', '队名不能为空')
+    return
+  }
+  teamModalOpen.value = false
+  store.operating = agent.name
+  try {
+    await store.updateAgent({ name: agent.name, team, members: Array.from(new Set([agent.name, ...draftMembers.value])) })
+    await store.refreshAgents()
+    pushNotice(shell, 'success', `已加入团队「${team}」`)
+  } catch (err: unknown) {
+    pushNotice(shell, 'error', err instanceof Error ? err.message : '组队失败')
+  } finally {
+    store.operating = ''
+  }
+}
 
 // ── 散伙（团队卡片 / 配置头部 / 市场卡片 / 详情弹层共用） ──
 function onFire(name: string, display: string): void {
@@ -805,8 +939,10 @@ onMounted(() => {
           @click="selectedName = a.name"
           @keydown.enter.prevent="selectedName = a.name"
         >
-          <span :class="$style.mAvatar">{{ (agentDisplayName(a) || '?').charAt(0).toUpperCase() }}</span>
+          <img v-if="a.icon" :class="[$style.mAvatar, $style.avatarImg]" :src="a.icon" :alt="agentDisplayName(a)" />
+          <span v-else :class="$style.mAvatar">{{ (agentDisplayName(a) || '?').charAt(0).toUpperCase() }}</span>
           <span :class="$style.mName" :title="a.name">{{ agentDisplayName(a) }}</span>
+          <span v-if="agentRoleSubtitle(a)" :class="$style.mRole">{{ agentRoleSubtitle(a) }}</span>
           <!-- 分类与市场统计标签：挪到卡片右端（原散伙按钮位）；散伙入口收进配置面板头部 -->
           <div :class="$style.mTags">
             <span v-if="(a.category || '').trim()" class="mx-tag" data-tone="info">{{ (a.category || '').trim() }}</span>
@@ -824,19 +960,62 @@ onMounted(() => {
       <div v-if="selectedAgent" :class="$style.config">
         <!-- 头部：头像 + 角色名 + 标识 + 描述 + 散伙 -->
         <div :class="$style.cfgHead">
-          <span :class="$style.cfgAvatar">{{ (agentDisplayName(selectedAgent) || '?').charAt(0).toUpperCase() }}</span>
+          <img
+            v-if="selectedAgent.icon"
+            :class="[$style.cfgAvatar, $style.avatarImg]"
+            :src="selectedAgent.icon"
+            :alt="agentDisplayName(selectedAgent)"
+          />
+          <span v-else :class="$style.cfgAvatar">{{ (agentDisplayName(selectedAgent) || '?').charAt(0).toUpperCase() }}</span>
           <div :class="$style.cfgMain">
             <div :class="$style.cfgNameRow">
               <h3 :class="$style.cfgName">{{ agentDisplayName(selectedAgent) }}</h3>
-              <span class="mx-tag" data-tone="success">已招募</span>
+              <span v-if="agentRoleSubtitle(selectedAgent)" :class="$style.cfgRole">{{ agentRoleSubtitle(selectedAgent) }}</span>
+              <!-- Leader 在标题旁显示团队名 -->
+              <span v-if="selectedAgent.is_leader && selectedAgent.team" class="mx-tag" data-tone="info">{{ selectedAgent.team }}</span>
             </div>
-            <span :class="$style.cfgId">{{ selectedAgent.name }}</span>
+            <!-- 标识行（name 小字）：点击进入昵称编辑（改名不影响目录名，展示名随之刷新） -->
+            <input
+              v-if="editingNick"
+              ref="nickInputEl"
+              v-model="nickDraft"
+              :class="$style.cfgId"
+              :disabled="store.operating === selectedAgent.name"
+              placeholder="设置昵称，留空清除"
+              @keydown.enter.prevent="saveNick"
+              @keydown.esc.prevent="cancelNick"
+              @blur="saveNick"
+            />
+            <span
+              v-else
+              :class="[$style.cfgId, $style.cfgIdEditable]"
+              title="点击修改昵称"
+              @click="startNickEdit"
+            >{{ selectedAgent.name }}</span>
             <p :class="$style.cfgDesc">{{ selectedAgent.description || '暂无描述' }}</p>
           </div>
+          <!-- 团队区：有团队显示成员头像堆叠（紧密排列，前一个覆盖后一个左边一半）；
+               非团队显示「组队」入口，点击弹组队对话框（队名 + 添加成员 + 成员头像） -->
+          <div v-if="teamMemberAvatars.length" :class="$style.teamStack" title="团队成员">
+            <template v-for="m in teamMemberAvatars" :key="m.name">
+              <img v-if="m.icon" :class="$style.teamStackAvatar" :src="m.icon" :alt="m.displayName" :title="m.displayName" />
+              <span v-else :class="$style.teamStackAvatar" :title="m.displayName">{{ m.displayName.charAt(0).toUpperCase() }}</span>
+            </template>
+          </div>
           <button
+            v-else
             type="button"
             class="mx-btn"
             :disabled="store.operating === selectedAgent.name"
+            @click="openTeamModal"
+          >
+            组队
+          </button>
+          <button
+            type="button"
+            class="mx-btn"
+            :disabled="store.operating === selectedAgent.name || !canFire"
+            :title="!canFire ? '系统至少需要保留一个智能体' : undefined"
             @click="onFire(selectedAgent.name, agentDisplayName(selectedAgent))"
           >
             <span v-if="store.operating === selectedAgent.name" class="mx-text-loading">执行中…</span>
@@ -859,6 +1038,17 @@ onMounted(() => {
             </button>
             <button type="button" class="mx-tab" role="tab" :aria-selected="editorTab === 'tools' ? 'true' : 'false'" @click="editorTab = 'tools'">
               工具<template v-if="isEditing">&nbsp;({{ localEnabledTools.size }}/{{ AGENT_TOOLS.length }})</template>
+            </button>
+            <!-- 团队职责：仅负责人可见（agent.Team 不为空且 is_leader） -->
+            <button
+              v-if="selectedAgent.is_leader && selectedAgent.team"
+              type="button"
+              class="mx-tab"
+              role="tab"
+              :aria-selected="editorTab === 'team' ? 'true' : 'false'"
+              @click="editorTab = 'team'"
+            >
+              团队
             </button>
           </div>
           <div v-if="editorTab !== 'instructions'" :class="$style.cfgActions">
@@ -921,6 +1111,24 @@ onMounted(() => {
               </div>
             </div>
           </template>
+        </div>
+
+        <!-- 区：团队职责（TEAM.md，仅负责人可见的页签内容） -->
+        <div v-show="editorTab === 'team'" :class="$style.tabPanel">
+          <p v-if="detailLoading" :class="[$style.hint, 'mx-text-loading']">正在加载团队职责…</p>
+          <div v-else :class="$style.instructionBlock">
+            <textarea
+              v-model="teamBody"
+              :class="$style.area"
+              rows="8"
+              placeholder="团队职责（TEAM.md 正文），暂无内容"
+              @input="teamDirty = true"
+            ></textarea>
+            <div :class="$style.instructionFoot">
+              <span :class="$style.hint">保存后写入 TEAM.md 正文</span>
+              <button type="button" class="mx-btn mx-btn--primary" :disabled="!teamDirty" @click="saveBody('team')">保存</button>
+            </div>
+          </div>
         </div>
 
         <!-- 区：技能（查看态摘要 / 编辑态多选） -->
@@ -1120,10 +1328,16 @@ onMounted(() => {
           @keydown.enter.prevent="openZoomMarket(pkg, $event)"
         >
           <div :class="$style.cardTop">
-            <span :class="$style.avatar">{{ (marketPkgDisplayName(pkg) || '?').charAt(0).toUpperCase() }}</span>
+            <img
+              v-if="pkg.icon"
+              :class="[$style.avatar, $style.avatarImg]"
+              :src="pkg.icon"
+              :alt="marketPkgDisplayName(pkg)"
+            />
+            <span v-else :class="$style.avatar">{{ (marketPkgDisplayName(pkg) || '?').charAt(0).toUpperCase() }}</span>
             <div :class="$style.titleCol">
               <span :class="$style.name" :title="pkg.name">{{ marketPkgDisplayName(pkg) }}</span>
-              <span :class="$style.id">{{ pkg.name }}</span>
+              <span v-if="marketPkgRoleSubtitle(pkg)" :class="$style.sub">{{ marketPkgRoleSubtitle(pkg) }}</span>
             </div>
             <!-- 招募/散伙动作上移至右上角取代状态标签（与团队卡片同款） -->
             <button
@@ -1139,7 +1353,8 @@ onMounted(() => {
               v-else
               type="button"
               class="mx-btn"
-              :disabled="store.operating === pkg.name"
+              :disabled="store.operating === pkg.name || !canFire"
+              :title="!canFire ? '系统至少需要保留一个智能体' : undefined"
               @click.stop="onMarketFire(pkg)"
             >
               <span v-if="store.operating === pkg.name" class="mx-text-loading">执行中…</span>
@@ -1171,10 +1386,16 @@ onMounted(() => {
         >
           <!-- 头部卡：头像 + 展示名 + 元信息 + 招募操作 + 简介 -->
           <div :class="$style.cardTop">
-            <span :class="$style.zoomAvatar">{{ (zoomed.title || '?').charAt(0).toUpperCase() }}</span>
+            <img
+              v-if="zoomed.pkg.icon"
+              :class="[$style.zoomAvatar, $style.avatarImg]"
+              :src="zoomed.pkg.icon"
+              :alt="zoomed.title"
+            />
+            <span v-else :class="$style.zoomAvatar">{{ (zoomed.title || '?').charAt(0).toUpperCase() }}</span>
             <div :class="$style.titleCol">
               <span :class="$style.name">{{ zoomed.title }}</span>
-              <span :class="$style.id">{{ zoomed.name }}</span>
+              <span v-if="marketPkgRoleSubtitle(zoomed.pkg)" :class="$style.sub">{{ marketPkgRoleSubtitle(zoomed.pkg) }}</span>
             </div>
             <span
               class="mx-tag"
@@ -1223,7 +1444,8 @@ onMounted(() => {
                 v-else
                 type="button"
                 class="mx-btn"
-                :disabled="store.operating === zoomed.name"
+                :disabled="store.operating === zoomed.name || !canFire"
+                :title="!canFire ? '系统至少需要保留一个智能体' : undefined"
                 @click="fireFromZoom(zoomed)"
               >
                 <span v-if="store.operating === zoomed.name" class="mx-text-loading">执行中…</span>
@@ -1231,6 +1453,57 @@ onMounted(() => {
               </button>
               <button type="button" class="mx-btn" :class="$style.zoomClose" @click="closeZoom">关闭</button>
             </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 组队对话框（Teleport 到 body）：队名输入框 +「+」添加成员 + 成员头像堆叠预览 -->
+    <Teleport to="body">
+      <div v-if="teamModalOpen" :class="$style.teamModalMask" @click.self="teamModalOpen = false">
+        <div :class="$style.teamModal">
+          <h3 :class="$style.teamModalTitle">组队</h3>
+          <input
+            v-model="teamNameDraft"
+            :class="$style.teamModalName"
+            placeholder="队名"
+            @keydown.enter.prevent="saveTeam"
+          />
+          <div :class="$style.teamModalRow">
+            <div :class="$style.teamModalPickerWrap">
+              <button
+                type="button"
+                :class="$style.teamModalAdd"
+                title="添加成员"
+                @click="memberPickerOpen = !memberPickerOpen"
+              >
+                +
+              </button>
+              <!-- 成员选择浮层（多选，确定并入草稿名单） -->
+              <div v-if="memberPickerOpen" :class="$style.memberPicker">
+                <label v-for="m in hireableMembers" :key="m.name" :class="$style.memberItem">
+                  <input v-model="memberPicks" type="checkbox" :value="m.name" />
+                  <img v-if="m.icon" :class="$style.teamStackAvatar" :src="m.icon" :alt="agentDisplayName(m)" />
+                  <span>{{ agentDisplayName(m) }}</span>
+                </label>
+                <p v-if="hireableMembers.length === 0" :class="$style.hint">暂无其他已招募成员</p>
+                <div :class="$style.memberPickerFoot">
+                  <button type="button" class="mx-btn" @click="memberPickerOpen = false">取消</button>
+                  <button type="button" class="mx-btn mx-btn--primary" @click="confirmPicks">确定</button>
+                </div>
+              </div>
+            </div>
+            <!-- 成员头像堆叠（草稿预览：前一个覆盖后一个左边一半） -->
+            <div v-if="draftMemberAvatars.length" :class="$style.teamStack" title="团队成员">
+              <template v-for="m in draftMemberAvatars" :key="m.name">
+                <img v-if="m.icon" :class="$style.teamStackAvatar" :src="m.icon" :alt="m.displayName" :title="m.displayName" />
+                <span v-else :class="$style.teamStackAvatar" :title="m.displayName">{{ m.displayName.charAt(0).toUpperCase() }}</span>
+              </template>
+            </div>
+          </div>
+          <div :class="$style.teamModalFoot">
+            <button type="button" class="mx-btn" @click="teamModalOpen = false">取消</button>
+            <button type="button" class="mx-btn mx-btn--primary" @click="saveTeam">保存</button>
           </div>
         </div>
       </div>
@@ -1354,7 +1627,7 @@ onMounted(() => {
    团队网格限高内滚，保证下方配置面板（上下结构的"下"）始终在视口内 */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--mx-space-3);
   align-content: start;
   /* 卡片高度随内容自适应（不随行内最高卡片拉伸） */
@@ -1437,10 +1710,16 @@ onMounted(() => {
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: 50%;
   background: var(--mx-module);
   font: var(--mx-font-caption);
   color: var(--mx-text-secondary);
+}
+
+/* 头像图片：与各尺寸头像类组合使用，图片填满圆角容器 */
+.avatarImg {
+  object-fit: cover;
+  background: var(--mx-module);
 }
 
 .mName {
@@ -1448,6 +1727,17 @@ onMounted(() => {
   max-width: 120px;
   font: var(--mx-font-body);
   color: var(--mx-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 迷你卡副题小字（Role）：昵称后同行展示 */
+.mRole {
+  flex: none;
+  max-width: 96px;
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1471,7 +1761,7 @@ onMounted(() => {
   place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: var(--mx-radius-control);
+  border-radius: 50%;
   background: var(--mx-module);
   font: var(--mx-font-heading);
   color: var(--mx-text-secondary);
@@ -1494,7 +1784,8 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
-.id {
+/* 副题小字（Role）：统一显示规则 = 昵称主名 + Role 小字 */
+.sub {
   font: var(--mx-font-caption);
   color: var(--mx-text-tertiary);
   white-space: nowrap;
@@ -1575,7 +1866,7 @@ onMounted(() => {
   place-items: center;
   width: 48px;
   height: 48px;
-  border-radius: var(--mx-radius-control);
+  border-radius: 50%;
   background: var(--mx-module);
   font: var(--mx-font-heading);
   color: var(--mx-text-secondary);
@@ -1601,9 +1892,183 @@ onMounted(() => {
   color: var(--mx-text);
 }
 
+/* 配置面板副题小字（Role）：昵称后同行展示 */
+.cfgRole {
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
+  white-space: nowrap;
+}
+
 .cfgId {
   font: var(--mx-font-caption);
   color: var(--mx-text-tertiary);
+}
+
+/* 标识行可编辑态：悬浮提示可点（虚线下划线），点击进入昵称编辑 */
+.cfgIdEditable {
+  cursor: pointer;
+  text-decoration: underline dashed color-mix(in srgb, var(--mx-text-tertiary) 55%, transparent);
+  text-underline-offset: 3px;
+}
+
+.cfgIdEditable:hover {
+  color: var(--mx-text-secondary);
+}
+
+/* 编辑态输入框：沿用标识行字形，仅保留底边线（对齐 inline 编辑惯例） */
+input.cfgId {
+  width: 160px;
+  padding: 0 var(--mx-space-1);
+  border: none;
+  border-bottom: 1px solid var(--mx-accent);
+  background: transparent;
+  outline: none;
+  color: var(--mx-text);
+}
+
+/* 成员选择浮层（组队对话框内下拉） */
+.memberPicker {
+  position: absolute;
+  top: calc(100% + var(--mx-space-1));
+  left: 0;
+  z-index: 30;
+  width: 240px;
+  max-height: 240px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-1);
+  padding: var(--mx-space-2);
+  border-radius: var(--mx-radius-control);
+  background: var(--mx-menu-bg);
+  border: 1px solid var(--mx-separator);
+  box-shadow: var(--mx-shadow-prominent);
+}
+
+.memberPickerFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--mx-space-2);
+  margin-top: var(--mx-space-1);
+}
+
+/* 团队成员头像堆叠：紧密排列，前一个覆盖后一个左边一半（负 margin 叠加） */
+.teamStack {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-right: var(--mx-space-2);
+}
+
+.teamStackAvatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--mx-bg-elevated);
+  background: var(--mx-hover);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: var(--mx-font-caption);
+  color: var(--mx-text-secondary);
+}
+
+.teamStack > * + * {
+  margin-left: -12px;
+}
+
+/* 组队对话框（Teleport 到 body）：队名 + 添加成员 + 头像预览 */
+.teamModalMask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mx-mask);
+}
+
+.teamModal {
+  width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-3);
+  padding: var(--mx-space-4);
+  border-radius: var(--mx-radius-window);
+  background: var(--mx-bg-elevated);
+  border: 1px solid var(--mx-separator);
+  box-shadow: var(--mx-shadow-panel);
+}
+
+.teamModalTitle {
+  margin: 0;
+  font: var(--mx-font-heading);
+  font-weight: 600;
+  color: var(--mx-text);
+}
+
+.teamModalName {
+  width: 100%;
+  padding: var(--mx-space-2);
+  border: 1px solid var(--mx-border-strong);
+  border-radius: var(--mx-radius-control);
+  background: var(--mx-bg-surface);
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+  outline: none;
+}
+
+.teamModalName:focus {
+  border-color: var(--mx-accent);
+}
+
+.teamModalRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-3);
+  min-height: 32px;
+}
+
+.teamModalPickerWrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.teamModalAdd {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px dashed var(--mx-border-strong);
+  background: var(--mx-bg-surface);
+  color: var(--mx-text-secondary);
+  font: var(--mx-font-body);
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.teamModalAdd:hover {
+  color: var(--mx-accent);
+  border-color: var(--mx-accent);
+}
+
+.teamModalFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--mx-space-2);
+}
+
+/* 成员选择浮层内的成员行 */
+.memberItem {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-2);
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+  cursor: pointer;
 }
 
 .cfgDesc {
@@ -1959,7 +2424,7 @@ onMounted(() => {
   place-items: center;
   width: 56px;
   height: 56px;
-  border-radius: var(--mx-radius-control);
+  border-radius: 50%;
   background: var(--mx-module);
   font: var(--mx-font-heading);
   color: var(--mx-text-secondary);

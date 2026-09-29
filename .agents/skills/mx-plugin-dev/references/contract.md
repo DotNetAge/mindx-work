@@ -183,7 +183,14 @@ interface ServiceContext {
 
 通道里流动的是 **Pinia store 等响应式本体**，不是快照副本：提供方放 store，消费方 `useService` 拿到的就是同一份响应式数据（Vue 适配器经 `useService(name)` 取用）。
 
-**调用时机硬边界**：`useService` / `useShell` 基于 Vue inject，**只能在组件 setup 同步上下文调用**——事件回调深处、Pinia store 的 action、setTimeout/async 续体里调用会抛"壳上下文缺失"。需要服务本体的 store：在 store 初始化（setup store 函数体）时捕获一次（首次 `useXxxStore()` 总由某组件 setup 触发，此时 inject 有效），action 里用捕获的引用。
+**调用时机硬边界**：`useService` / `useShell` 基于 Vue inject，**只能在组件 setup 同步上下文调用**——事件回调深处、Pinia store 的 action、setTimeout/async 续体里调用会抛"壳上下文缺失"。
+
+需要壳能力（服务本体、`Detail.show` 等）的 store，按创建时机二选一：
+
+- **普通页面 store**（首次创建由组件 setup 触发）：在 store 初始化（setup store 函数体）时 `useService` / `useShell` 捕获一次，action 里用捕获的引用。
+- **以服务 provide 的 store**：首次创建可能发生在非 setup 上下文（消费方 store 的 action 经 service 解引用触发），store 函数体内 inject 全部失效——走**装配期绑定**：插件函数体 `bindXxxShell(ctx)` 捕获壳本体，store 内 `theShell()` 取用；`shell.services.use()` 是内核方法、无 inject 依赖，拿到壳后随处可调（实证：markdown / explorer / image-viewer / web-viewer 四插件）。
+
+**装配时序坑（实证）**：插件函数体在 `createApp([...])` 时执行，`createPinia()` 在 `mountVueApp` 内才安装——**插件函数体内调用 `useXxxStore()` 必炸（无 activePinia）**。装配期 provide 一律用**延迟外壳**：`createXxxService()` 返回 `{ get store() { return useXxxStore() } }`，把 store 创建推迟到消费方首次解引用（须在挂载后）。
 
 ### 10.1 跨插件响应的双形态（MVVM 译法，禁止事件总线）
 
@@ -191,7 +198,7 @@ interface ServiceContext {
 
 | 形态 | 适用语义 | 实现 |
 | --- | --- | --- |
-| **A. 命令调用** | 消费方对提供方有明确意图（打开/聚焦/执行） | `useService('xx.store')` 调 store 的 **action**（如 `open({ path })`）；提供方在 action 内完成状态写入 + 壳编排（`shell.Detail.show` 等） |
+| **A. 命令调用** | 消费方对提供方有明确意图（打开/聚焦/执行） | `useService('xx.store').store` 调 store 的 **action**（如 `open(path)`）；提供方在 action 内完成状态写入 + 壳编排（`shell.Detail.show` 等） |
 | **B. 状态订阅** | 无方向的同步/多播（状态变了大家都动） | 多方对**同一份 store** 各自 `computed` / `watch`；瞬时事件物化为状态迁移（布尔标志、append 记录、版本号） |
 
 判断口诀：事件总线广播"发生了什么"（无契约）；MVVM 表达"要做什么"（形态 A 的命令）与"现在是什么"（形态 B 的状态）。**不存在第三种**——真需要多对多通知时，是形态 B（同一份事实记录，各方 watch），不是互发消息。
@@ -205,22 +212,41 @@ interface ServiceContext {
 ### 10.3 范式：点击文件链接 → 另一插件以 Markdown 显示到 Detail
 
 ```ts
-// 提供方 md-viewer：store（Model）+ Detail 条目注册 + 命令 action
+// 提供方 md-viewer：store（Model）+ Detail 条目注册 + 命令 action。
+// store 要在 action 里编排壳：装配期绑定壳本体（store action 里不能 useShell——inject 硬边界）。
+let shellRef: VueAppShell | null = null
+export const bindMdViewerShell = (shell: VueAppShell): void => { shellRef = shell }
+const theShell = (): VueAppShell => {
+  if (!shellRef) throw new Error('md-viewer 壳未绑定：插件装配缺失')
+  return shellRef
+}
+
 export const useMdViewerStore = defineStore('md-viewer', () => {
   const currentFile = ref<FileInfo | null>(null)          // 形态 B 的状态本体
   const open = (target: FileInfo) => {                     // 形态 A 的命令
     currentFile.value = target
-    useShell().Detail.show(DETAIL_ID)                      // 编排归提供方
+    theShell().Detail.show(DETAIL_ID)                      // 编排归提供方
   }
   return { currentFile, open }
 })
-// 插件函数体内：ctx.services.provide('md-viewer', useMdViewerStore())
-//              ctx.Detail.add({ id: DETAIL_ID, component: MdViewerPanel, ... })
+
+// 服务外壳：装配期 Pinia 尚未安装（插件函数体先于 mountVueApp 执行），
+// getter 把 store 创建推迟到消费方首次解引用（须在挂载后）
+export type MdViewerStore = ReturnType<typeof useMdViewerStore>
+export interface MdViewerService { readonly store: MdViewerStore }
+export function createMdViewerService(): MdViewerService {
+  return { get store() { return useMdViewerStore() } }
+}
+
+// 插件函数体内：
+//   bindMdViewerShell(ctx)
+//   ctx.services.provide('md-viewer.store', createMdViewerService())
+//   ctx.Detail.add({ id: DETAIL_ID, component: MdViewerPanel, ... })
 ```
 
 ```vue
 <!-- 消费方：点击 handler 只有一行命令，不关心对方怎么渲染 -->
-<a @click.prevent="useService<ReturnType<typeof useMdViewerStore>>('md-viewer').open(file)">
+<a @click.prevent="useService<MdViewerService>('md-viewer.store').store.open(file)">
   {{ file.name }}
 </a>
 ```

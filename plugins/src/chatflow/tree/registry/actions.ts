@@ -74,7 +74,7 @@ const ACTION_TABLE: ActionTable = {
     { id: 'copy', label: '复制', icon: 'lucide:copy', when: n => n.finishReason === 'stop' },
     { id: 'speak', label: '朗读', icon: 'lucide:volume-2', when: n => n.finishReason === 'stop' },
     { id: 'download-md', label: '下载为 Markdown', icon: 'lucide:download', when: n => n.finishReason === 'stop' },
-    { id: 'save-project', label: '保存到项目', icon: 'lucide:link', when: n => n.finishReason === 'stop' },
+    { id: 'save-project', label: '保存到项目', icon: 'lucide:save', when: n => n.finishReason === 'stop' },
   ],
   // thinking：无操作（「复制」裸文字按钮冗余已删）
   thinking: [],

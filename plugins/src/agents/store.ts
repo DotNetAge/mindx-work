@@ -37,14 +37,36 @@ export class AgentExistsError extends Error {
   }
 }
 
-/** 员工展示名：role（中文角色名）优先，回退 name 标识符 */
+/**
+ * 员工展示名（统一显示规则）：昵称（nick_name，2-3 字外号）为主名，Role 作小字副题；
+ * 昵称缺失时回退 role，再回退 name 标识符。role 小字仅在昵称生效时展示（调用方
+ * 可用 agentRoleSubtitle 判断），避免「role 回退时主副重复」。
+ */
 export function agentDisplayName(a: AgentMeta): string {
-  return (typeof a.role === 'string' && a.role.trim()) || a.name
+  return (typeof a.nick_name === 'string' && a.nick_name.trim()) || (typeof a.role === 'string' && a.role.trim()) || a.name
 }
 
-/** 市场包展示名：role 优先，回退包名 */
+/** 员工副题小字（Role）：仅在昵称生效（主名不是 role）时返回，否则空串 */
+export function agentRoleSubtitle(a: AgentMeta): string {
+  const nick = typeof a.nick_name === 'string' ? a.nick_name.trim() : ''
+  if (!nick) return ''
+  return (typeof a.role === 'string' && a.role.trim()) || ''
+}
+
+/** 市场包展示名（统一显示规则同上）：昵称优先，回退 role，再回退包名 */
 export function marketPkgDisplayName(pkg: MarketAgentPackage): string {
-  return (typeof pkg.role === 'string' && pkg.role.trim()) || pkg.name
+  return (
+    (typeof pkg.nick_name === 'string' && pkg.nick_name.trim()) ||
+    (typeof pkg.role === 'string' && pkg.role.trim()) ||
+    pkg.name
+  )
+}
+
+/** 市场包副题小字（Role）：仅在昵称生效时返回，否则空串 */
+export function marketPkgRoleSubtitle(pkg: MarketAgentPackage): string {
+  const nick = typeof pkg.nick_name === 'string' ? pkg.nick_name.trim() : ''
+  if (!nick) return ''
+  return (typeof pkg.role === 'string' && pkg.role.trim()) || ''
 }
 
 /** 技能展示名：中文名（metadata.name_zh）优先，回退原名 */

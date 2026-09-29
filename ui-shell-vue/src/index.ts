@@ -27,3 +27,5 @@ export {
   type VuePlugin,
 } from './reactivity'
 export { default as MxIcon } from './MxIcon.vue'
+export { default as ToolbarIconButton } from './ToolbarIconButton.vue'
+export { default as CodeMirrorPane } from './components/CodeMirrorPane.vue'

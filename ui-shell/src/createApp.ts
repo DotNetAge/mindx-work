@@ -34,16 +34,35 @@ export interface AppShell<C> {
   /** 壳机制：Sidebar 折叠（壳唯一写） */
   readonly sidebarCollapsed: boolean
   toggleSidebar(): void
+  /** 壳机制：Sidebar Footer 固定区折叠（壳唯一写） */
+  readonly footerCollapsed: boolean
+  toggleFooter(): void
+  /** 壳机制：Content 中列收起（Detail 全屏让位，壳唯一写） */
+  readonly contentCollapsed: boolean
+  toggleContent(): void
   /** 生命周期：执行全部插件清理函数（热更 = 重执行插件前的准备） */
   dispose(): void
 }
 
 export function createApp<C>(plugins: readonly Plugin<C>[]): AppShell<C> {
   const hub = createChangeHub()
+  // 装配层接线（层模型激活链 Sidebar→Content→Detail）：Detail 先建，
+  // Content.onActivate 里做「展开才联动」——激活插件有 owner 归属的 Detail
+  // 层则切换（缺区回退：无则保持原内容）；轨道收起时不动、不自动弹出
+  const Detail = createDetailView<C>(hub)
+  const Content = createContentView<C>(hub, {
+    onActivate: (id) => {
+      if (!Detail.shown) return
+      const owned = Detail.entries
+        .filter((entry) => entry.owner === id)
+        .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))[0]
+      if (owned) Detail.setActiveTab(owned.id)
+    },
+  })
   const shell: AppShell<C> = {
     Sidebar: createSidebarView<C>(hub),
-    Content: createContentView<C>(hub),
-    Detail: createDetailView<C>(hub),
+    Content,
+    Detail,
     Overlay: createOverlayView<C>(hub),
     Toolbar: createToolbarView<C>(hub),
     Settings: createPreferences<C>(hub),
@@ -59,6 +78,20 @@ export function createApp<C>(plugins: readonly Plugin<C>[]): AppShell<C> {
       sidebarCollapsed = !sidebarCollapsed
       hub.bump()
     },
+    get footerCollapsed() {
+      return footerCollapsed
+    },
+    toggleFooter() {
+      footerCollapsed = !footerCollapsed
+      hub.bump()
+    },
+    get contentCollapsed() {
+      return contentCollapsed
+    },
+    toggleContent() {
+      contentCollapsed = !contentCollapsed
+      hub.bump()
+    },
     dispose() {
       // 逆序执行清理：后注册者先清理
       for (const cleanup of [...cleanups].reverse()) cleanup()
@@ -66,6 +99,27 @@ export function createApp<C>(plugins: readonly Plugin<C>[]): AppShell<C> {
     },
   }
   let sidebarCollapsed = false
+  let contentCollapsed = false
+  let footerCollapsed = false
+
+  // 全屏态守护：Content 收起（全屏让位）后 Detail 也收起，则整窗无内容区可看——
+  // Detail 收起动作（hide / popActiveTab 退无可退）联动恢复 Content（装配层接线，壳唯一写）
+  const detailHide = Detail.hide.bind(Detail)
+  const detailPop = Detail.popActiveTab.bind(Detail)
+  Detail.hide = () => {
+    detailHide()
+    if (!Detail.shown && contentCollapsed) {
+      contentCollapsed = false
+      hub.bump()
+    }
+  }
+  Detail.popActiveTab = () => {
+    detailPop()
+    if (!Detail.shown && contentCollapsed) {
+      contentCollapsed = false
+      hub.bump()
+    }
+  }
 
   // 启动装配：顺序执行插件清单，收集清理函数
   const cleanups: Array<() => void> = []
@@ -101,6 +155,22 @@ export function validateShellConstraints<C>(shell: AppShell<C>): void {
   for (const row of shell.Settings.rows) {
     if (row.page && !pageIds.has(row.page)) {
       throw new Error(`启动期校验失败：Preferences 行 "${row.id}" 指向不存在的页 "${row.page}"`)
+    }
+  }
+
+  // 层归属校验：owner 指向的 Content 条目必须存在（省略 = 全局层 / 独立唤起层）
+  for (const entry of shell.Toolbar.entries) {
+    if (entry.owner && !contentIds.has(entry.owner)) {
+      throw new Error(
+        `启动期校验失败：Toolbar 条目 "${entry.id}" 归属的 Content 条目 "${entry.owner}" 不存在`,
+      )
+    }
+  }
+  for (const entry of shell.Detail.entries) {
+    if (entry.owner && !contentIds.has(entry.owner)) {
+      throw new Error(
+        `启动期校验失败：Detail 条目 "${entry.id}" 归属的 Content 条目 "${entry.owner}" 不存在`,
+      )
     }
   }
 }

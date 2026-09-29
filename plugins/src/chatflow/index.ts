@@ -9,11 +9,28 @@
 import type { VuePlugin } from '@mindx-work/ui-shell-vue'
 import ChatFlowPage from './pages/ChatFlowPage.vue'
 import TasksSection from './sidebar/TasksSection.vue'
-import { CHATFLOW_HOME_ID, CHATFLOW_TASKS_SECTION_ID } from './ids'
+import ProductsPanel from './detail/ProductsPanel.vue'
+import ToolbarTrailing from './ToolbarTrailing.vue'
+import { CHATFLOW_HOME_ID, CHATFLOW_TASKS_SECTION_ID, PRODUCT_DETAIL_ID } from './ids'
+import { createChatflowService } from './store'
 
 export const chatflowPlugin: VuePlugin = (ctx) => {
   // Content：对话流页面（title 呈现于 Toolbar）
   ctx.Content.add({ id: CHATFLOW_HOME_ID, order: 100, title: '对话', component: ChatFlowPage })
+
+  // Detail：「产物」tab（order 106，概念框架 §6.1 三段：对话产物/技能/最近文件）。
+  // owner=对话条目：本插件的 Detail 层——激活对话时轨道联动切到本层（层模型激活链）
+  ctx.Detail.add({
+    id: PRODUCT_DETAIL_ID,
+    order: 106,
+    owner: CHATFLOW_HOME_ID,
+    title: '产物',
+    icon: 'lucide:package',
+    component: ProductsPanel,
+  })
+
+  // Toolbar 尾段：task 图标打开会话产物 tab
+  ctx.Toolbar.add({ id: 'chatflow-toolbar-products', slot: 'trailing', order: 102, component: ToolbarTrailing })
 
   // Sidebar：Tasks 节（分节组件席位，概念框架 §7.2）。
   // 全量分组制会话列表（按目录名）+「最近讨论」捷径区 + 行四要素
@@ -23,11 +40,20 @@ export const chatflowPlugin: VuePlugin = (ctx) => {
   ctx.Sidebar.add({
     id: CHATFLOW_TASKS_SECTION_ID,
     order: 100,
-    title: 'Tasks',
     icon: 'lucide:list-todo',
     component: TasksSection,
     rows: [],
   })
 
-  return () => {}
+  // services：chatflow store 延迟外壳（本 store 带 inject 依赖，首次实例化
+  // 必须由组件 setup 触发——装配期 Pinia 未安装，禁止此时创建；消费方为
+  // explorer 等详情轨道插件，读 currentProjectDir 跟随当前会话工作区）
+  ctx.services.provide('chatflow.store', createChatflowService())
+
+  // 停用清理：席位移除 + 收起 Detail 轨道（若正展示本 tab）
+  return () => {
+    if (ctx.Detail.activeTabId === PRODUCT_DETAIL_ID) ctx.Detail.hide()
+    ctx.Detail.remove(PRODUCT_DETAIL_ID)
+    ctx.Toolbar.remove('chatflow-toolbar-products')
+  }
 }

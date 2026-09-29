@@ -27,11 +27,29 @@ export type ContentEntry<C> = Entry<C> & {
 export type DetailEntry<C> = Entry<C> & {
   title: string
   icon?: Glyph
+  /** 层归属：指向 Content 条目 id——该插件激活时 Detail 轨道联动切换到此层；
+   * 省略 = 独立唤起层（无 Content 层的工具型插件，仅经 Detail.show 唤起） */
+  owner?: string
+  /** 是否呈现壳固有默认工具组（全屏/隐藏/关闭层退栈三按钮）：缺省 true，
+   * false 则该层激活时不渲染默认工具组（插件自带 DetailToolbar 按钮组时可关） */
+  defaultTools?: boolean
+  /** 声明式满宽提示：该条目被激活拉出轨道时，宽度默认取当前上限（用户仍可拖拽调窄）。
+   * 适合网页浏览 / 终端等宽内容层；缺省 false 取轨道缺省宽 */
+  openMax?: boolean
 }
 
 export type OverlayEntry<C> = Entry<C> & { kind: OverlayKind }
 
-export type ToolbarEntry<C> = Entry<C> & { slot: 'leading' | 'trailing' }
+export type ToolbarEntry<C> = Entry<C> & {
+  slot: 'leading' | 'trailing'
+  /** 层归属：指向 Content 条目 id——仅该条目激活时呈现（层模型，对齐 DetailToolbar）；
+   * 省略 = 全局层（壳级工具轨，恒显，如对话工作台的文件夹/浏览器/终端图标） */
+  owner?: string
+}
+
+/** DetailToolbar 尾段按钮组条目：owner 归属 Detail 条目——每条目一套，
+ * 仅归属条目激活时呈现（插件 A 的 Detail 显示 A 的按钮组，其它插件隐藏） */
+export type DetailToolbarEntry<C> = Entry<C> & { owner: string }
 
 export type PrefPageEntry<C> = Entry<C> & { title: string; icon?: Glyph }
 
@@ -62,7 +80,7 @@ export interface ContentViewApi<C> {
   readonly entries: readonly ContentEntry<C>[]
   /** 活动条目：壳唯一写，由 Sidebar 行点击切换；初始 = order 最小条目 */
   readonly activeId: string | null
-  /** 仅供壳的 Sidebar 行点击调用（壳唯一写） */
+  /** 仅供壳的 Sidebar 行点击调用（壳唯一写）；激活时触发 onActivate 传播（层模型激活链） */
   activate(id: string): void
 }
 
@@ -73,11 +91,19 @@ export interface DetailViewApi<C> {
   readonly entries: readonly DetailEntry<C>[]
   readonly shown: boolean
   readonly activeTabId: string | null
-  /** 编程开合，缺省激活首个 tab */
+  /** 编程开合，缺省激活首个 tab；激活即隐式切换（Detail 无 Tab 组件，用户不手动切换） */
   show(id?: string): void
   hide(): void
-  /** 仅供壳的 tab 点击调用 */
+  /** 编程式激活条目（隐式切换的唯一通道） */
   setActiveTab(id: string): void
+  /** 关闭当前层（层退栈）：退到激活历史上一不同条目并激活；无上一层则收起轨道 */
+  popActiveTab(): void
+  /** DetailToolbar 尾段席位：轨道头部行右侧按钮组（左 Title 自动呈现激活条目）。
+   * 按钮组按 owner 归属条目——每条目一套，非全轨道共用；对齐 Sidebar headers/footers 子席位先例 */
+  addToolbar(entry: DetailToolbarEntry<C>): void
+  removeToolbar(id: string): void
+  hasToolbar(id: string): boolean
+  readonly toolbarEntries: readonly DetailToolbarEntry<C>[]
 }
 
 export interface OverlayViewApi<C> {
@@ -145,7 +171,15 @@ export function createSidebarView<C>(hub: ChangeHub): SidebarViewApi<C> {
   }
 }
 
-export function createContentView<C>(hub: ChangeHub): ContentViewApi<C> {
+/** Content 激活传播钩子：createApp 装配层接线（层模型激活链 Sidebar→Content→Detail） */
+export interface ContentActivateHooks {
+  onActivate?(id: string): void
+}
+
+export function createContentView<C>(
+  hub: ChangeHub,
+  hooks?: ContentActivateHooks,
+): ContentViewApi<C> {
   const registry = createRegistry<ContentEntry<C>>(hub, 'Content')
   // null = 用户尚未选择：activeId 由 getter 动态回退到 order 最小条目（契约 §4），
   // 装配期不受注册顺序影响；activate 后固定为用户选择
@@ -171,6 +205,8 @@ export function createContentView<C>(hub: ChangeHub): ContentViewApi<C> {
         throw new Error(`Content 不存在条目：${id}`)
       }
       activeId = id
+      // 激活链传播：由装配层接向 Detail 联动（展开才联动规则，见 createApp）
+      hooks?.onActivate?.(id)
       hub.bump()
     },
   }
@@ -178,12 +214,27 @@ export function createContentView<C>(hub: ChangeHub): ContentViewApi<C> {
 
 export function createDetailView<C>(hub: ChangeHub): DetailViewApi<C> {
   const registry = createRegistry<DetailEntry<C>>(hub, 'Detail')
+  const toolbarRegistry = createRegistry<DetailToolbarEntry<C>>(hub, 'DetailToolbar')
   let shown = false
   let activeTabId: string | null = null
+  // 激活历史栈：show/setActiveTab 压入（栈顶去重），popActiveTab 据此层退栈
+  let activationStack: string[] = []
+  const pushStack = (id: string) => {
+    if (activationStack[activationStack.length - 1] !== id) {
+      activationStack.push(id)
+    }
+  }
   return {
     add: registry.add,
     remove: (id) => {
       registry.remove(id)
+      // 级联移除归属本条目的按钮组（每条目一套，条目移除后按钮组不存活）
+      const doomed = toolbarRegistry.entries.filter((btn) => btn.owner === id).map((btn) => btn.id)
+      for (const btnId of doomed) {
+        toolbarRegistry.remove(btnId)
+      }
+      // 级联清栈：被移除条目不得残留在激活历史里
+      activationStack = activationStack.filter((stacked) => stacked !== id)
       if (activeTabId === id) {
         activeTabId = registry.entries[0]?.id ?? null
       }
@@ -203,7 +254,13 @@ export function createDetailView<C>(hub: ChangeHub): DetailViewApi<C> {
       if (id && !registry.has(id)) {
         throw new Error(`Detail 不存在条目：${id}`)
       }
-      activeTabId = id ?? registry.entries[0]?.id ?? null
+      // 无参恢复：优先回到当前激活层（隐藏→恢复不跳层），当前层已不存在才回退首个条目
+      if (id) {
+        activeTabId = id
+      } else if (!activeTabId || !registry.has(activeTabId)) {
+        activeTabId = registry.entries[0]?.id ?? null
+      }
+      if (activeTabId) pushStack(activeTabId)
       shown = true
       hub.bump()
     },
@@ -216,7 +273,37 @@ export function createDetailView<C>(hub: ChangeHub): DetailViewApi<C> {
         throw new Error(`Detail 不存在条目：${id}`)
       }
       activeTabId = id
+      pushStack(id)
       hub.bump()
+    },
+    popActiveTab() {
+      // 退栈：弹出直至找到与当前激活不同的存活条目（栈顶即当前层，跳过）
+      while (activationStack.length > 0) {
+        const top = activationStack.pop()!
+        if (top !== activeTabId && registry.has(top)) {
+          activeTabId = top
+          hub.bump()
+          return
+        }
+      }
+      // 无上一层：退无可退则收起轨道（非删除条目，重新 show 即恢复）
+      shown = false
+      hub.bump()
+    },
+    addToolbar: (entry) => {
+      // 归属校验（对齐 Sidebar 行 → Content 条目的启动期暴露范式）：
+      // 同一插件内必须先 Detail.add 条目再 addToolbar 归属它的按钮组
+      if (!registry.has(entry.owner)) {
+        throw new Error(
+          `DetailToolbar 按钮组 "${entry.id}" 归属的 Detail 条目 "${entry.owner}" 不存在（先 Detail.add 再 addToolbar）`,
+        )
+      }
+      toolbarRegistry.add(entry)
+    },
+    removeToolbar: toolbarRegistry.remove,
+    hasToolbar: toolbarRegistry.has,
+    get toolbarEntries() {
+      return toolbarRegistry.entries
     },
   }
 }

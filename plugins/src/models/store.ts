@@ -358,7 +358,7 @@ export const useModelsStore = defineStore('models-store', () => {
     }
   }
 
-  /** 在线模型一键添加 */
+  /** 在线模型一键添加（enabled 必须显式传 true：daemon 侧 Go bool 零值为 false，缺字段即落盘「已停用」） */
   async function addOnlineModel(model: OnlineModelInfo): Promise<void> {
     await daemon.call<ModelConfig>('model.create', {
       name: model.id,
@@ -370,6 +370,7 @@ export const useModelsStore = defineStore('models-store', () => {
       visioning: model.visioning,
       cost_per_1m_in: model.cost_per_1m_in,
       cost_per_1m_out: model.cost_per_1m_out,
+      enabled: true,
     })
     await refresh()
   }

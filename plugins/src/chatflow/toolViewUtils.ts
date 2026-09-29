@@ -3,7 +3,7 @@
 // 源：mindx-desktop components/chat/toolViewUtils.ts。一期只平移 registry 消费的
 // 纯函数；二期 A 补齐节点视图消费的视图侧函数（结果解析 / diff 提取 / 文件链接注入）。
 
-import { ElMessage } from 'element-plus'
+import { useChatflowStore } from './store'
 
 /**
  * Agent 显示名：按 agent 英文名查已招募列表，优先返回角色中文名，
@@ -85,20 +85,27 @@ export function countUnifiedDiff(diff: string): { additions: number; deletions: 
   return { additions, deletions }
 }
 
-// ── 文件打开（work 适配：编辑器通道四期接线，先行提示占位） ──────────────────
+// ── 文件 / 链接打开（详情轨道路由：chatflow store openFile / openUrl）────────
 
 /**
- * 打开文件：desktop 版经 vscode 命令在编辑器打开；work 侧 monaco workbench 的
- * 文件打开通道尚未具备（无 vscode API 暴露先例，禁止猜测协议），二期 A 以提示占位，
- * 四期随数据层接线时接编辑器命令。
+ * 打开文件：路由到详情轨道对应插件（目录/explorer 定位、md/markdown 查看编辑、
+ * 图片查看；相对路径按当前会话工作区解析）。服务缺失时内部 toast 提示，不炸。
  */
 export async function tryOpenFile(filePath: string): Promise<void> {
   if (!filePath) return
-  ElMessage.info('文件打开通道待接入: ' + basename(filePath))
+  await useChatflowStore().openFile(filePath)
 }
 
 /** 点击正文链接时若指向本地文件，用文件编辑器打开（FormattedContent / UserMessageRow 共用） */
 export function handleContentClick(e: MouseEvent): void {
+  // 拦截普通网页链接 → web-viewer（消息内 URL 链接接管；服务缺失内部 toast）
+  const webLink = (e.target as HTMLElement).closest('a[href^="http://"], a[href^="https://"]')
+  if (webLink) {
+    e.preventDefault()
+    const href = (webLink as HTMLAnchorElement).getAttribute('href') || ''
+    if (href) useChatflowStore().openUrl(href)
+    return
+  }
   // 拦截 a[href^="/"]（绝对路径链接）和 a[href^="file://"]（file 协议）
   const linkTarget = (e.target as HTMLElement).closest('a[href^="/"], a[href^="file://"]')
   if (linkTarget) {

@@ -20,7 +20,8 @@
  *   ②输入优化 optimize.rpc（optimizeInput → store.optimizeText）；
  *   ③停止执行（busy 分支 → store.stopProcessing）；
  * - desktop 的 pendingInputText / pendingAppendRef 外部填入 watch 依赖 chatStore
- *   可写字段，随回退/「添加到对话」入口经 defineExpose 消费（fillText / fillAndSend）。
+ *   可写字段，随回退/「添加到对话」入口经 defineExpose 消费
+ *   （fillText / fillAndSend / appendFileRef，appendFileRef 即 explorer 引用 chip 追加）。
  *
  * 文案：work 无 vue-i18n，全部中文字面量（desktop zh.json 逐条查证，先例同 UserMessageRow）。
  * 样式：全量 --mx-* 语义 token（军规 3），desktop token 按移植计划附录 A 映射。
@@ -36,6 +37,7 @@ import ModelSelector from './ModelSelector.vue'
 import ContextUsageGauge from './ContextUsageGauge.vue'
 import WorkspacePicker from './WorkspacePicker.vue'
 import { FileRef } from './fileRefNode'
+import type { FileRefAttrs } from './fileRefNode'
 import { useChatflowStore } from '../store'
 import type { ModelInfo, ProviderInfo } from '../store'
 import type { ContextUsageInfo } from '../tree/types/content'
@@ -410,12 +412,25 @@ function fillAndSend(text: string) {
   sendMessage()
 }
 
+// ── 外部追加入口：文件引用 chip（explorer「添加到对话」；desktop pendingAppendRef
+// 消费链的 work 形态——经服务壳转发 defineExpose，非 watch 轮询）──
+function appendFileRef(refAttrs: FileRefAttrs): void {
+  if (!editor.value) return
+  if (!props.connected) {
+    ElMessage.warning('请先连接到 MindX 服务')
+    return
+  }
+  // 光标先落到文末再插入：insertContent 按当前选区落点，保证连续追加时 chip 依次排尾
+  editor.value.commands.focus('end')
+  editor.value.commands.insertFileRef(refAttrs)
+}
+
 /** 出站消息文本：编辑器纯文本序列化，fileRef chip 即其完整路径 */
 function composeOutgoingText(): string {
   return editor.value?.getText().trim() ?? ''
 }
 
-defineExpose({ fillText, fillAndSend })
+defineExpose({ fillText, fillAndSend, appendFileRef })
 </script>
 
 <template>
@@ -777,6 +792,21 @@ defineExpose({ fillText, fillAndSend })
   background-position: center center;
   background-size: 16px auto;
   text-align: center;
+}
+
+/* 图标兜底（work 无 vscode 文件图标主题 CSS，computeIconClasses 的 class 无消费者）：
+   lucide 线性 SVG 以 mask 渲染、currentColor 跟随前景——目录 folder-icon / 文件
+   file-icon（fileRefNode class 算法的兜底基类，name/ext 细分规则留待主题体系落位） */
+.message-input :deep(.file-ref-icon.folder-icon) {
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E") center / 14px auto no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E") center / 14px auto no-repeat;
+}
+
+.message-input :deep(.file-ref-icon.file-icon:not(.folder-icon)) {
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/%3E%3Cpath d='M14 2v4a2 2 0 0 0 2 2h4'/%3E%3C/svg%3E") center / 14px auto no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/%3E%3Cpath d='M14 2v4a2 2 0 0 0 2 2h4'/%3E%3C/svg%3E") center / 14px auto no-repeat;
 }
 
 /* ── 录音指示器 ── */

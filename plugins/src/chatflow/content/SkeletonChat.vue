@@ -102,7 +102,11 @@ const ROWS = 6
 }
 
 .skeleton-bubble--user {
-  border-radius: var(--mx-radius-card) 4px var(--mx-radius-card) var(--mx-radius-card);
+  /* 对齐 UserMessageRow 胶囊化：全圆角 + 同底色（右对齐随行） */
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--mx-text) 12%, transparent);
+  --el-skeleton-color: color-mix(in srgb, var(--mx-text) 16%, transparent);
+  --el-skeleton-to-color: color-mix(in srgb, var(--mx-text) 24%, transparent);
 }
 
 .skeleton-bubble--assistant {

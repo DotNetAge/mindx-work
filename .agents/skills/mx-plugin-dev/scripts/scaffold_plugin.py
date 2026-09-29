@@ -13,7 +13,7 @@ Agent 生成插件的最高频路径：选场景 → 生成 → 按需修改，�
     detail    Detail tab 注册 + 页面挂载时自动打开（区间联动）
     settings  配置项 + 通用配置行（壳自带"通用"页）+ 自定义配置页
     overlay   modal（互斥）与 banner（可堆叠）浮层，页面按钮触发
-    services  store 以服务形式 provide（跨插件共享）
+    services  store 以服务形式 provide（跨插件共享；延迟外壳规避装配期 Pinia 未安装）
 
 自动注册（锚点不匹配时跳过并提示手工步骤，绝不破坏既有文件）：
     1. plugins/package.json 的 exports 增加 "./<name>" 子路径
@@ -83,16 +83,58 @@ def main() -> None:
     else:
         store_return_extra = ""
 
+    # services 场景三件套：装配期 Pinia 尚未安装（插件函数体在 createApp 时执行，
+    # createPinia 在 mountVueApp 内才装）——store 经延迟外壳按需创建；store 内取壳
+    # 走 bind/theShell（shell.services.use 是内核方法，无 inject 依赖）。
+    store_shell_import = ""
+    store_shell_trio = ""
+    store_service_shell = ""
+    if "services" in scenarios:
+        store_shell_import = "import type { VueAppShell } from '@mindx-work/ui-shell-vue'\n"
+        store_shell_trio = f"""
+// ── 壳引用绑定（装配期一次；store 需要壳能力时经 theShell() 取用）────────────
+
+let shellRef: VueAppShell | null = null
+
+/** 插件函数体内绑定 AppShell 本体（装配期 Pinia 尚未安装，禁止在此创建 store） */
+export function bind{pascal}Shell(shell: VueAppShell): void {{
+  shellRef = shell
+}}
+
+/** 插件内非组件代码取壳（组件内请用 useShell()） */
+export function theShell(): VueAppShell {{
+  if (!shellRef) throw new Error('{kebab} 壳未绑定：插件装配缺失')
+  return shellRef
+}}
+"""
+        store_service_shell = f"""
+// ── 服务外壳（装配期 Pinia 尚未安装：getter 延迟到消费方首次解引用才创建 store）──
+
+export type {pascal}Store = ReturnType<typeof use{pascal}Store>
+
+export interface {pascal}Service {{
+  readonly store: {pascal}Store
+}}
+
+export function create{pascal}Service(): {pascal}Service {{
+  return {{
+    get store() {{
+      return use{pascal}Store()
+    }},
+  }}
+}}
+"""
+
     store_ts = f"""/** {kebab} 插件内部状态：一律 Pinia（界面层选型定稿） */
 
 import {{ computed, ref }} from 'vue'
 import {{ defineStore }} from 'pinia'
-
+{store_shell_import}
 interface Item {{
   id: number
   title: string
 }}
-
+{store_shell_trio}
 export const use{pascal}Store = defineStore('{kebab}-store', () => {{
   const items = ref<Item[]>([])
 {store_extra}  let nextId = 1
@@ -108,7 +150,7 @@ export const use{pascal}Store = defineStore('{kebab}-store', () => {{
 
   return {{ items{store_return_extra}, add, remove, count }}
 }})
-"""
+{store_service_shell}"""
 
     # HomePage script：detail 加 onMounted 自动打开；overlay 加浮层触发函数
     home_import_vue = "import { onMounted, ref } from 'vue'" if "detail" in scenarios else "import { ref } from 'vue'"
@@ -456,7 +498,10 @@ import {{ MxIcon }} from '@mindx-work/ui-shell-vue'
         index_imports.append("import PageRow from './prefs/PageRow.vue'")
     if "detail" in scenarios:
         index_imports.append("import DetailPanel from './DetailPanel.vue'")
-    index_imports.append(f"import {{ use{pascal}Store }} from './store'")
+    # store 导入仅 services 场景需要（其余场景 index.ts 不直接消费 store，
+    # HomePage / 行组件各自导入——避免生成未使用导入）
+    if "services" in scenarios:
+        index_imports.append(f"import {{ bind{pascal}Shell, create{pascal}Service }} from './store'")
 
     index_detail = ""
     if "detail" in scenarios:
@@ -484,12 +529,20 @@ import {{ MxIcon }} from '@mindx-work/ui-shell-vue'
   ctx.Settings.row({{ id: 'pref-{kebab}-page', page: '{kebab}-prefs', component: PageRow }})
 """
 
+    index_bind = ""
+    if "services" in scenarios:
+        index_bind = f"""
+  // 装配期捕获壳本体（store 顶部零 inject 依赖的关键；此时 Pinia 尚未安装，
+  // 插件函数体内禁止 use{pascal}Store()——装配时序坑详见 references/examples.md）
+  bind{pascal}Shell(ctx)
+"""
+
     index_services = ""
     if "services" in scenarios:
         index_services = f"""
-  // services：把 store 以服务形式提供（消费方 useService('{kebab}.data')，
-  // 通道里流动的是 Pinia store 响应式本体，不是快照副本）
-  ctx.services.provide('{kebab}.data', use{pascal}Store())
+  // services：store 延迟外壳（getter 在消费方首次解引用时才创建 store，首次
+  // 解引用须在挂载后；通道里流动的是 Pinia store 响应式本体，不是快照副本）
+  ctx.services.provide('{kebab}.store', create{pascal}Service())
 """
 
     scenario_note = (
@@ -503,7 +556,7 @@ import {{ MxIcon }} from '@mindx-work/ui-shell-vue'
 
 {chr(10).join(index_imports)}
 
-export const {plugin_fn}: VuePlugin = (ctx) => {{
+export const {plugin_fn}: VuePlugin = (ctx) => {{{index_bind}
   // Content：页面（条目 id 带插件前缀，避免跨插件撞 id）
   ctx.Content.add({{ id: '{kebab}-home', order: 100, title: '{kebab}', component: HomePage }})
 

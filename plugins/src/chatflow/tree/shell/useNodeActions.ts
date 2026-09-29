@@ -5,12 +5,14 @@
 //
 // mindx-work 适配（二期 A）：
 // - 纯前端能力（剪贴板 / 下载 / 外链）真实实现；
-// - 编辑器通道（打开文件 / reveal / diff 对照）与数据层（回滚 / 重跑 / 子会话路由 /
-//   用量报告 / 保存项目）依赖四期 store 与 daemon 接线，二期 A 以提示占位——
-//   work 无 vscode API 暴露先例，协议不猜，接线时按实际能力补齐。
+// - 编辑器通道（打开文件 / reveal）与数据层（重跑 / 子会话路由 / 用量报告 /
+//   保存项目）依赖四期 store 与 daemon 接线，二期 A 以提示占位——
+// - write/edit 的 diff 查看（Details「变更」面板定位）与回滚已接线：
+//   经 chatflow.store 的 diffFocusPath 通道 + session.rollback_files 动作。
 
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { extractDiff, parseToolResult } from '../../toolViewUtils'
+import { useShell } from '@mindx-work/ui-shell-vue'
+import { useChatflowStore } from '../../store'
 import type { NodeActionId } from '../registry/actions'
 import type { TreeNode } from '../types'
 import type { BashToolNode, EditToolNode, RunScriptToolNode, SkillToolNode, WriteToolNode } from '../types/tool'
@@ -37,6 +39,11 @@ function editorPending(feature: string, detail?: string): void {
  * 未知 id 静默忽略（registry 声明与分派的增量不同步时不出错）。
  */
 export function useNodeActions() {
+  // 联动通道：跳转 Details「变更」面板定位 diff（shell + store 均为 setup 期注入，
+  // 本 composable 仅在组件 setup 中调用——ChatRound / TreeNodeItem 两调用点已核实）
+  const shell = useShell()
+  const chatStore = useChatflowStore()
+
   const dispatch = async (node: TreeNode, id: NodeActionId): Promise<void> => {
     switch (id) {
       // ── 文件类（编辑器通道四期接线，二期 A 占位） ──
@@ -49,15 +56,37 @@ export function useNodeActions() {
       }
       case 'open-diff':
         if (node.type === 'tool.write' || node.type === 'tool.edit') {
-          // diff 文本已可从节点结果提取（extractDiff），仅缺编辑器对照通道
           const n = node as WriteToolNode | EditToolNode
-          editorPending('diff 对照', extractDiff(parseToolResult(n.outputTail || '')) ? undefined : n.filePath)
+          // 跳转 Details「变更」面板并定位该文件（store.diffFocusPath 通道，
+          // DiffPanel watch 消费；面板未注册时 Detail.show 静默，无副作用）
+          chatStore.diffFocusPath = n.filePath
+          shell.Detail.show('diff-detail')
         }
         break
       case 'rollback':
         if (node.type === 'tool.write' || node.type === 'tool.edit') {
-          // 依赖 daemon.connection 的文件回滚 RPC（四期随数据层接线）
-          editorPending('回滚', (node as WriteToolNode | EditToolNode).filePath)
+          const n = node as WriteToolNode | EditToolNode
+          // 回滚该文件（session.rollback_files，破坏性操作确认弹窗）
+          try {
+            await ElMessageBox.confirm(
+              `将「${n.filePath.split('/').pop() || n.filePath}」回滚到修改前内容，修改将丢失且不可恢复。`,
+              '回滚文件',
+              {
+                confirmButtonText: '回滚',
+                cancelButtonText: '取消',
+                type: 'warning',
+                confirmButtonClass: 'el-button--danger',
+              },
+            )
+          } catch {
+            break
+          }
+          try {
+            await chatStore.rollbackSessionFiles(chatStore.activeSessionId, [n.filePath])
+            ElMessage({ message: '已回滚', type: 'success', duration: 2000 })
+          } catch {
+            ElMessage({ message: '回滚失败', type: 'error', duration: 2000 })
+          }
         }
         break
       case 'reveal':

@@ -26,6 +26,16 @@
   --mx-terminal-fg: var(--vscode-terminal-foreground, #c9d1d9);
   --mx-terminal-cursor: var(--vscode-terminalCursor-foreground, #58a6ff);
 
+  /* 编辑器语法高亮（CodeMirror 共享内核）：亮套为缺省，暗套在 data-mx-theme
+     覆盖段换值；HighlightStyle 全部 var() 消费，自动跟随主题 */
+  --mx-cm-keyword: #7c4dbe;                  /* 关键字：紫 */
+  --mx-cm-string: #2e7d32;                   /* 字符串：绿 */
+  --mx-cm-comment: #8a8f98;                  /* 注释：中性灰 */
+  --mx-cm-number: #b26a00;                   /* 数字/布尔：橙棕 */
+  --mx-cm-heading: #1f2328;                  /* markdown 标题 */
+  --mx-cm-link: #0a6ddb;                     /* 链接 */
+  --mx-cm-meta: #6b7280;                     /* 元信息：中灰 */
+
   /* 颜色语义 token（亮色 = DSH design-platform 亮色别名） */
   --mx-bg-window: rgb(255, 255, 255);        /* bg-base: neutral-bluish-00 */
   --mx-bg-surface: rgb(249, 250, 251);       /* sidebar-fill: neutral-bluish-50 */
@@ -152,6 +162,14 @@
   --mx-active: rgba(255, 255, 255, 0.14);
   --mx-hover-solid: rgb(53, 54, 56);         /* neutral-bluish-800 */
   --mx-btn-elevated: rgb(67, 69, 74);        /* button-elevated-fill: neutral-bluish-750 */
+
+  --mx-cm-keyword: #c792ea;                  /* 关键字：紫 */
+  --mx-cm-string: #a5d6a7;                   /* 字符串：绿 */
+  --mx-cm-comment: #7d8590;                  /* 注释：中性灰 */
+  --mx-cm-number: #ffab70;                   /* 数字/布尔：橙 */
+  --mx-cm-heading: #e6edf3;                  /* markdown 标题 */
+  --mx-cm-link: #58a6ff;                     /* 链接 */
+  --mx-cm-meta: #9ca3af;                     /* 元信息：中灰 */
 }
 
 /* 全局底座 */

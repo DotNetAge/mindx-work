@@ -25,9 +25,10 @@
  * 技能·员工热重载广播（agents_changed / skills_changed）不属对话流数据面，不订阅。
  */
 
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { useService } from '@mindx-work/ui-shell-vue'
+import { ElMessage } from 'element-plus'
+import { useService, useShell } from '@mindx-work/ui-shell-vue'
 import type { ChatMessage, ChatRound, SessionMessage } from './model/message'
 import { classifyHttpError } from './model/message'
 import { extFromMime, mimeFromPath } from './imageUtils'
@@ -180,6 +181,8 @@ export function buildRounds(messages: ChatMessage[]): ChatRound[] {
 export const useChatflowStore = defineStore('chatflow-store', () => {
   // 服务本体在 store 初始化时捕获（首次 useChatflowStore 由组件 setup 触发，inject 有效）
   const daemon = useService<DaemonConnection>(DAEMON_CONNECTION)
+  // 壳本体同步捕获（同上时机；供 action 内按需 services.use 消费详情轨道四插件）
+  const shell = useShell()
 
   // ---------- 会话列表（Tasks 数据源）----------
   /** 全量会话列表（session.list 无参，daemon 按 LastActivityAt 倒序返回；Tasks 按目录名分组） */
@@ -213,6 +216,48 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
   /** 会话级「本轮已结束」标记：loop_end(termination_reason=completed) 置 true，
    *  发送新消息时重置——配合 finish_reason=stop 驱动轮收拢（RoundInput.isFinal） */
   const sessionLoopEnded = reactive<Record<string, boolean>>({})
+
+  // ---------- 跨端运行态对齐（session.statuses 轮询） ----------
+  // 事件按发起客户端单播：其它端（TUI 等）跑起来的执行，本端收不到在途事件，
+  // 侧栏运行指示（头像呼吸）与 ChatInput 停止态只能靠轮询 daemon 拉取对齐。
+
+  /** 上一轮 daemon 报告的运行中会话：仅对「报告过又消失」的会话熄灭，
+   *  本端本地自置的 busy（sendMessage 在途窗口）不被轮询误清 */
+  const lastRunningReport = new Set<string>()
+
+  /** 拉取 daemon 运行中会话清单并对齐 busySessions（主会话队列 + 子代理登记） */
+  async function refreshRunningSessions(): Promise<void> {
+    try {
+      const list = await daemon.call<{ session_id: string; kind: string }[]>('session.statuses', {})
+      const running = new Set((list || []).map((s) => s.session_id))
+      for (const sid of running) busySessions[sid] = true
+      for (const sid of lastRunningReport) {
+        if (!running.has(sid) && busySessions[sid]) delete busySessions[sid]
+      }
+      lastRunningReport.clear()
+      for (const sid of running) lastRunningReport.add(sid)
+    } catch {
+      // 旧版 daemon 无此方法 / 连接断开：静默跳过，等下一轮轮询
+    }
+  }
+
+  // 连接建立即对齐一次并启动 5s 周期轮询；断开停止（重连后 immediate 再对齐）
+  let runningPollTimer: ReturnType<typeof setInterval> | null = null
+  watch(
+    isConnected,
+    (connected) => {
+      if (connected) {
+        void refreshRunningSessions()
+        if (!runningPollTimer) {
+          runningPollTimer = setInterval(() => void refreshRunningSessions(), 5000)
+        }
+      } else if (runningPollTimer) {
+        clearInterval(runningPollTimer)
+        runningPollTimer = null
+      }
+    },
+    { immediate: true },
+  )
 
   // ---------- 未读标记（Tasks 行四要素之一）----------
   /** 后台会话终态事件计数（轮完成 / 错误 / 轮数上限）；打开会话即清零。
@@ -398,8 +443,12 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
       // 工作目录/Agent 随 switchToSession 就位，发送链路立即可用）。仅缺活动会话
       // 时触发，不抢占已打开会话，也不影响手动「新会话」的 hero 态。
       if (!activeSessionId.value && sessions.value.length > 0) {
+        // 无工作目录的会话不可用（发送链路必卡「请先选择工作区」，explorer 详情轨道无根
+        // 永远停在「正在定位工作目录」）：自动激活只在有目录的会话里选最近；
+        // 全部无目录则保持 hero 态，等用户经工作区选择 chip 显式就位
         let latest: Session | null = null
         for (const s of sessions.value) {
+          if (!s.project_dir) continue
           if (!latest || s.updated_at > latest.updated_at) latest = s
         }
         if (latest) void switchToSession(latest.session_id)
@@ -471,7 +520,12 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     delete unreadBySession[sessionId]
 
     const session = sessions.value.find((s) => s.session_id === sessionId)
-    if (session?.agent_name) currentAgent.value = session.agent_name
+    if (session?.agent_name) {
+      currentAgent.value = session.agent_name
+      // 历史恢复无实时事件登记：以会话归属 Agent 回填执行 Agent 表，
+      // 驱动轮头「Agent 行」显示真实头像与昵称（否则回退 'A Agent' 兜底）
+      sessionCurrentAgentName[sessionId] = session.agent_name
+    }
     if (session?.project_dir) currentProjectDir.value = session.project_dir
 
     // 重置上下文用量并拉取新会话的窗口用量（避免残留上一会话数据）
@@ -1368,6 +1422,46 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     } catch (err) {
       console.warn('[ChatFlow] last_model 持久化失败:', err)
     }
+    // 切换后立即刷新活动会话的上下文用量：分母（max_window_size）随当前模型变化，
+    // 而 context_usage 事件仅在轮次结束时推送——不主动拉取，指示器会一直显示
+    // 旧模型的窗口分母（2026-09-28 实证：1M 模型切过来仍显示 204.8K/129%）
+    await refreshContextUsage()
+  }
+
+  /**
+   * 拉取活动会话的上下文用量（session.context：daemon 经 modelContextResolver
+   * 动态查询当前默认模型的窗口大小）。无活动会话静默跳过；失败仅告警不抛出
+   * （指示器下一次轮次结束的事件仍会纠偏）。
+   */
+  async function refreshContextUsage(): Promise<void> {
+    const sid = activeSessionId.value
+    if (!sid) return
+    try {
+      const usage = await daemon.call<{
+        session_id: string
+        window_tokens: number
+        max_window_size: number
+        usage_ratio: number
+        message_count: number
+        cursor: number
+        active_message_count: number
+        total_actual_tokens: number
+        total_cost: number
+      }>('session.context', { session_id: sid })
+      if (sid !== activeSessionId.value) return // 会话已切走，过期响应丢弃
+      contextUsage.value = {
+        window_tokens: usage.window_tokens ?? 0,
+        max_window_size: usage.max_window_size ?? 0,
+        usage_ratio: usage.usage_ratio ?? 0,
+        message_count: usage.message_count ?? 0,
+        cursor: usage.cursor ?? 0,
+        active_message_count: usage.active_message_count ?? 0,
+        total_actual_tokens: usage.total_actual_tokens ?? 0,
+        total_cost: usage.total_cost ?? 0,
+      }
+    } catch (err) {
+      console.warn('[ChatFlow] 上下文用量刷新失败:', err)
+    }
   }
 
   /**
@@ -1412,6 +1506,18 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     await daemon.call('session.rename', { session_id: sessionId, title })
     const target = sessions.value.find((s) => s.session_id === sessionId)
     if (target) target.title = title
+  }
+
+  /**
+   * 删除会话（session.delete）：本地清单同步移除；删的是当前会话时清空对话流
+   * 回到新会话态（保留目录与 Agent，会话懒建于首条消息发送时）
+   */
+  async function deleteSession(sessionId: string): Promise<void> {
+    await daemon.call('session.delete', { session_id: sessionId })
+    sessions.value = sessions.value.filter((s) => s.session_id !== sessionId)
+    if (activeSessionId.value === sessionId) {
+      clearActiveStream()
+    }
   }
 
   // ---------- 上下文用量 ----------
@@ -1541,20 +1647,21 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     if (sid && typeof ts === 'number' && ts > 0) patchLastUserMessageTimestamp(sid, ts)
   })
 
-  // message_queued：消息已进入会话串行队列（上一轮 CollectResults 等长耗时工具仍在运行）
+  // message_queued：消息已进入会话串行队列（上一轮 CollectResults 等长耗时工具仍在运行）。
+  // busySessions 不限激活会话：后台会话（含其它端发起）也要点亮侧栏运行指示
   onEvent('message_queued', (envelope) => {
     const sid = targetSessionOf(envelope)
-    if (sid && sid !== activeSessionId.value) return
-    isQueued.value = true
     if (sid) busySessions[sid] = true
+    if (sid !== activeSessionId.value) return
+    isQueued.value = true
   })
 
-  // message_processing：排队中的消息已开始执行
+  // message_processing：排队中的消息已开始执行（同上：busy 全局点亮，激活态字段仅活动会话）
   onEvent('message_processing', (envelope) => {
     const sid = targetSessionOf(envelope)
-    if (sid && sid !== activeSessionId.value) return
-    isQueued.value = false
     if (sid) busySessions[sid] = true
+    if (sid !== activeSessionId.value) return
+    isQueued.value = false
   })
 
   // thinking_delta：按会话累积增量写入（子会话事件写子会话自己的消息流）
@@ -1940,6 +2047,9 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     // 登记 sponsor：子会话授权/提问回答的魔术词据此发往主会话路由
     if (sessionId) subSessionSponsor[subSessionId] = sessionId
 
+    // 子会话进入运行态：侧栏点亮（轮询兜底通道之外的事件级实时点亮）
+    if (subSessionId) busySessions[subSessionId] = true
+
     // 本地持久化：会话快照被压缩窗口清掉 SubAgent 调用后，重载据此补齐卡片
     persistSubtaskSpawn(sessionId, {
       session_id: subSessionId,
@@ -1962,6 +2072,8 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     // 完成事件写入子会话自己的消息流（单一数据源，观察窗从子会话流尾部检测状态）
     // sponsor 优先取 spawn 时的内存映射；刷新后回退用事件所属会话
     const sponsorSessionId = subSessionSponsor[data?.session_id] || sessionId
+    // 子会话退出运行态：侧栏熄灭（daemon sponsored 登记已随 spawn 结束清理）
+    if (data?.session_id) delete busySessions[data.session_id]
     if (sponsorSessionId && data?.session_id) {
       persistSubtaskCompletion(sponsorSessionId, {
         session_id: data.session_id,
@@ -2272,6 +2384,29 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     }
   }
 
+  // ---------- 文件变更确认 / 回滚（diffview 面板与对话流联动共用入口） ----------
+
+  /** diff 面板联动焦点：对话流（Write/Edit 名片 / 轮 footer 文件行）跳转面板时
+   *  写入目标文件路径，DiffPanel watch 消费（选中并清空）——跨插件定位通道 */
+  const diffFocusPath = ref('')
+
+  /**
+   * 确认待确认文件（RPC session.confirm_files，files 为路径数组）：
+   * daemon 报错整体不动，成功后逐路径移出待确认列表并持久化
+   */
+  async function confirmSessionFiles(sessionId: string, paths: string[]): Promise<void> {
+    if (!sessionId || paths.length === 0) return
+    await daemon.call('session.confirm_files', { session_id: sessionId, files: paths })
+    for (const p of paths) removePendingFile(sessionId, p)
+  }
+
+  /** 回滚待确认文件（RPC session.rollback_files 恢复到修改前内容），成功后移出列表 */
+  async function rollbackSessionFiles(sessionId: string, paths: string[]): Promise<void> {
+    if (!sessionId || paths.length === 0) return
+    await daemon.call('session.rollback_files', { session_id: sessionId, files: paths })
+    for (const p of paths) removePendingFile(sessionId, p)
+  }
+
   // ---------- 打开工作目录（跨 Agent 最近活跃会话）----------
 
   /**
@@ -2305,6 +2440,149 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     void loadSessions()
   }
 
+  // ---------- 打开文件 / 网页（详情轨道四插件路由）----------
+
+  /** markdown 扩展名（explorer 面板同判据） */
+  const MARKDOWN_EXTS = new Set(['md', 'markdown'])
+  /** 常见图片扩展名 */
+  const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
+
+  /** 代码文件扩展名（codeeditor 承接，CodeMirror 按扩展名语法高亮） */
+  const CODE_EXTS = new Set([
+    'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
+    'go', 'py', 'rs', 'java', 'kt', 'swift', 'dart', 'rb', 'php', 'lua',
+    'c', 'h', 'cpp', 'hpp', 'cc', 'cxx', 'm', 'mm',
+    'css', 'scss', 'sass', 'less', 'html', 'htm', 'vue', 'svelte',
+    'json', 'yml', 'yaml', 'toml', 'xml', 'sql',
+    'sh', 'bash', 'zsh', 'bat', 'ps1',
+  ])
+
+  /** 剥离 grep 命中行传入的 `:行号`（或 `:起-止`）尾巴 */
+  function stripLineSuffix(p: string): string {
+    return p.replace(/:\d+(-\d+)?$/, '')
+  }
+
+  function extOf(path: string): string {
+    const base = path.split('/').pop() || path
+    const dot = base.lastIndexOf('.')
+    return dot > 0 ? base.slice(dot + 1).toLowerCase() : ''
+  }
+
+  /**
+   * 相对路径候选解析：绝对路径直用；`~/` 前缀换主目录；其余相对路径按
+   * 当前会话工作区拼接。逐候选 fs.stat 探测，命中即用；全部落空返回 null。
+   */
+  async function resolvePath(raw: string): Promise<string | null> {
+    const p = raw.trim()
+    if (!p) return null
+    if (p.startsWith('/')) return p
+    const candidates: string[] = []
+    if (p.startsWith('~/')) {
+      try {
+        const home = await daemon.call<{ path: string }>('fs.home')
+        candidates.push(`${home.path.replace(/\/+$/, '')}/${p.slice(2)}`)
+      } catch {
+        // 主目录取不到则跳过该候选
+      }
+    } else {
+      const dir = currentProjectDir.value.replace(/\/+$/, '')
+      if (dir) candidates.push(`${dir}/${p}`)
+    }
+    for (const candidate of candidates) {
+      try {
+        await daemon.call('fs.stat', { path: candidate })
+        return candidate
+      } catch {
+        // 候选不存在，继续探测
+      }
+    }
+    return null
+  }
+
+  /**
+   * 按名取详情轨道插件服务（store action 非组件上下文，不能 useService——
+   * 此处用 store 初始化捕获的壳本体；对方 store 外壳解引用无 inject 依赖，安全；
+   * 服务缺失（插件停用）返回 null 由调用方 toast，不炸）。
+   */
+  function serviceOf<T>(name: string): T | null {
+    try {
+      return shell.services.use<T>(name)
+    } catch {
+      return null
+    }
+  }
+
+  interface OpenerService {
+    readonly store: { open(path: string): Promise<void> | void }
+  }
+
+  /**
+   * 打开文件到详情轨道：目录 → explorer 定位；md/markdown → markdown；
+   * 图片扩展 → image-viewer；其余文件 → explorer 定位（父目录 + 高亮）。
+   */
+  async function openFile(rawPath: string): Promise<void> {
+    const target = stripLineSuffix(rawPath.trim())
+    if (!target) return
+    const resolved = await resolvePath(target)
+    if (!resolved) {
+      ElMessage.warning(`文件不存在或不可访问：${target}`)
+      return
+    }
+    let isDir = false
+    try {
+      const st = await daemon.call<{ is_dir: boolean }>('fs.stat', { path: resolved })
+      isDir = st.is_dir
+    } catch {
+      // 探测失败按文件处理（扩展名路由兜底）
+    }
+    const ext = extOf(resolved)
+    if (!isDir && MARKDOWN_EXTS.has(ext)) {
+      const svc = serviceOf<OpenerService>('markdown.store')
+      if (svc) {
+        await svc.store.open(resolved)
+        return
+      }
+      ElMessage.warning('Markdown 查看器未启用')
+      return
+    }
+    if (!isDir && IMAGE_EXTS.has(ext)) {
+      const svc = serviceOf<OpenerService>('image-viewer.store')
+      if (svc) {
+        await svc.store.open(resolved)
+        return
+      }
+      ElMessage.warning('图片查看器未启用')
+      return
+    }
+    if (!isDir && CODE_EXTS.has(ext)) {
+      const svc = serviceOf<OpenerService>('codeeditor.store')
+      if (svc) {
+        await svc.store.open(resolved)
+        return
+      }
+      ElMessage.warning('代码编辑器未启用')
+      return
+    }
+    const svc = serviceOf<OpenerService>('explorer.store')
+    if (svc) {
+      await svc.store.open(resolved)
+      return
+    }
+    ElMessage.warning('文件浏览器未启用')
+  }
+
+  /** 打开网页到 web-viewer（同 URL 已开则聚焦；服务缺失 toast 不炸） */
+  function openUrl(rawUrl: string): void {
+    const url = rawUrl.trim()
+    if (!url) return
+    const svc = serviceOf<{ readonly store: { open(url: string): void } }>('web-viewer.store')
+    if (svc) {
+      svc.store.open(url)
+      return
+    }
+    ElMessage.warning('网页查看器未启用')
+  }
+
   return {
     // 会话列表
     sessions,
@@ -2316,6 +2594,9 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     chooseWorkspace,
     loadSessions,
     openLatestByDir,
+    // 文件 / 网页打开路由
+    openFile,
+    openUrl,
     // 活动会话与消息流
     activeSessionId,
     activeSession,
@@ -2350,6 +2631,7 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     retryFromError,
     deleteRound,
     renameSession,
+    deleteSession,
     // 图片与输入辅助
     uploadImageToSessionTmp,
     loadImageAsDataUrl,
@@ -2362,6 +2644,9 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     pendingFileModificationsBySession,
     removePendingFile,
     clearPendingFiles,
+    confirmSessionFiles,
+    rollbackSessionFiles,
+    diffFocusPath,
     // 模型列表与切换
     models,
     rawProviders,
@@ -2380,3 +2665,51 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     answerSubagentAsk,
   }
 })
+
+// ── 服务外壳（契约 §10：provide 的是 Pinia store 响应式本体）─────────────────
+// 本 store 带 inject 依赖（daemon/壳捕获），首次实例化必须由组件 setup 触发；
+// 装配期 Pinia 尚未安装（mountVueApp 内才 createPinia），故 provide 延迟外壳，
+// 消费方（explorer DetailPanel 等组件上下文）首次解引用 .store 时才创建。
+
+export type ChatflowStore = ReturnType<typeof useChatflowStore>
+
+// ── 输入框外部追加入口（explorer「添加到对话」跨插件通道）────────────────────
+// ChatFlowPage 挂载时登记 ChatInput 的 appendFileRef（defineExpose），服务壳转发；
+// 未登记（对话页未挂载）时 appendFileRef 返回 false，由调用方提示。
+
+/** 外部追加的文件引用（chip 数据：路径 + 目录标记） */
+export interface FileRefInput {
+  /** 完整绝对路径 */
+  path: string
+  /** 是否目录（决定引用 chip 的文件夹/文件图标） */
+  isDir?: boolean
+}
+
+type AppendFileRefHandler = (ref: FileRefInput) => void
+
+let appendFileRefHandler: AppendFileRefHandler | null = null
+
+/** ChatFlowPage 挂载期登记输入框追加函数，卸载时注销（传 null） */
+export function registerAppendFileRefHandler(fn: AppendFileRefHandler | null): void {
+  appendFileRefHandler = fn
+}
+
+export interface ChatflowService {
+  /** store 响应式本体（Pinia 缓存实例，重复解引用同一份） */
+  readonly store: ChatflowStore
+  /** 追加文件引用 chip 进输入框（explorer「添加到对话」）；对话页未挂载返回 false */
+  appendFileRef(ref: FileRefInput): boolean
+}
+
+export function createChatflowService(): ChatflowService {
+  return {
+    get store() {
+      return useChatflowStore()
+    },
+    appendFileRef(ref) {
+      if (!appendFileRefHandler) return false
+      appendFileRefHandler(ref)
+      return true
+    },
+  }
+}

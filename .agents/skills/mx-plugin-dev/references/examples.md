@@ -63,10 +63,12 @@ python3 ../.skills/mx-plugin-dev/scripts/scaffold_plugin.py my-plugin --with det
 
 ## services——跨插件共享与响应
 
-在 basic 上追加：`ctx.services.provide('<name>.data', use<Name>Store())`。
+在 basic 上追加：`bind<Name>Shell(ctx)` + `ctx.services.provide('<name>.store', create<Name>Service())`（延迟外壳三件套由 scaffold 生成，通道名用 `<name>.store`）。
 
+- **装配时序坑（实证）**：插件函数体在 `createApp([...])` 时执行，`createPinia()` 在 `mountVueApp` 内才安装——插件函数体内 `use<Name>Store()` 必炸（无 activePinia）。因此装配期 provide 一律走**延迟外壳**：`create<Name>Service()` 返回 `{ get store() { return use<Name>Store() } }`，store 创建推迟到消费方首次解引用（须在挂载后）。禁止在插件函数体、provide 调用里直接创建 store。
+- **service store 内取壳**：以服务提供的 store 首次创建可能发生在非 setup 上下文（消费方 store 的 action 经 service 解引用触发），此时 store 函数体内 `useService` / `useShell` 会抛"壳上下文缺失"——走 bind/theShell：插件函数体 `bind<Name>Shell(ctx)` 捕获壳本体，store 内 `theShell()` 取用；`shell.services.use()` 是内核方法、无 inject 依赖，拿到壳后随处可调（实证：markdown / explorer / image-viewer / web-viewer 四插件）。
 - **添加**两个可行时机：插件函数体内（`ctx` 就是 AppShell）或装配方 `app/src/main.ts`（实证：`shell.services.provide('shell.theme', createThemeController())`，在 `mountVueApp` 之前）。重复 provide 抛错。
-- **消费**：组件内 `useService<T>('<name>.data')`（实证：`ThemeRow.vue` 消费 `shell.theme`）。通道里流动的是 **Pinia store 响应式本体**，不是快照副本——消费端读到的就是提供方那份数据，改它全局生效。
+- **消费**：组件内 `useService<T>('<name>.store').store`（实证：`ThemeRow.vue` 消费 `shell.theme`）。通道里流动的是 **Pinia store 响应式本体**，不是快照副本——消费端读到的就是提供方那份数据，改它全局生效。
 - 语义（`services.ts` 实证）：`use` 未提供时抛错——依赖缺失在启动期暴露；时序上 provide 都发生在组件渲染之前。
 - **响应（联动）**：在共享之上加跨插件动作时只有两种形态——命令调用（调对方 store 的 action）与状态订阅（各方 watch 同一份状态）；瞬时事件物化为状态迁移。选型规则、职责边界与完整范式（"点击文件链接 → 另一插件 Markdown 显示到 Detail"）读 [contract.md](./contract.md) §10.1–10.3，此处不重复。
 

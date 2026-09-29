@@ -90,6 +90,16 @@ export interface MxDesktopBridge {
     /** 选择技能分发包（.mindpkg）；取消返回 null */
     openMindpkg(): Promise<string | null>
   }
+  terminal: {
+    /** 创建 pty 会话（cwd 空串回退主进程 homedir）；返回会话 id，失败返回 null */
+    create(cwd: string, cols: number, rows: number): Promise<string | null>
+    write(id: string, data: string): Promise<boolean>
+    resize(id: string, cols: number, rows: number): Promise<boolean>
+    kill(id: string): Promise<boolean>
+    /** 订阅输出回推；返回退订函数 */
+    onData(listener: (payload: { id: string; data: string }) => void): () => void
+    onExit(listener: (payload: { id: string }) => void): () => void
+  }
   plugins: {
     list(): Promise<InstalledPluginView[] | null>
     installFromFile(): Promise<PluginInstallResult>

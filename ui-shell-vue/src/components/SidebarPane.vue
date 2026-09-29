@@ -25,12 +25,16 @@ const data = useShellData(() => ({
   footers: shell.Sidebar.footers,
   activeId: shell.Content.activeId,
   collapsed: shell.sidebarCollapsed,
+  footerCollapsed: shell.footerCollapsed,
 }))
 
 const width = ref(WIDTH_DEFAULT)
 const dragging = ref(false)
 
-/** 指针拖拽调宽：捕获指针后全程跟随，clamp 到边界（折叠态禁用） */
+const emit = defineEmits<{ resize: [width: number] }>()
+
+/** 指针拖拽调宽：捕获指针后全程跟随，clamp 到边界（折叠态禁用）；
+ * 宽度上抛 AppFrame（几何归壳：Detail 平分约束需感知侧栏宽） */
 function onResizeStart(event: PointerEvent) {
   if (data.value.collapsed) return
   dragging.value = true
@@ -40,6 +44,7 @@ function onResizeStart(event: PointerEvent) {
   target.setPointerCapture(event.pointerId)
   const onMove = (e: PointerEvent) => {
     width.value = Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, startWidth + e.clientX - startX))
+    emit('resize', width.value)
   }
   const onUp = () => {
     dragging.value = false
@@ -101,14 +106,32 @@ function onResizeStart(event: PointerEvent) {
         </button>
       </template>
     </nav>
-    <!-- Footer 固定区：固定操作行，不随内容滚动（DSH footArea 模式：占位者自带几何） -->
+    <!-- Footer 固定区：顶部折叠行 + 固定操作行（不随内容滚动；折叠为壳机制状态） -->
     <div v-if="data.footers.length" :class="$style.footer">
-      <component
-        :is="footer.component"
-        v-for="footer in data.footers"
-        :key="footer.id"
-        :compact="data.collapsed"
-      />
+      <button
+        type="button"
+        :class="$style.footerToggle"
+        :aria-expanded="data.footerCollapsed ? 'false' : 'true'"
+        :title="data.collapsed ? (data.footerCollapsed ? '展开' : '收起') : undefined"
+        @click="shell.toggleFooter()"
+      >
+        <MxIcon
+          :name="data.footerCollapsed ? 'lucide:chevron-up' : 'lucide:chevron-down'"
+          :size="data.collapsed ? 20 : 16"
+        />
+        <span v-if="!data.collapsed">{{ data.footerCollapsed ? '展开' : '收起' }}</span>
+      </button>
+      <!-- grid 0fr→1fr 行高过渡：折叠平滑收拢，visibility 延迟隐藏保焦点不可达 -->
+      <div :class="$style.footerBody" :data-collapsed="data.footerCollapsed ? 'true' : 'false'">
+        <div :class="$style.footerClip">
+          <component
+            :is="footer.component"
+            v-for="footer in data.footers"
+            :key="footer.id"
+            :compact="data.collapsed"
+          />
+        </div>
+      </div>
     </div>
     <!-- 右缘拖拽手柄：悬停时显示分隔高亮，双击重置 -->
     <div
@@ -116,7 +139,7 @@ function onResizeStart(event: PointerEvent) {
       :class="$style.resizer"
       title="拖拽调节宽度，双击重置"
       @pointerdown="onResizeStart"
-      @dblclick="width = WIDTH_DEFAULT"
+      @dblclick="((width = WIDTH_DEFAULT), emit('resize', width))"
     />
   </section>
 </template>
@@ -153,6 +176,82 @@ function onResizeStart(event: PointerEvent) {
 .header,
 .footer {
   flex-shrink: 0;
+}
+
+/* Footer 折叠行：几何对齐 footer 行先例（42 高 / radius 12 / margin 4 -2 / padding 0 12），
+   secondary 墨色、hover 实底提升（UsageFooterRow 同口径，darwin 半透明侧栏需实底 hover） */
+.footerToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-2);
+  height: 42px;
+  margin: 4px -2px;
+  padding: 0 var(--mx-space-3);
+  width: calc(100% + 4px);
+  box-sizing: border-box;
+  border: none;
+  border-radius: var(--mx-radius-control);
+  background: transparent;
+  color: var(--mx-text-secondary);
+  font: var(--mx-font-body);
+  cursor: pointer;
+  transition: background-color var(--mx-duration-fast) var(--mx-ease-standard),
+    color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.footerToggle:hover {
+  background: var(--mx-bg-surface);
+  color: var(--mx-text);
+}
+
+.footerToggle:active {
+  background: var(--mx-active);
+}
+
+.footerToggle:focus-visible {
+  outline: 1px solid var(--mx-accent);
+  outline-offset: -1px;
+}
+
+/* 折叠 rail：36x36 图标盒居中（对齐 .collapsed .row 节奏） */
+.collapsed .footerToggle {
+  width: 36px;
+  height: 36px;
+  margin: 4px auto;
+  padding: 0;
+  justify-content: center;
+}
+
+/* 折叠体：grid 0fr→1fr 行高过渡（内容随行高收拢，展开/收起平滑） */
+.footerBody {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--mx-duration-motion) var(--mx-ease-standard);
+}
+
+.footerBody[data-collapsed='true'] {
+  grid-template-rows: 0fr;
+}
+
+/* 裁切层：min-height 0 允许行高压到 0；visibility 过渡保证折叠后焦点不可达 */
+.footerClip {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  visibility: visible;
+  transition: visibility var(--mx-duration-motion) var(--mx-ease-standard);
+}
+
+.footerBody[data-collapsed='true'] .footerClip {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .footerBody,
+  .footerClip {
+    transition: none;
+  }
 }
 
 /* 拖拽期间关闭宽度过渡，保证跟手 */

@@ -350,6 +350,13 @@ function onViewEvent(id: NodeActionId): void {
   color: var(--mx-text);
 }
 
+/* 答案形态操作行（view-actions）：水平 padding 翻倍——定宽 24px 改自适应，
+   左右 2px→8px，图标视觉空隙每侧 4px→8px */
+.view-actions .action-btn {
+  width: auto;
+  padding: 2px 8px;
+}
+
 .action-btn .action-icon {
   color: inherit;
 }

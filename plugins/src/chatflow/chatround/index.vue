@@ -34,6 +34,8 @@ const props = defineProps<{
   round: Round
   /** 执行 agent 显示名（desktop 取 chatStore.sessionCurrentAgentName，work 由宿主注入） */
   agentLabel?: string
+  /** 执行 agent 身份（头像/昵称/role，宿主经 agents.registry 解析；缺省回退 agentLabel） */
+  agentIdentity?: { name: string; nickName?: string; role?: string; icon?: string }
   /** 本轮是否执行中（desktop 取 chatStore.isBusy，work 由宿主注入；驱动树尾 pending 行） */
   roundExecuting?: boolean
   /** 本轮节点树（ChatArea 全会话构建后按轮分发，builder 按轮记忆化） */
@@ -93,6 +95,16 @@ const roundDurationMs = computed(() => {
 
 /** 轮是否执行中（驱动树尾 pending 行：LLM 建流空窗指示） */
 const roundExecuting = computed(() => !!props.roundExecuting)
+
+/**
+ * 轮头 Agent 身份显示（与侧栏同规则）：昵称主名回退 role 再回退 agentLabel；
+ * role 小字仅昵称生效时显示避免重复；头像 icon 优先、首字兜底。
+ */
+const agentPrimaryName = computed(
+  () => props.agentIdentity?.nickName || props.agentIdentity?.role || props.agentLabel || 'Agent'
+)
+const agentRoleText = computed(() => (props.agentIdentity?.nickName ? props.agentIdentity?.role || '' : ''))
+const agentInitial = computed(() => (agentPrimaryName.value || 'A').trim().charAt(0).toUpperCase())
 
 // ── 轮 footer 数据（§4.3：跟着轮走的功能归轮根渲染层） ────────────────────
 
@@ -201,8 +213,18 @@ function formatContent(content: string): string {
 
     <!-- 过程树：Agent 行常驻作树根（可随时收拢/展开，不消失），树在行下方 -->
     <div v-if="processNodes.length" class="agent-row" @click="treeCollapsed = !treeCollapsed">
-      <span class="agent-dot" :class="{ executing: roundExecuting }" />
-      <span class="agent-name">{{ agentLabel || 'Agent' }}</span>
+      <img
+        v-if="agentIdentity?.icon"
+        class="agent-avatar"
+        :class="{ executing: roundExecuting }"
+        :src="agentIdentity.icon"
+        alt=""
+      />
+      <span v-else class="agent-avatar agent-avatar-fallback" :class="{ executing: roundExecuting }">{{
+        agentInitial
+      }}</span>
+      <span class="agent-name">{{ agentPrimaryName }}</span>
+      <span v-if="agentRoleText" class="agent-role">{{ agentRoleText }}</span>
       <span v-if="roundDurationMs" class="agent-duration">任务耗时 {{ formatDuration(roundDurationMs) }}</span>
       <span class="flex-spacer" />
       <MxIcon
@@ -260,23 +282,35 @@ function formatContent(content: string): string {
 /* ── Agent 行：树的常驻根行，点击双向收拢/展开（§3.6 顶层布局） ── */
 .agent-row {
   display: flex;
+  margin-left: -10px;
   align-items: center;
   gap: var(--mx-space-2);
-  padding: var(--mx-space-1) var(--mx-space-2);
+  /* 左缘贴树导轨线：头像与下方节点边线垂直对齐（右/上下间距保留） */
+  padding: var(--mx-space-1) var(--mx-space-2) var(--mx-space-1) 0;
   cursor: pointer;
   user-select: none;
 }
 
-.agent-dot {
-  width: 8px;
-  height: 8px;
+/* 轮头头像：圆形 20px（icon 优先，首字兜底）；执行中呼吸（与侧栏运行态同语义） */
+.agent-avatar {
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--mx-success) 80%, transparent);
+  object-fit: cover;
   flex-shrink: 0;
 }
 
-.agent-dot.executing {
-  background: var(--mx-accent);
+.agent-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: var(--mx-font-caption);
+  font-weight: 600;
+  color: var(--mx-text-secondary);
+  background: var(--mx-hover);
+}
+
+.agent-avatar.executing {
   animation: agent-dot-pulse 1.4s ease-in-out infinite;
 }
 
@@ -289,6 +323,11 @@ function formatContent(content: string): string {
   font: var(--mx-font-caption);
   font-weight: 600;
   color: var(--mx-text-secondary);
+}
+
+.agent-role {
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
 }
 
 .agent-duration {

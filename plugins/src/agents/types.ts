@@ -8,6 +8,8 @@
 export interface AgentMeta {
   name: string
   role?: string
+  /** 昵称（2-3 字外号，展示主名；统一显示规则 = 昵称 + Role 小字） */
+  nick_name?: string
   description?: string
   /** IDENTITY.md 正文（agent.list 不返回，agent.get 才有） */
   introduction?: string
@@ -22,6 +24,14 @@ export interface AgentMeta {
   exclude_tools?: string[]
   /** 允许的 MCP 云技能条目（"mcp:<server>"） */
   allows_tools?: string[]
+  /** 所属团队名（固定组队语义） */
+  team?: string
+  /** 团队成员名单（非空即团队负责人，is_leader 派生） */
+  members?: string[]
+  /** 是否团队负责人（agent.list/get 派生返回，不落盘） */
+  is_leader?: boolean
+  /** TEAM.md 正文（agent.get 才有；负责人自定义团队职责） */
+  team_duty?: string
   /** 杂项元数据（ratings/version 等） */
   meta?: Record<string, unknown>
 }
@@ -31,12 +41,20 @@ export interface AgentDetailResp {
   introduction?: string
   soul?: string
   allows_tools?: string[]
+  /** TEAM.md 正文（负责人团队职责） */
+  team_duty?: string
 }
 
 /** agent.update 参数（指针语义字段未传与清空由调用方区分） */
 export interface AgentUpdateParams {
   name: string
   role?: string
+  /** 昵称（frontmatter 顶级键；空串清空，展示回退 role/name） */
+  nick_name?: string
+  /** 所属团队名（组队写入） */
+  team?: string
+  /** 团队成员名单（非空即自任负责人；全量覆盖） */
+  members?: string[]
   description?: string
   skills?: string[]
   exclude_tools?: string[]
@@ -44,6 +62,8 @@ export interface AgentUpdateParams {
   introduction?: string
   identity_body?: string
   soul?: string
+  /** TEAM.md 正文（负责人团队职责；空串清空） */
+  team_duty?: string
   meta?: unknown
 }
 
@@ -77,7 +97,9 @@ export interface MarketAgentPackage {
   name: string
   description?: string
   icon?: string
-  /** 角色名（中文原文，市场卡片展示名） */
+  /** 昵称（2-3 字外号，展示主名；统一显示规则 = 昵称 + Role 小字） */
+  nick_name?: string
+  /** 角色名（中文原文，昵称缺失时回退为展示名） */
   role?: string
   /** 业务分类（中文原文） */
   category?: string
@@ -113,7 +135,7 @@ export interface BundleInstallResult {
 
 /** 市场固定业务分类（中文）——标签栏按数组顺序陈列，清单中出现未收录分类时
  * 排在固定分类之后按字典序陈列。（移植自 mindx-desktop marketDomains.ts） */
-export const FIXED_DOMAINS = ['办公提效', '产品研发', '内容创作', '数据分析', '市场营销', '商业研究', '经营管理']
+export const FIXED_DOMAINS = ['办公提效', '产品研发', '工业', '内容创作', '数据分析', '市场营销', '商业研究', '经营管理']
 
 /** 工具定义（name/desc 为 Go 侧工具源码原文；展示名与描述走内置中文文案） */
 export interface ToolDef {

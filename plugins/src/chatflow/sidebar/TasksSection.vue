@@ -22,7 +22,8 @@
  * 样式：全量 --mx-* 语义 token（军规 3），desktop token 按移植计划附录 A 映射；
  * 行几何对齐壳 SidebarPane 行（34px / radius 8），按钮卡对齐壳 rowButton（38px）。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { MxIcon, useShell, useService } from '@mindx-work/ui-shell-vue'
 import { useChatflowStore } from '../store'
 import { CHATFLOW_HOME_ID } from '../ids'
@@ -34,6 +35,7 @@ interface AgentsRegistry {
     Array<{
       name: string
       role?: string
+      nick_name?: string
       description?: string
       icon?: string
       hired?: boolean
@@ -45,18 +47,20 @@ const agentsRegistry = useService<AgentsRegistry>('agents.registry')
 const shell = useShell()
 const store = useChatflowStore()
 
-// ── 折叠 rail 形态（壳传 compact）：仅渲染「新会话」36px 图标钮 ──
+// ── 折叠 rail 形态（壳传 compact）：仅渲染「新任务」36px 图标钮 ──
 const props = defineProps<{ compact?: boolean }>()
 
 // ── Agent 清单（仅已招募）──
-const agents = ref<Array<{ name: string; role?: string }>>([])
+const agents = ref<Array<{ name: string; role?: string; nick_name?: string; icon?: string }>>([])
 const agentsLoading = ref(false)
 
 async function refreshAgents(): Promise<void> {
   agentsLoading.value = true
   try {
     const list = await agentsRegistry.list()
-    agents.value = (list || []).filter((a) => a.hired).map((a) => ({ name: a.name, role: a.role }))
+    agents.value = (list || [])
+      .filter((a) => a.hired)
+      .map((a) => ({ name: a.name, role: a.role, nick_name: a.nick_name, icon: a.icon }))
     // 缺省选中：currentAgent 为空时取首个已招募 Agent（新会话归属与发送前置）
     if (!store.currentAgent && agents.value[0]) {
       store.currentAgent = agents.value[0].name
@@ -68,10 +72,19 @@ async function refreshAgents(): Promise<void> {
   }
 }
 
-/** 触发器与下拉项展示（源 AgentSwitcher：角色主文字 + 英文名次级文字） */
+/**
+ * 触发器与下拉项展示（显示规则：昵称主名 + Role 小字，昵称缺失回退 role，
+ * role 小字仅昵称生效时显示避免重复；头像 icon 优先、首字兜底）
+ */
 const currentAgentInfo = computed(() => agents.value.find((a) => a.name === store.currentAgent) || null)
-const triggerRole = computed(() => (agentsLoading.value && !agents.value.length ? '加载中…' : currentAgentInfo.value?.role || 'Agent'))
-const triggerName = computed(() => store.currentAgent || '未选择')
+const agentDisplayName = (a?: { name: string; role?: string; nick_name?: string } | null): string =>
+  a?.nick_name || a?.role || a?.name || ''
+// 悬空引用（会话归属的 Agent 已不在已招募列表）直接显示该 Agent 名，不落「未选择」
+const triggerName = computed(() => {
+  if (agentsLoading.value && !agents.value.length) return '加载中…'
+  return agentDisplayName(currentAgentInfo.value) || store.currentAgent || '未选择'
+})
+const triggerRole = computed(() => (currentAgentInfo.value?.nick_name && currentAgentInfo.value.role ? currentAgentInfo.value.role : ''))
 
 function handleAgentCommand(command: string | number | object): void {
   const name = String(command)
@@ -114,6 +127,15 @@ function recency(s?: Session): number {
 }
 
 // ── 行四要素辅助 ──
+/** 最近讨论区归属标识：按 agent 名查已招募清单（昵称主名 + 头像），悬空引用回退英文名 */
+const agentTagLabel = (name?: string): string => {
+  if (!name) return ''
+  const a = agents.value.find((x) => x.name === name)
+  return a?.nick_name || a?.role || name
+}
+const agentIconOf = (name?: string): string | undefined =>
+  agents.value.find((x) => x.name === name)?.icon
+
 function rowTitle(s: Session): string {
   return s.title || '未命名任务'
 }
@@ -150,6 +172,65 @@ function openSession(sessionId: string): void {
   shell.Content.activate(CHATFLOW_HOME_ID)
 }
 
+// ── 行尾弹出菜单（hover 显现）：重命名（session.rename）+ 删除（session.delete）──
+/** 行内重命名态：editingId 命中的行渲染底线输入框（Enter/失焦保存，Esc 取消） */
+const editingId = ref<string | null>(null)
+const editTitle = ref('')
+const renameInput = ref<HTMLInputElement | null>(null)
+
+function startRename(s: Session): void {
+  editingId.value = s.session_id
+  editTitle.value = s.title || ''
+  void nextTick(() => renameInput.value?.focus())
+}
+
+/** v-for 内函数式 ref：仅当前编辑行的 input 被注册（字符串 ref 会数组化） */
+function setRenameInput(el: unknown): void {
+  renameInput.value = el instanceof HTMLInputElement ? el : null
+}
+
+function cancelRename(): void {
+  editingId.value = null
+  editTitle.value = ''
+}
+
+async function commitRename(sessionId: string): Promise<void> {
+  if (editingId.value !== sessionId) return
+  const title = editTitle.value.trim()
+  cancelRename()
+  if (!title) return // 置空视作取消，保持原标题
+  try {
+    await store.renameSession(sessionId, title)
+  } catch {
+    ElMessage({ message: '重命名失败', type: 'error', duration: 2000 })
+  }
+}
+
+async function removeSession(s: Session): Promise<void> {
+  const label = s.title || '未命名任务'
+  try {
+    await ElMessageBox.confirm(`确定删除「${label.slice(0, 30)}」吗？会话消息一并删除，不可恢复。`, '删除任务', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger',
+    })
+  } catch {
+    return
+  }
+  try {
+    await store.deleteSession(s.session_id)
+    ElMessage({ message: '已删除', type: 'success', duration: 2000 })
+  } catch {
+    ElMessage({ message: '删除失败', type: 'error', duration: 2000 })
+  }
+}
+
+function handleSessionCommand(command: string, s: Session): void {
+  if (command === 'rename') startRename(s)
+  else if (command === 'delete') void removeSession(s)
+}
+
 function handleNewSession(): void {
   // 新会话 = 清空对话流（保留目录与 Agent），会话懒建于首条消息发送时
   store.clearActiveStream()
@@ -177,18 +258,20 @@ watch(
 </script>
 
 <template>
-  <!-- 折叠 rail：36px「新会话」图标钮（对齐壳折叠行节奏） -->
+  <!-- 折叠 rail：36px「新任务」图标钮（对齐壳折叠行节奏） -->
   <button v-if="props.compact" type="button" :class="$style.railBtn" @click="handleNewSession">
     <MxIcon name="lucide:plus" :size="20" />
   </button>
 
   <div v-else :class="$style.root">
-    <!-- Agent 切换器：当前 Agent 角色 + 展示名，下拉仅列已招募 Agent
+    <!-- Agent 切换器：头像 + 昵称主名 + 右侧 Role 小字（昵称缺失回退 role），下拉仅列已招募 Agent
          （popper-class：面板样式落在 EP popper 外壳，消除外壳/内层 UL 双框） -->
     <el-dropdown trigger="click" popper-class="chatflow-agent-menu" @command="handleAgentCommand">
       <button type="button" :class="$style.agentTrigger">
-        <span :class="$style.agentRole">{{ triggerRole }}</span>
+        <img v-if="currentAgentInfo?.icon" :src="currentAgentInfo.icon" :class="$style.agentAvatar" alt="" />
+        <span v-else :class="[$style.agentAvatar, $style.agentAvatarFallback]">{{ triggerName.charAt(0) }}</span>
         <span :class="$style.agentName">{{ triggerName }}</span>
+        <span v-if="triggerRole" :class="$style.agentRole">{{ triggerRole }}</span>
         <MxIcon name="lucide:chevron-down" :size="16" :class="$style.agentArrow" />
       </button>
       <template #dropdown>
@@ -199,8 +282,10 @@ watch(
             :command="a.name"
             :disabled="a.name === store.currentAgent"
           >
-            <span class="chatflow-agent-item-role">{{ a.role || a.name }}</span>
-            <span class="chatflow-agent-item-name">{{ a.name }}</span>
+            <img v-if="a.icon" :src="a.icon" class="chatflow-agent-item-avatar" alt="" />
+            <span v-else class="chatflow-agent-item-avatar chatflow-agent-item-avatar-fb">{{ agentDisplayName(a).charAt(0) }}</span>
+            <span class="chatflow-agent-item-name">{{ agentDisplayName(a) }}</span>
+            <span v-if="a.nick_name && a.role" class="chatflow-agent-item-role">{{ a.role }}</span>
           </el-dropdown-item>
           <el-dropdown-item v-if="!agents.length" disabled>
             <span class="chatflow-agent-item-name">{{ agentsLoading ? '加载中…' : '暂无已招募的 Agent' }}</span>
@@ -209,10 +294,15 @@ watch(
       </template>
     </el-dropdown>
 
-    <!-- 新会话按钮卡（几何对齐壳 rowButton：38 高 / 0.5px 边框 / radius 12 / elevated 填充） -->
+    <!-- 「任务」分组标题（Agent 切换器与新任务按钮之间，形态对齐分组头） -->
+    <div :class="$style.groupHeader">
+      <span :class="$style.groupTitle">任务</span>
+    </div>
+
+    <!-- 新任务按钮卡（几何对齐壳 rowButton：38 高 / 0.5px 边框 / radius 12 / elevated 填充） -->
     <button type="button" :class="$style.newSessionBtn" @click="handleNewSession">
       <MxIcon name="lucide:plus" :size="16" />
-      <span>新会话</span>
+      <span>新任务</span>
     </button>
 
     <!-- 骨架：加载中且未就绪（保持到内容完全加载） -->
@@ -237,21 +327,61 @@ watch(
           <span :class="$style.groupTitle">{{ g.label }}</span>
           <span :class="$style.groupCount">{{ g.items.length }}</span>
         </div>
-        <button
+        <div
           v-for="s in g.items"
           :key="s.session_id"
-          type="button"
           :class="$style.sessionRow"
           :data-active="s.session_id === store.activeSessionId ? 'true' : 'false'"
-          @click="openSession(s.session_id)"
         >
-          <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
-            <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
-          </el-tooltip>
-          <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
-          <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
-          <span :class="$style.rowTime">{{ formatTime(s.updated_at) }}</span>
-        </button>
+          <button
+            v-if="editingId !== s.session_id"
+            type="button"
+            :class="$style.rowMain"
+            @click="openSession(s.session_id)"
+          >
+            <!-- 行首聊天图标：任务分组行无 Agent 头像，以聊天图标标识会话身份；运行中呼吸 -->
+            <MxIcon
+              name="lucide:message-circle"
+              :size="16"
+              :class="[$style.rowChatIcon, { [$style.breathing]: isRunning(s.session_id) }]"
+            />
+            <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
+              <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
+            </el-tooltip>
+            <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
+            <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
+            <span :class="$style.rowTime">{{ formatTime(s.updated_at) }}</span>
+          </button>
+          <!-- 行尾弹出菜单（hover 显现）：重命名 / 删除（编辑态隐藏避免抢占输入焦点） -->
+          <el-dropdown
+            v-if="editingId !== s.session_id"
+            trigger="click"
+            popper-class="chatflow-agent-menu"
+            @command="(cmd: string) => handleSessionCommand(cmd, s)"
+          >
+            <button type="button" :class="$style.rowMore" title="会话操作" @click.stop>
+              <MxIcon name="lucide:ellipsis" :size="16" />
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu class="chatflow-agent-menu">
+                <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                <el-dropdown-item command="delete">删除</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <!-- 行内重命名（底线输入，对齐昵称编辑先例）：编辑态占满整行 -->
+          <input
+            v-if="editingId === s.session_id"
+            :ref="setRenameInput"
+            v-model="editTitle"
+            :class="$style.rowRenameInput"
+            placeholder="任务名"
+            @keydown.enter.prevent="commitRename(s.session_id)"
+            @keydown.esc.prevent="cancelRename"
+            @blur="commitRename(s.session_id)"
+            @click.stop
+          />
+        </div>
       </section>
 
       <!-- 「最近讨论」捷径区：跨 Agent 最近活跃（先切 Agent 再切会话，switchToSession 内完成） -->
@@ -259,24 +389,68 @@ watch(
         <div :class="$style.groupHeader">
           <span :class="$style.groupTitle">最近讨论</span>
         </div>
-        <button
+        <div
           v-for="s in recentSessions"
           :key="s.session_id"
-          type="button"
           :class="$style.sessionRow"
           :data-active="s.session_id === store.activeSessionId ? 'true' : 'false'"
-          @click="openSession(s.session_id)"
         >
-          <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
-            <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
-          </el-tooltip>
-          <span v-if="s.agent_name && s.agent_name !== store.currentAgent" :class="$style.agentTag">
-            {{ s.agent_name }}
-          </span>
-          <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
-          <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
-          <span :class="$style.rowTime">{{ formatTime(s.updated_at) }}</span>
-        </button>
+          <button
+            v-if="editingId !== s.session_id"
+            type="button"
+            :class="$style.rowMain"
+            @click="openSession(s.session_id)"
+          >
+            <!-- 行首 Agent 头像（icon 优先、昵称/英文名首字兜底）：跨 Agent 捷径区标识归属；运行中呼吸 -->
+            <img
+              v-if="agentIconOf(s.agent_name)"
+              :src="agentIconOf(s.agent_name)"
+              :class="[$style.rowAvatar, { [$style.breathing]: isRunning(s.session_id) }]"
+              alt=""
+            />
+            <span
+              v-else-if="s.agent_name"
+              :class="[$style.rowAvatar, $style.rowAvatarFallback, { [$style.breathing]: isRunning(s.session_id) }]"
+            >
+              {{ agentTagLabel(s.agent_name).charAt(0) }}
+            </span>
+            <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
+              <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
+            </el-tooltip>
+            <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
+            <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
+            <span :class="$style.rowTime">{{ formatTime(s.updated_at) }}</span>
+          </button>
+          <!-- 行尾弹出菜单（hover 显现）：重命名 / 删除（编辑态隐藏避免抢占输入焦点） -->
+          <el-dropdown
+            v-if="editingId !== s.session_id"
+            trigger="click"
+            popper-class="chatflow-agent-menu"
+            @command="(cmd: string) => handleSessionCommand(cmd, s)"
+          >
+            <button type="button" :class="$style.rowMore" title="会话操作" @click.stop>
+              <MxIcon name="lucide:ellipsis" :size="16" />
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu class="chatflow-agent-menu">
+                <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                <el-dropdown-item command="delete">删除</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <!-- 行内重命名（底线输入，对齐昵称编辑先例）：编辑态占满整行 -->
+          <input
+            v-if="editingId === s.session_id"
+            :ref="setRenameInput"
+            v-model="editTitle"
+            :class="$style.rowRenameInput"
+            placeholder="任务名"
+            @keydown.enter.prevent="commitRename(s.session_id)"
+            @keydown.esc.prevent="cancelRename"
+            @blur="commitRename(s.session_id)"
+            @click.stop
+          />
+        </div>
       </section>
     </template>
   </div>
@@ -295,14 +469,14 @@ watch(
   padding: 0 2px var(--mx-space-1);
 }
 
-/* ── Agent 切换器触发器（源 AgentSwitcher 形态：角色主文字 + 展示名 + 下拉箭头）── */
+/* ── Agent 切换器触发器（头像 + 昵称主名 + 右侧 Role 小字 + 下拉箭头）── */
 .agentTrigger {
   display: inline-flex;
   align-items: center;
   gap: var(--mx-space-2);
   width: 100%;
   min-width: 0;
-  height: 28px;
+  height: 34px;
   padding: 0 var(--mx-space-2);
   border: none;
   border-radius: var(--mx-radius-control);
@@ -325,30 +499,78 @@ watch(
   outline-offset: -2px;
 }
 
-.agentRole {
+/* 头像：20px 圆形，icon 优先、首字兜底（accent 淡底居中） */
+.agentAvatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.agentAvatarFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: var(--mx-font-micro);
+  font-weight: 600;
+  color: var(--mx-accent);
+  background: color-mix(in srgb, var(--mx-accent) 14%, transparent);
+}
+
+/* 昵称主名（昵称缺失回退 role/name） */
+.agentName {
   font: var(--mx-font-caption);
   font-weight: 600;
   color: var(--mx-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 
-.agentName {
+/* Role 小字：右侧次级（仅昵称生效时显示） */
+.agentRole {
   font: var(--mx-font-micro);
   color: var(--mx-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
-  min-width: 0;
-  text-align: right;
+  flex-shrink: 0;
 }
 
 .agentArrow {
   flex-shrink: 0;
   color: var(--mx-text-tertiary);
+}
+
+/* ── 行首聊天图标（任务分组行）：会话身份标识，tertiary 弱化不抢任务名 ── */
+.rowChatIcon {
+  flex-shrink: 0;
+  color: var(--mx-text-tertiary);
+}
+
+/* ── 运行中呼吸：行首元素明暗交替（头像/聊天图标通用）；
+      prefers-reduced-motion 用户关动画，保留静态运行点 ── */
+.breathing {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .breathing {
+    animation: none;
+  }
 }
 
 /* ── 新会话按钮卡（对齐壳 rowButton：38 高 / 0.5px 边框 / radius 12 / elevated 填充 / 500 字重）── */
@@ -476,7 +698,7 @@ watch(
   background: transparent;
   border: none;
   border-radius: var(--mx-radius-control);
-  cursor: pointer;
+  cursor: default;
   text-align: left;
   transition: background-color var(--mx-duration-fast) var(--mx-ease-standard);
 }
@@ -489,7 +711,7 @@ watch(
   background: var(--mx-active);
 }
 
-.sessionRow:focus-visible {
+.sessionRow:focus-within {
   outline: 2px solid var(--mx-text);
   outline-offset: -2px;
 }
@@ -497,6 +719,70 @@ watch(
 /* 选中态（状态而非交互态）：灰底，对齐壳行 data-active 语义 */
 .sessionRow[data-active='true'] {
   background: var(--mx-hover);
+}
+
+/* 行内主点击区（button 重置 + 填满行），行容器（div）承载 hover 菜单 */
+.rowMain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* 行尾弹出菜单触发器（⋯）：默认隐藏，hover 行才显现（可感知鼠标） */
+.rowMore {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--mx-radius-control);
+  background: transparent;
+  color: var(--mx-text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--mx-duration-fast) var(--mx-ease-standard),
+    color var(--mx-duration-fast) var(--mx-ease-standard),
+    background-color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.sessionRow:hover .rowMore,
+.rowMore:focus-visible {
+  opacity: 1;
+}
+
+.rowMore:hover {
+  color: var(--mx-text);
+  background: var(--mx-active);
+}
+
+/* 行内重命名输入（底线样式，对齐昵称编辑先例） */
+.rowRenameInput {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 var(--mx-space-1);
+  border: none;
+  border-bottom: 1px solid var(--mx-accent);
+  background: transparent;
+  outline: none;
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+}
+
+.rowRenameInput::placeholder {
+  color: var(--mx-text-tertiary);
 }
 
 .rowTitle {
@@ -553,15 +839,23 @@ watch(
   border-top: 1px solid var(--mx-separator-soft);
 }
 
-/* 跨 Agent 会话的来源标记（与当前 Agent 不同才显示） */
-.agentTag {
-  font: var(--mx-font-micro);
-  color: var(--mx-text-tertiary);
-  max-width: 64px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* 最近讨论区行首头像：16px 圆形，icon 优先、首字兜底（accent 淡底居中） */
+.rowAvatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
   flex-shrink: 0;
+}
+
+.rowAvatarFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: var(--mx-font-micro);
+  font-weight: 600;
+  color: var(--mx-accent);
+  background: color-mix(in srgb, var(--mx-accent) 14%, transparent);
 }
 
 /* ── 折叠 rail：36px 图标钮（对齐壳折叠行几何）── */
@@ -641,18 +935,41 @@ watch(
   cursor: default;
 }
 
-.chatflow-agent-item-role {
-  font: var(--mx-font-body);
-  font-weight: 600;
-  white-space: nowrap;
+/* 下拉项头像：18px 圆形，icon 优先、首字兜底 */
+.chatflow-agent-item-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
+.chatflow-agent-item-avatar-fb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: var(--mx-font-micro);
+  font-weight: 600;
+  color: var(--mx-accent);
+  background: color-mix(in srgb, var(--mx-accent) 14%, transparent);
+}
+
+/* 昵称主名（昵称缺失回退 role/name） */
 .chatflow-agent-item-name {
   font: var(--mx-font-caption);
-  color: var(--mx-text-tertiary);
+  font-weight: 600;
+  color: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Role 小字：右侧次级（仅昵称生效时显示） */
+.chatflow-agent-item-role {
+  font: var(--mx-font-micro);
+  color: var(--mx-text-tertiary);
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .chatflow-agent-menu .el-dropdown-menu__item.is-disabled .chatflow-agent-item-name {

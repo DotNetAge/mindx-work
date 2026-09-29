@@ -33,6 +33,24 @@ contextBridge.exposeInMainWorld('mxDesktop', {
       ipcRenderer.invoke('mx:dialog-save-file', defaultName),
     openMindpkg: (): Promise<string | null> => ipcRenderer.invoke('mx:dialog-open-mindpkg'),
   },
+  terminal: {
+    create: (cwd: string, cols: number, rows: number): Promise<string | null> =>
+      ipcRenderer.invoke('mx:terminal-create', cwd, cols, rows),
+    write: (id: string, data: string): Promise<boolean> => ipcRenderer.invoke('mx:terminal-write', id, data),
+    resize: (id: string, cols: number, rows: number): Promise<boolean> =>
+      ipcRenderer.invoke('mx:terminal-resize', id, cols, rows),
+    kill: (id: string): Promise<boolean> => ipcRenderer.invoke('mx:terminal-kill', id),
+    onData: (listener: (payload: { id: string; data: string }) => void): (() => void) => {
+      const wrapped = (_event: unknown, payload: { id: string; data: string }): void => listener(payload)
+      ipcRenderer.on('mx:terminal-data', wrapped)
+      return () => ipcRenderer.removeListener('mx:terminal-data', wrapped)
+    },
+    onExit: (listener: (payload: { id: string }) => void): (() => void) => {
+      const wrapped = (_event: unknown, payload: { id: string }): void => listener(payload)
+      ipcRenderer.on('mx:terminal-exit', wrapped)
+      return () => ipcRenderer.removeListener('mx:terminal-exit', wrapped)
+    },
+  },
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
     installFromFile: (): Promise<PluginInstallResult> => ipcRenderer.invoke('plugins:install-from-file'),

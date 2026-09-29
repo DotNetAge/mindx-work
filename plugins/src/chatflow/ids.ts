@@ -5,3 +5,6 @@ export const CHATFLOW_HOME_ID = 'chatflow-home'
 
 /** Sidebar Tasks 分节 id（节标题「Tasks」；四期真数据行在本节 rows 扩展） */
 export const CHATFLOW_TASKS_SECTION_ID = 'chatflow-tasks'
+
+/** Detail「产物」tab 条目 id（概念框架 §6.1：对话产物 / 技能 / 最近文件 三段） */
+export const PRODUCT_DETAIL_ID = 'chatflow-products'

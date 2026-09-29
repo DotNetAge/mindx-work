@@ -16,21 +16,43 @@
     "./phone-pair": "./src/phone-pair/index.ts",
     "./shell-chrome": "./src/shell-chrome/index.ts",
     "./chatflow": "./src/chatflow/index.ts",
-    "./chatflow-slot": "./src/chatflow/slot/index.ts"
+    "./chatflow-slot": "./src/chatflow/slot/index.ts",
+    "./explorer": "./src/explorer/index.ts",
+    "./markdown": "./src/markdown/index.ts",
+    "./codeeditor": "./src/codeeditor/index.ts",
+    "./image-viewer": "./src/image-viewer/index.ts",
+    "./web-viewer": "./src/web-viewer/index.ts",
+    "./terminal": "./src/terminal/index.ts",
+    "./calendar": "./src/calendar/index.ts",
+    "./usage": "./src/usage/index.ts",
+    "./memory": "./src/memory/index.ts",
+    "./diffview": "./src/diffview/index.ts"
   },
   "dependencies": {
+    "@fullcalendar/core": "^6.1.21",
+    "@fullcalendar/daygrid": "^6.1.21",
+    "@fullcalendar/interaction": "^6.1.21",
+    "@fullcalendar/list": "^6.1.21",
+    "@fullcalendar/timegrid": "^6.1.21",
+    "@fullcalendar/vue3": "^6.1.21",
     "@mindx-work/ui-shell": "workspace:*",
     "@mindx-work/ui-shell-vue": "workspace:*",
     "@tiptap/core": "^3.31.3",
     "@tiptap/extension-placeholder": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
     "@tiptap/vue-3": "^3.31.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "dompurify": "^3.2.5",
     "element-plus": "^2.14.6",
     "highlight.js": "^11.10.0",
     "marked": "^14.0.0",
     "mermaid": "^11.4.1",
     "pinia": "^3.0.2",
+    "qrcode": "^1.5.4",
     "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
   }
 }

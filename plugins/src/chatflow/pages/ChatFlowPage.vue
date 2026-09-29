@@ -28,7 +28,7 @@
  * 渲染出口 + 假发送）/ nomodel / disabled（输入区三态）。样式：全量 --mx-* 语义 token（军规 3），desktop token
  * 按移植计划附录 A 映射。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useService, useShell } from '@mindx-work/ui-shell-vue'
 import { buildTreesForRounds, clearTreeBuildState } from '../tree/builder'
@@ -46,15 +46,25 @@ import ChatRoundView from '../chatround/index.vue'
 import ChatInput from '../input/index.vue'
 import HeroTitle from '../input/HeroTitle.vue'
 import SkeletonChat from '../content/SkeletonChat.vue'
+import TurnRail from '../content/TurnRail.vue'
 import AskUserView from '../content/BottomBar/AskUserView.vue'
 import PermissionBar from '../content/BottomBar/PermissionBar.vue'
-import { useChatflowStore } from '../store'
+import { registerAppendFileRefHandler, useChatflowStore } from '../store'
 import type { ModelInfo, ProviderInfo } from '../store'
 import { useBlockers } from '../content/useBlockers'
 
 const store = useChatflowStore()
 // ChatInput 外部填入通道（undo 回退回填等，defineExpose fillText / fillAndSend）
 const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
+// 「添加到对话」跨插件通道：登记 ChatInput 的引用 chip 追加函数（explorer 经
+// chatflow.store 服务转发；hero/消息流两形态共用同一 ref，运行期解引用），
+// 卸载注销防悬挂闭包
+registerAppendFileRefHandler((ref) => chatInputRef.value?.appendFileRef(ref))
+onBeforeUnmount(() => registerAppendFileRefHandler(null))
+// 轮次指示器当前轮联动的 rAF 句柄清理
+onBeforeUnmount(() => {
+  if (activeRafId) cancelAnimationFrame(activeRafId)
+})
 const {
   activeBlocker,
   remoteBlocker,
@@ -142,7 +152,9 @@ async function handleModelSelect(model: ModelInfo) {
 
 // ── Agent 描述占位（desktop connectionStore.currentAgent.description 同语义）──
 interface AgentsRegistry {
-  list(): Promise<Array<{ name: string; description?: string }>>
+  list(): Promise<
+    Array<{ name: string; description?: string; role?: string; nick_name?: string; icon?: string }>
+  >
 }
 const agentsRegistry = useService<AgentsRegistry>('agents.registry')
 const agentDescriptionByName = ref<Record<string, string>>({})
@@ -161,12 +173,15 @@ function fetchInitialData(): void {
     .list()
     .then((list) => {
       const map: Record<string, string> = {}
+      const identities = new Map<string, AgentIdentity>()
       for (const a of list || []) {
         if (a.name && a.description) map[a.name] = a.description
+        identities.set(a.name, { name: a.name, nickName: a.nick_name, role: a.role, icon: a.icon })
       }
       agentDescriptionByName.value = map
+      agentIdentityMap.value = identities
     })
-    .catch((err) => console.warn('[ChatFlowPage] Agent 描述拉取失败:', err))
+    .catch((err) => console.warn('[ChatFlowPage] Agent 清单拉取失败:', err))
 }
 if (store.isConnected) fetchInitialData()
 watch(
@@ -223,6 +238,57 @@ const liveRoundItems = computed(() =>
 
 const roundItems = computed(() => (isFixture ? fixtureRoundItems.value : liveRoundItems.value))
 
+// ── 轮次指示器（左侧波浪刻度尺）：全量轮次 + 当前轮联动 + 点击跳转 ──────────
+// 刻度绑定全量轮次（渲染窗只裁剪 DOM，数据恒在内存）；点击窗口外的旧轮先扩窗
+// 再滚动定位（扩一页余量，transition-group 入场动画期间二次 rAF 等布局就位）
+const roundsRail = computed(() =>
+  roundItems.value.map((item, i) => ({
+    key: item.round.key,
+    title:
+      item.round.userMessage?.content?.replace(/\s+/g, ' ').trim().slice(0, 60) ||
+      item.round.messages[0]?.content?.replace(/\s+/g, ' ').trim().slice(0, 60) ||
+      `第 ${i + 1} 轮`,
+  }))
+)
+
+const activeRailIndex = ref(-1)
+let activeRafId = 0
+
+/** 当前轮联动：视口 40% 线落在哪一轮（滚动高频，rAF 合并只保留最后一次） */
+function scheduleActiveRoundUpdate() {
+  if (activeRafId) return
+  activeRafId = requestAnimationFrame(() => {
+    activeRafId = 0
+    const el = chatContainer.value
+    if (!el) return
+    const nodes = el.querySelectorAll<HTMLElement>('[data-round-key]')
+    const mid = el.getBoundingClientRect().top + el.clientHeight * 0.4
+    let currentKey = ''
+    nodes.forEach((node) => {
+      if (node.getBoundingClientRect().top <= mid) currentKey = node.dataset.roundKey || ''
+    })
+    activeRailIndex.value = currentKey
+      ? roundsRail.value.findIndex((r) => r.key === currentKey)
+      : -1
+  })
+}
+
+function handleRoundSelect(key: string) {
+  const idx = roundItems.value.findIndex((r) => r.round.key === key)
+  if (idx < 0) return
+  const need = roundItems.value.length - idx
+  if (!isFixture && renderWindowEnd.value < need) {
+    renderWindowEnd.value = Math.min(roundItems.value.length, need + RENDER_PAGE)
+  }
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      chatContainer.value
+        ?.querySelector<HTMLElement>(`[data-round-key="${CSS.escape(key)}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  })
+}
+
 // ── 渐进式加载渲染窗（概念框架 §4.4 定稿）───────────────────────────────────
 // 数据全量在内存（store 恢复即全量），窗口只裁剪渲染：进入已有会话首屏渲染最近
 // RENDER_PAGE 轮，向上滚动触顶按 RENDER_PAGE 一页向上扩窗（无数据加载）；实时对话
@@ -272,6 +338,8 @@ watch(
 
 // 向上滚动触顶：向上扩一页，扩窗后补偿滚动位置保持视觉稳定（纯渲染裁剪）
 function handleStreamScroll() {
+  // 轮次指示器当前轮联动（fixture 与真数据同语义）
+  scheduleActiveRoundUpdate()
   if (isFixture) return
   const el = chatContainer.value
   if (!el || el.scrollTop > 40) return
@@ -290,7 +358,11 @@ watch(
   () => store.activeSessionId,
   () => {
     renderWindowEnd.value = RENDER_PAGE
-    nextTick(() => scrollToBottom())
+    nextTick(() => {
+      scrollToBottom()
+      // 首屏滚底后立即联动当前轮（内容不满一屏无 scroll 事件时的兜底）
+      scheduleActiveRoundUpdate()
+    })
   }
 )
 
@@ -339,6 +411,28 @@ const agentLabel = computed(() => {
   void store.activeMessages.length
   const sid = store.activeSessionId
   return (sid && store.sessionCurrentAgentName[sid]) || 'Agent'
+})
+
+/**
+ * 轮头 Agent 身份（头像 + 昵称 + role）：agentsRegistry 建 name 索引，
+ * 显示规则与侧栏 Agent 切换器一致（昵称主名 + role 小字，头像 icon 优先、
+ * 首字兜底）。拉取并入上方 fetchInitialData（挂载早于 ws 建连，onMounted
+ * 直拉必然 reject，isConnected 跃迁时重试——与 Agent 描述同路径）。
+ */
+interface AgentIdentity {
+  name: string
+  nickName?: string
+  role?: string
+  icon?: string
+}
+
+const agentIdentityMap = ref<Map<string, AgentIdentity>>(new Map())
+
+const agentIdentity = computed<AgentIdentity | undefined>(() => {
+  void store.activeMessages.length // 与 agentLabel 同源：读消息流建立响应式依赖
+  const sid = store.activeSessionId
+  const name = (sid && store.sessionCurrentAgentName[sid]) || ''
+  return name ? agentIdentityMap.value.get(name) : undefined
 })
 
 // 会话忙碌（发送 ⇄ 停止；desktop chatStore.isBusy(activeSessionId) 同语义，
@@ -486,6 +580,7 @@ function handleOpenModelSettings() {
       <HeroTitle />
       <div :class="$style.heroInput">
         <ChatInput
+          ref="chatInputRef"
           :connected="connected"
           :models="models"
           :raw-providers="rawProviders"
@@ -510,6 +605,13 @@ function handleOpenModelSettings() {
     <!-- 有轮次：消息流 + 底部输入（desktop ChatArea 布局对齐） -->
     <template v-else>
       <div :class="$style.streamWrap">
+        <!-- 轮次指示器：左侧波浪刻度尺（全量轮次；hover 波浪 + tooltip，点击跳轮） -->
+        <TurnRail
+          v-if="!store.isCompacting"
+          :rounds="roundsRail"
+          :active-index="activeRailIndex"
+          @select="handleRoundSelect"
+        />
         <!-- 消息流：与骨架屏共存，恢复时隐藏在骨架屏后方；压缩中整块隐藏 -->
         <div
           v-if="!store.isCompacting"
@@ -518,11 +620,17 @@ function handleOpenModelSettings() {
           @scroll="handleStreamScroll"
         >
           <transition-group name="message-list" tag="div" :class="$style.roundsList">
-            <div v-for="item in visibleRoundItems" :key="item.round.key" :class="$style.roundWrapper">
+            <div
+              v-for="item in visibleRoundItems"
+              :key="item.round.key"
+              :data-round-key="item.round.key"
+              :class="$style.roundWrapper"
+            >
               <ChatRoundView
                 :round="item.round"
                 :round-tree="item.tree"
                 :agent-label="agentLabel"
+                :agent-identity="agentIdentity"
                 :round-executing="busy"
                 @permission-grant="(data) => handlePermissionGrant(data)"
                 @permission-deny="(reason) => handlePermissionDeny(reason)"
@@ -655,13 +763,16 @@ function handleOpenModelSettings() {
   max-width: 720px;
 }
 
-/* 消息流壳（desktop chat-messages-wrapper 同构）：滚动容器 + 覆盖层锚点 */
+/* 消息流壳（desktop chat-messages-wrapper 同构）：滚动容器 + 覆盖层锚点；
+   container 建立 inline-size 容器查询上下文（TurnRail 窄流隐藏判定），
+   inline-size containment 不影响纵向 flex 布局 */
 .streamWrap {
   flex: 1;
   min-height: 0;
   position: relative;
   display: flex;
   flex-direction: column;
+  container: chatflow-stream / inline-size;
 }
 
 /* 滚动容器（desktop chat-messages 同构）：--space-5(20px)→--mx-space-5、

@@ -78,7 +78,7 @@ const filteredServers = computed<MCPServerListEntry[]>(() => {
   return store.servers.filter((s) => [s.name, displayName(s), descOf(s)].join(' ').toLowerCase().includes(q))
 })
 
-/** 切换开关：成功推结果通知；开启后自动测连，未通过仅警告（不回滚开关） */
+/** 切换开关：请求期间开关内转圈（含开启后自动测连全程）；未通过仅警告（不回滚开关） */
 function onToggle(server: MCPServerListEntry, enabled: boolean) {
   void store.toggle(server, enabled).then((warning) => {
     if (warning) {
@@ -88,15 +88,6 @@ function onToggle(server: MCPServerListEntry, enabled: boolean) {
     }
   }).catch((err: unknown) => {
     pushNotice(shell, 'error', err instanceof Error ? err.message : '切换启用状态失败')
-  })
-}
-
-/** 手动测试连接：成功/失败都推通知 */
-function onTest(server: MCPServerListEntry) {
-  void store.test(server).then(() => {
-    pushNotice(shell, 'success', `「${displayName(server)}」连接正常`)
-  }).catch((err: unknown) => {
-    pushNotice(shell, 'error', `「${displayName(server)}」连接测试未通过：${err instanceof Error ? err.message : '未知错误'}`)
   })
 }
 
@@ -149,12 +140,15 @@ async function onRefresh() {
           </div>
           <button
             class="mx-switch"
+            :class="{ [$style.switchLoading]: store.switching === server.name }"
             role="switch"
             :aria-checked="server.enabled ? 'true' : 'false'"
+            :aria-busy="store.switching === server.name ? 'true' : undefined"
             :disabled="store.switching === server.name"
             @click="onToggle(server, !server.enabled)"
           >
-            <span class="mx-switch-thumb" />
+            <span class="mx-switch-thumb" :class="{ [$style.thumbHidden]: store.switching === server.name }" />
+            <span v-if="store.switching === server.name" :class="$style.switchLoader" />
           </button>
         </div>
         <p :class="$style.desc" :title="descOf(server)">{{ descOf(server) || '—' }}</p>
@@ -162,17 +156,7 @@ async function onRefresh() {
           <span class="mx-tag" data-tone="neutral">{{ typeLabel(server.type) }}</span>
           <div :class="$style.cardActions">
             <button type="button" class="mx-icon-btn" aria-label="编辑连接器" @click="onEdit(server)">
-              <MxIcon name="lucide:pencil" :size="16" />
-            </button>
-            <button
-              type="button"
-              class="mx-icon-btn"
-              :class="{ [$style.spin]: store.testing === server.name }"
-              aria-label="测试连接"
-              :disabled="store.testing === server.name"
-              @click="onTest(server)"
-            >
-              <MxIcon name="lucide:plug-zap" :size="16" />
+              <MxIcon name="lucide:settings" :size="16" />
             </button>
             <button type="button" class="mx-icon-btn" aria-label="删除连接器" @click="onRemove(server)">
               <MxIcon name="lucide:trash-2" :size="16" />
@@ -336,15 +320,32 @@ async function onRefresh() {
   gap: 2px;
 }
 
-/* 测连进行中：图标旋转示意 */
-.spin {
-  animation: spin 1s linear infinite;
+/* 切换中：覆盖禁用降透明度，保证 loader 转圈清晰 */
+.switchLoading {
+  opacity: 1 !important;
+}
+
+/* loader：12px 圆环居中转圈（白系在 accent/灰轨道上均清晰；thumb 同步隐藏） */
+.switchLoader {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--mx-text-on-accent) 30%, transparent);
+  border-top-color: var(--mx-text-on-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
+}
+
+.thumbHidden {
+  opacity: 0;
 }
 
 .hint {

@@ -10,8 +10,6 @@ const active = useShellData(
 
 <template>
   <main :class="$style.content">
-    <!-- macOS 壳：主区顶部拖动留白条（frame-top-clearance 48px），sticky 常驻 -->
-    <div :class="$style.dragBand" data-mx-drag-band aria-hidden="true" />
     <component :is="active.component" v-if="active" :active="true" />
   </main>
 </template>
@@ -34,23 +32,5 @@ const active = useShellData(
  * （对齐 DSH AppFrame.module.css 的 centerCol 处理） */
 :global(html[data-platform='darwin']) .content {
   border-left: 0.5px solid var(--mx-border-strong);
-}
-
-/* macOS 壳：主区顶部 48px 拖动留白（--dsh-frame-top-clearance 同值，
- * DSH AppFrame.module.css L93-95）；sticky 常驻顶部不随内容滚走，
- * 占位即留白（入口内容自然从其下开始）；非 darwin 不渲染 */
-.dragBand {
-  display: none;
-}
-
-:global(html[data-platform='darwin']) .dragBand {
-  display: block;
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  height: 48px;
-  /* flex 纵向容器内不被压缩，满高页面的 flex:1 计算才准确让位 48px */
-  flex-shrink: 0;
-  -webkit-app-region: drag;
 }
 </style>

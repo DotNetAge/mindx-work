@@ -512,12 +512,24 @@ onMounted(syncIndicator)
           @keydown.enter.prevent="openZoomLocal(skill, $event)"
         >
           <div :class="$style.cardTop">
-            <span :class="$style.avatar">{{ (skillDisplayName(skill) || '?').charAt(0).toUpperCase() }}</span>
+            <span :class="$style.avatar"><MxIcon name="lucide:sparkles" :size="20" /></span>
             <div :class="$style.titleCol">
               <span :class="$style.name" :title="skill.name">{{ skillDisplayName(skill) }}</span>
               <span :class="$style.id">{{ skill.name }}</span>
             </div>
             <span v-if="isThirdParty(skill)" class="mx-tag" data-tone="warning">第三方</span>
+            <!-- 操作组右上角（@click.stop 防触发卡片详情弹层） -->
+            <div :class="$style.cardActions" @click.stop>
+              <button type="button" class="mx-icon-btn" aria-label="导出为分发包" @click="onExport(skill)">
+                <MxIcon name="lucide:download" :size="16" />
+              </button>
+              <button type="button" class="mx-icon-btn" aria-label="修改 SKILL.md" @click="onEdit(skill)">
+                <MxIcon name="lucide:pencil" :size="16" />
+              </button>
+              <button type="button" class="mx-icon-btn" aria-label="删除技能" @click="onDelete(skill)">
+                <MxIcon name="lucide:trash-2" :size="16" />
+              </button>
+            </div>
           </div>
           <p :class="$style.desc" :title="skillLocaleDesc(skill)">{{ skillLocaleDesc(skill) || '(无描述)' }}</p>
           <div :class="$style.tagRow">
@@ -533,20 +545,6 @@ onMounted(syncIndicator)
               @click.stop="onLicense(skill)"
               @keydown.enter.prevent="onLicense(skill)"
             >许可证</span>
-          </div>
-          <div :class="$style.cardFoot" @click.stop>
-            <span></span>
-            <div :class="$style.cardActions">
-              <button type="button" class="mx-icon-btn" aria-label="导出为分发包" @click="onExport(skill)">
-                <MxIcon name="lucide:download" :size="16" />
-              </button>
-              <button type="button" class="mx-icon-btn" aria-label="修改 SKILL.md" @click="onEdit(skill)">
-                <MxIcon name="lucide:pencil" :size="16" />
-              </button>
-              <button type="button" class="mx-icon-btn" aria-label="删除技能" @click="onDelete(skill)">
-                <MxIcon name="lucide:trash-2" :size="16" />
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -567,7 +565,7 @@ onMounted(syncIndicator)
           @keydown.enter.prevent="openZoomMarket(pkg, $event)"
         >
           <div :class="$style.cardTop">
-            <span :class="$style.avatar">{{ (store.marketDisplayName(pkg) || '?').charAt(0).toUpperCase() }}</span>
+            <span :class="$style.avatar"><MxIcon name="lucide:sparkles" :size="20" /></span>
             <div :class="$style.titleCol">
               <span :class="$style.name" :title="pkg.name">{{ store.marketDisplayName(pkg) }}</span>
               <span :class="$style.id">{{ pkg.name }}</span>
@@ -605,7 +603,7 @@ onMounted(syncIndicator)
           @click.stop
         >
           <div :class="$style.cardTop">
-            <span :class="$style.avatar">{{ (zoomed.title || '?').charAt(0).toUpperCase() }}</span>
+            <span :class="$style.avatar"><MxIcon name="lucide:sparkles" :size="20" /></span>
             <div :class="$style.titleCol">
               <span :class="$style.name">{{ zoomed.title }}</span>
               <span :class="$style.id">{{ zoomed.name }}</span>
