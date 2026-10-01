@@ -23,6 +23,8 @@ export const docPreviewPlugin: VuePlugin = (ctx) => {
     title: '文档',
     icon: 'lucide:file-text',
     component: DetailPanel,
+    // 理想宽：pdf/office 页面需要宽版面，激活时轨道拉宽（clamp 到平分上限）
+    preferredWidth: 760,
   })
 
   // DetailToolbar 尾段按钮（owner 归属本条目）：「添加到对话」引用 chip
@@ -31,7 +33,14 @@ export const docPreviewPlugin: VuePlugin = (ctx) => {
   // services：store 延迟外壳（装配期 Pinia 未安装，禁止此时创建 store）
   ctx.services.provide('docpreview.store', createDocPreviewService())
 
+  // 文件类型接管：文档扩展名 → 本插件（打开路由动态注册表）
+  const unregisterFileTypes = ctx.fileTypes.register(
+    ['pdf', 'docx', 'xlsx', 'pptx'],
+    'docpreview.store',
+  )
+
   return () => {
+    unregisterFileTypes()
     ctx.Detail.removeToolbar('doc-preview-detail-addchat')
   }
 }

@@ -10,6 +10,7 @@ export type {
   Unsubscribe,
   ViewProps,
 } from './types'
+export { createFileTypesContext, type FileTypesContext } from './fileTypes'
 export { createApp, validateShellConstraints, type AppShell } from './createApp'
 export { MX_API_VERSION, manifestIssues, type PluginManifest } from './plugin-manifest'
 export {

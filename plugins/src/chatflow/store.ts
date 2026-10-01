@@ -428,7 +428,7 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     sessionsLoading.value = true
     try {
       const list = await daemon.call<ServerSessionInfo[]>('session.list', {})
-      sessions.value = (list || []).map((s) => ({
+      const mapped = (list || []).map((s) => ({
         session_id: s.session_id,
         agent_name: s.agent_name || '',
         title: s.title || '',
@@ -438,6 +438,24 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
         project_dir: s.project_dir,
         session_dir: s.session_dir,
       }))
+      // 同 id 去重（daemon 分片存储按 agent 目录归档，同一会话可能存在跨 agent
+      // 重复副本，如 assistant 下无目录副本 + architect 下正常副本）：project_dir
+      // 非空优先，其次最近活跃。空目录副本若赢得去重，会话恢复后 currentProjectDir
+      // 不就位——explorer 详情轨道永远停在「正在定位工作目录」，发送链路同样卡死
+      const byId = new Map<string, Session>()
+      for (const s of mapped) {
+        const prev = byId.get(s.session_id)
+        if (!prev) {
+          byId.set(s.session_id, s)
+          continue
+        }
+        const better =
+          (!!s.project_dir && !prev.project_dir) ||
+          (!!s.project_dir === !!prev.project_dir && s.updated_at > prev.updated_at)
+        if (better) byId.set(s.session_id, s)
+      }
+      // Map 保序（插入序 = daemon 返回的活跃度倒序），去重不改排序
+      sessions.value = [...byId.values()]
       sessionsLoaded.value = true
       // 启动自动激活：列表就绪后自动打开最近会话（用户定稿：一进入就加载会话，
       // 工作目录/Agent 随 switchToSession 就位，发送链路立即可用）。仅缺活动会话
@@ -2446,31 +2464,7 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     void loadSessions()
   }
 
-  // ---------- 打开文件 / 网页（详情轨道四插件路由）----------
-
-  /** markdown 扩展名（explorer 面板同判据） */
-  const MARKDOWN_EXTS = new Set(['md', 'markdown'])
-  /** 常见图片扩展名（svg 归 svgboard 可编辑，不在此列） */
-  const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
-  // 文档预览路由（docpreview 插件：pdf 直出、docx/xlsx/pptx 前端渲染）
-  const DOC_EXTS = new Set(['pdf', 'docx', 'xlsx', 'pptx'])
-  // 视频路由（video-viewer 插件：mx-file 流式协议播放；avi/flv 等容器浏览器不解码，
-  // 仍路由进来由面板错误态提示，好于落回资源管理器定位）
-  const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ogv'])
-  // SVG → svgboard（矢量画板：查看与编辑一体）
-  const SVGBOARD_EXTS = new Set(['svg'])
-  // dashboard → 仪表板插件（Agent 生成的动态仪表板布局，Detail 轨道渲染）
-  const KANBAN_EXTS = new Set(['dash'])
-
-  /** 代码文件扩展名（codeeditor 承接，CodeMirror 按扩展名语法高亮） */
-  const CODE_EXTS = new Set([
-    'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
-    'go', 'py', 'rs', 'java', 'kt', 'swift', 'dart', 'rb', 'php', 'lua',
-    'c', 'h', 'cpp', 'hpp', 'cc', 'cxx', 'm', 'mm',
-    'css', 'scss', 'sass', 'less', 'html', 'htm', 'vue', 'svelte',
-    'json', 'yml', 'yaml', 'toml', 'xml', 'sql',
-    'sh', 'bash', 'zsh', 'bat', 'ps1',
-  ])
+  // ---------- 打开文件 / 网页（文件类型接管注册表路由）----------
 
   /** 剥离 grep 命中行传入的 `:行号`（或 `:起-止`）尾巴 */
   function stripLineSuffix(p: string): string {
@@ -2532,8 +2526,9 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
   }
 
   /**
-   * 打开文件到详情轨道：目录 → explorer 定位；md/markdown → markdown；
-   * 图片扩展 → image-viewer；其余文件 → explorer 定位（父目录 + 高亮）。
+   * 打开文件到详情轨道：目录 → explorer 定位；接管扩展名 → 声明插件
+   * （fileTypes 注册表，市场插件装入即生效）；未接管 → codeeditor 兜底
+   * （二进制由其嗅探转系统打开）；codeeditor 缺失 → 系统默认程序 / explorer 定位。
    */
   async function openFile(rawPath: string): Promise<void> {
     const target = stripLineSuffix(rawPath.trim())
@@ -2551,72 +2546,24 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
       // 探测失败按文件处理（扩展名路由兜底）
     }
     const ext = extOf(resolved)
-    if (!isDir && MARKDOWN_EXTS.has(ext)) {
-      const svc = serviceOf<OpenerService>('markdown.store')
-      if (svc) {
-        await svc.store.open(resolved)
+    // 文件类型接管注册表路由：扩展名 → 声明插件服务
+    if (!isDir) {
+      const serviceId = shell.fileTypes.serviceOf(ext)
+      if (serviceId) {
+        const svc = serviceOf<OpenerService>(serviceId)
+        if (svc) {
+          await svc.store.open(resolved)
+          return
+        }
+        ElMessage.warning(`.${ext} 文件的查看器未启用`)
         return
       }
-      ElMessage.warning('Markdown 查看器未启用')
-      return
-    }
-    if (!isDir && IMAGE_EXTS.has(ext)) {
-      const svc = serviceOf<OpenerService>('image-viewer.store')
-      if (svc) {
-        await svc.store.open(resolved)
+      // 未接管扩展名 → codeeditor 兜底（二进制由其嗅探后转系统默认程序）
+      const code = serviceOf<OpenerService>('codeeditor.store')
+      if (code) {
+        await code.store.open(resolved)
         return
       }
-      ElMessage.warning('图片查看器未启用')
-      return
-    }
-    // PDF / Office 文档 → docpreview（pdf/docx/xlsx/pptx，Detail 轨道文档 tab）
-    if (!isDir && DOC_EXTS.has(ext)) {
-      const svc = serviceOf<OpenerService>('docpreview.store')
-      if (svc) {
-        await svc.store.open(resolved)
-        return
-      }
-      ElMessage.warning('文档预览未启用')
-      return
-    }
-    // 视频文件 → video-viewer（mx-file 流式协议，Detail 轨道视频 tab）
-    if (!isDir && VIDEO_EXTS.has(ext)) {
-      const svc = serviceOf<OpenerService>('video-viewer.store')
-      if (svc) {
-        svc.store.open(resolved)
-        return
-      }
-      ElMessage.warning('视频播放器未启用')
-      return
-    }
-    // SVG → svgboard（矢量画板查看与编辑一体）
-    if (!isDir && SVGBOARD_EXTS.has(ext)) {
-      const svc = serviceOf<OpenerService>('svgboard.store')
-      if (svc) {
-        await svc.store.open(resolved)
-        return
-      }
-      ElMessage.warning('矢量画板未启用')
-      return
-    }
-    // dashboard → 仪表板插件（Agent-Driven UI：布局 + 数据渲染，Detail 轨道仪表板 tab）
-    if (!isDir && KANBAN_EXTS.has(ext)) {
-      const svc = serviceOf<OpenerService>('kanban.store')
-      if (svc) {
-        await svc.store.open(resolved)
-        return
-      }
-      ElMessage.warning('仪表板未启用')
-      return
-    }
-    if (!isDir && CODE_EXTS.has(ext)) {
-      const svc = serviceOf<OpenerService>('codeeditor.store')
-      if (svc) {
-        await svc.store.open(resolved)
-        return
-      }
-      ElMessage.warning('代码编辑器未启用')
-      return
     }
     // 未知类型兜底（Agent-Driven UI：file_open 覆盖链 = 内置查看器 → 系统默认
     // 程序）：无内置查看器/编辑器的文件类型（pdf/office/压缩包等）交系统默认

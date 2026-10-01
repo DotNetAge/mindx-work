@@ -48,9 +48,13 @@ export const kanbanPlugin: VuePlugin = (ctx) => {
   // services：store 延迟外壳（装配期 Pinia 未安装，禁止此时创建 store）
   ctx.services.provide('kanban.store', createKanbanService())
 
-  // 停用清理：席位移除 + 收起 Detail 轨道（若正展示本 tab）。
+  // 文件类型接管：dash → 本插件（打开路由动态注册表）
+  const unregisterFileTypes = ctx.fileTypes.register(['dash'], 'kanban.store')
+
+  // 停用清理：席位移除 + 文件类型接管摘除 + 收起 Detail 轨道（若正展示本 tab）。
   // Sidebar 节无 remove API（chatflow 先例同），随应用生命周期常驻。
   return () => {
+    unregisterFileTypes()
     if (ctx.Detail.activeTabId === KANBAN_DETAIL_ID) ctx.Detail.hide()
     ctx.Detail.remove(KANBAN_DETAIL_ID)
     ctx.Detail.removeToolbar('kanban-detail-addchat')

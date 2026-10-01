@@ -37,8 +37,12 @@ export const svgboardPlugin: VuePlugin = (ctx) => {
   // services：store 延迟外壳（装配期 Pinia 未安装，禁止此时创建 store）
   ctx.services.provide('svgboard.store', createSvgboardService())
 
-  // 停用清理：席位移除
+  // 文件类型接管：svg → 本插件（打开路由动态注册表）
+  const unregisterFileTypes = ctx.fileTypes.register(['svg'], 'svgboard.store')
+
+  // 停用清理：席位移除 + 文件类型接管摘除
   return () => {
+    unregisterFileTypes()
     ctx.Toolbar.remove('svgboard-toolbar-open')
     ctx.Detail.removeToolbar('svgboard-detail-addchat')
   }

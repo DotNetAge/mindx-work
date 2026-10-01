@@ -6,11 +6,11 @@
  * 缩进 = 深度 × 14px。右键打开上下文菜单（store.openCtx，菜单由 DetailPanel 渲染）。
  * 内联重命名（store.renamingPath 命中本行渲染 input，enter 确认 esc 取消）。
  * phantom 新建行（store.creating.parent 命中本目录子层首行渲染 input）。
- * 点击目录懒加载展开；点击文件按扩展名路由（markdown / 图片进对应插件，其余定位高亮）。
+ * 点击目录懒加载展开；点击文件按文件类型接管注册表路由（未接管走 codeeditor 兜底）。
  */
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MxIcon, useService } from '@mindx-work/ui-shell-vue'
+import { MxIcon, useService, useShell } from '@mindx-work/ui-shell-vue'
 import { useExplorerStore, type FsEntry } from './store'
 
 const props = defineProps<{
@@ -19,76 +19,33 @@ const props = defineProps<{
 }>()
 
 const store = useExplorerStore()
+const shell = useShell()
 
-// 消费侧本地服务形状（插件间禁止 import，仅声明所需最小形状）
-interface MarkerServiceLike {
+// codeeditor 兜底外壳在 setup 捕获（useService 是 inject，只能在组件同步上下文调用）；
+// 缺失（插件停用）降级为仅定位高亮。
+interface CodeEditorServiceLike {
   readonly store: { open(path: string): Promise<void> }
 }
-interface ImageViewerServiceLike {
-  readonly store: { open(path: string): Promise<void> }
-}
-interface DocPreviewServiceLike {
-  readonly store: { open(path: string): Promise<void> }
-}
-interface VideoViewerServiceLike {
-  readonly store: { open(path: string): void }
-}
-interface SvgboardServiceLike {
-  readonly store: { open(path: string): Promise<void> }
-}
-interface KanbanServiceLike {
-  readonly store: { open(path: string): Promise<void> }
-}
-// 服务外壳在 setup 捕获（useService 是 inject，只能在组件同步上下文调用）；
-// 缺失（插件停用）静默降级为仅定位高亮。
-let markdownSvc: MarkerServiceLike | null = null
-let imageSvc: ImageViewerServiceLike | null = null
-let docSvc: DocPreviewServiceLike | null = null
-let videoSvc: VideoViewerServiceLike | null = null
-let svgSvc: SvgboardServiceLike | null = null
-let kanbanSvc: KanbanServiceLike | null = null
+let codeSvc: CodeEditorServiceLike | null = null
 try {
-  markdownSvc = useService<MarkerServiceLike>('markdown.store')
+  codeSvc = useService<CodeEditorServiceLike>('codeeditor.store')
 } catch {
-  markdownSvc = null
+  codeSvc = null
 }
-try {
-  imageSvc = useService<ImageViewerServiceLike>('image-viewer.store')
-} catch {
-  imageSvc = null
-}
-try {
-  docSvc = useService<DocPreviewServiceLike>('docpreview.store')
-} catch {
-  docSvc = null
-}
-try {
-  videoSvc = useService<VideoViewerServiceLike>('video-viewer.store')
-} catch {
-  videoSvc = null
-}
-try {
-  svgSvc = useService<SvgboardServiceLike>('svgboard.store')
-} catch {
-  svgSvc = null
-}
-try {
-  kanbanSvc = useService<KanbanServiceLike>('kanban.store')
-} catch {
-  kanbanSvc = null
-}
-
-const MARKDOWN_EXTS = new Set(['md', 'markdown'])
-const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
-const DOC_EXTS = new Set(['pdf', 'docx', 'xlsx', 'pptx'])
-const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ogv'])
-const SVGBOARD_EXTS = new Set(['svg'])
-const KANBAN_EXTS = new Set(['dash'])
 
 function extOf(path: string): string {
   const base = path.split('/').pop() || path
   const dot = base.lastIndexOf('.')
   return dot > 0 ? base.slice(dot + 1).toLowerCase() : ''
+}
+
+/** 按服务名取打开器（服务缺失 = 插件停用，返回 null 不炸） */
+function openerOf(name: string): { store: { open(path: string): Promise<void> | void } } | null {
+  try {
+    return shell.services.use(name)
+  } catch {
+    return null
+  }
 }
 
 /** 子项清单（已加载才有；未加载 undefined 不渲染子层）；过滤态绕过展开态呈现命中链 */
@@ -164,33 +121,31 @@ function cancelCreate(): void {
   phantomName.value = ''
 }
 
-/** 点击行：目录懒加载展开；文件按扩展名路由（其余定位高亮） */
+/** 点击行：目录懒加载展开；文件按文件类型接管注册表路由（未接管 → codeeditor 兜底） */
 function onClick(): void {
   if (props.entry.is_dir) {
     void store.toggle(props.entry.path)
     return
   }
   store.highlightPath = props.entry.path
-  const ext = extOf(props.entry.path)
-  if (MARKDOWN_EXTS.has(ext)) {
-    if (markdownSvc) void markdownSvc.store.open(props.entry.path)
-    else ElMessage.warning('Markdown 查看器未启用')
-  } else if (IMAGE_EXTS.has(ext)) {
-    if (imageSvc) void imageSvc.store.open(props.entry.path)
-    else ElMessage.warning('图片查看器未启用')
-  } else if (DOC_EXTS.has(ext)) {
-    if (docSvc) void docSvc.store.open(props.entry.path)
-    else ElMessage.warning('文档预览未启用')
-  } else if (VIDEO_EXTS.has(ext)) {
-    if (videoSvc) videoSvc.store.open(props.entry.path)
-    else ElMessage.warning('视频播放器未启用')
-  } else if (SVGBOARD_EXTS.has(ext)) {
-    if (svgSvc) void svgSvc.store.open(props.entry.path)
-    else ElMessage.warning('矢量画板未启用')
-  } else if (KANBAN_EXTS.has(ext)) {
-    if (kanbanSvc) void kanbanSvc.store.open(props.entry.path)
-    else ElMessage.warning('仪表板未启用')
+  const path = props.entry.path
+  const ext = extOf(path)
+  // 接管扩展名 → 声明插件（装配期注册，市场插件装入即生效，路由代码零改动）
+  const serviceId = shell.fileTypes.serviceOf(ext)
+  if (serviceId) {
+    const svc = openerOf(serviceId)
+    if (svc) {
+      void svc.store.open(path)
+    } else {
+      ElMessage.warning(`.${ext} 文件的查看器未启用`)
+    }
+    return
   }
+  // 未接管扩展名 → codeeditor 兜底（二进制由 codeeditor 嗅探后转系统默认程序）
+  if (codeSvc) {
+    void codeSvc.store.open(path)
+  }
+  // codeeditor 未启用：定位高亮即兜底
 }
 
 /** 右键：上抛目标与指针位置（菜单由 DetailPanel 统一渲染） */
@@ -291,9 +246,9 @@ function onCtx(event: MouseEvent): void {
         <MxIcon
           v-else
           :name="
-            MARKDOWN_EXTS.has(extOf(entry.path))
+            ['md', 'markdown'].includes(extOf(entry.path))
               ? 'lucide:file-text'
-              : IMAGE_EXTS.has(extOf(entry.path))
+              : ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(extOf(entry.path))
                 ? 'lucide:image'
                 : ['ts', 'tsx', 'js', 'jsx', 'vue', 'go', 'rs', 'py', 'sh', 'css', 'html'].includes(
                       extOf(entry.path)

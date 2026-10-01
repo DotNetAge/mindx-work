@@ -60,3 +60,13 @@
 - **CDP 驱动 mindx-work 界面的实操路径**：reload 后会话/详情轨道全关；入口链 = 侧栏会话行（叶子文本匹配，注意消息摘要截断如「帮我安装 Agent Reac…」）→ `[title="打开会话产物"]`；无工作目录的会话技能/待办段显示空态。**绕过会话切换的轻量法**：`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s` 拿 store（chatflow-store），直接赋 `store.currentProjectDir` 触发 watch 重拉——UI 交互仍走真实链路。
 - **Playwright 双击编辑的坑**：dblclick 触发 Vue 编辑态后 span 被 input 替换，locator 失效导致 Playwright 动作重试超时——用 `dispatchEvent(new MouseEvent('dblclick', {bubbles:true}))` 触发后直接操作 input。
 - **`| tail` 吞退出码假象**：`vue-tsc | tail` 的 exit code 是 tail 的（永远 0），上一轮 typecheck「通过」是假的；判断要用输出内容或 PIPESTATUS。既有错误一例：plugins 无 vite 依赖（vite 7 装在 app/），`import.meta.glob` 类型缺失——Vite 7 client.d.ts 不再内联 glob 声明，手写最小 ImportMeta interface 增强解决（vite-env.d.ts）。MxIcon :size 类型只收 16|20。
+
+## 八轮：飞书交互二批（便签/连接线/导出 PNG）调试实录（2026-10-01 追加）
+
+- **setPointerCapture 会重定向兼容鼠标事件的 target（本round最大坑，同病三处）**：pointerdown 里 `setPointerCapture` 后，后续 pointermove/pointerup/click/dblclick 的 `e.target` 全部变成捕获元素（画布 SVG 本体）——凡依赖 `e.target.closest('[data-shape-id]')` 的命中检测在手势帧全部失效。首版只有 pointerdown 帧能用，三处中招：spline 吸附（move/up 不吸附→connTo 永不落定）、双击再编辑（dblclick target=SVG→编辑器永不弹出）、橡皮擦拖擦（只有第一下能删）。修复 = `document.elementsFromPoint(x,y)` 自上而下遍历 + `canvasEl.contains(el)` 过滤（hitShapeAt）；snapAnchor 的 connectableOnly 变体还要继续向下层穿透（草稿线/既有线不可作端点但会挡在指针下）。
+- **pointerdown 同步开编辑浮层 = mousedown 默认行为抢焦点删除**：placeSticky/placeText 在 pointerdown 里放置 + `nextTick(() => input.focus())`，微任务渲染聚焦完成后浏览器继续派发 mousedown，其默认动作（target 不可聚焦→blur 当前焦点）立刻触发 `@blur="confirmEdit"` 空文本→isNew 删除，表现为"点击放置便签瞬间消失"。修复 = 放置分支 `e.preventDefault()`（取消 pointerdown 即抑制兼容 mousedown）。实证手段：源码临时打点 `[sb-debug]` + HMR + CDP 捕获 console，一次定位「sticky placed shapes=1 → confirmEdit empty」完整链。
+- **spline 终点吸附参考点必须是线的起点而非指针**：nearestMid 参考用指针位置时，指针在目标图形中心会吸到 top/bottom 边（距离 70 < 左右 90），与"连接线落在朝向源头的边"的直觉相反；参考=线另一端才能与 updateConns 的动态换边语义一致（拖动后自动换到最近边）。起点吸附（无另一端）才用指针作参考。
+- **CDP 验证画布坐标：viewBox 与元素宽高不等比时存在 letterbox 偏移**：viewBox 0 0 1000 700 落在 1099×1246 元素上，meet 模式垂直居中补偿 (1246−769)/2≈238px——屏幕比例点 pt(fx,fy) 反推的 SVG y 与直觉差 78+；验证脚本断言要从 DOM attrs 自洽推期望值（先画再读 attrs 算期望），不要用屏幕比例硬算 SVG 坐标。
+- **Pinia 桥的边界**：`$pinia._s.get('svgboard-store')` 只有延迟外壳字段（currentFile/serializer/pendingText/savePng…），shapes/editBox/tool/selectedIds 全在 DetailPanel 的 setupState——`canvas.__vueParentComponent.setupState.shapes.splice(0)` 才是清场入口，两套别混（本round错调外壳 shapes 报 undefined）。
+- **导入便签的 DOM 层级**：sticky 渲染为 `<g data-shape-id><rect/><text v-if="s.text"/></g>`——fill 在内层 rect 上（g 无 fill 属性），空文本时无 text 子元素；脚本断言要 querySelector('rect').getAttribute('fill')。
+- **验证书写教训**：粘贴体带 transform（mergeTranslate 偏移），比较"线端点 vs 目标左缘"必须 attr+translate 的视觉坐标（vx 助手）；数组计数别漏此前步骤产出的图形（便签+两矩形+连接线=4，粘贴后 8 而非 6）；toDataURL 头含逗号 `data:image/png;base64,`（slice(0,22)），等值断言用 startswith。

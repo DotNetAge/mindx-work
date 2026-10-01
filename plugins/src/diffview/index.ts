@@ -25,6 +25,8 @@ export const diffviewPlugin: VuePlugin = (ctx) => {
     title: '变更',
     icon: 'lucide:git-compare',
     component: DiffPanel,
+    // 理想宽：双栏对比需要宽版面，激活时轨道拉宽（clamp 到平分上限）
+    preferredWidth: 760,
   })
 
   // Sidebar Footer 固定区：变更入口行（order 92：记忆 91 之下、设置 100 之上）

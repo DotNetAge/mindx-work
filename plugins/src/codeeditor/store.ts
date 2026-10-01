@@ -7,7 +7,7 @@
 
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { VueAppShell } from '@mindx-work/ui-shell-vue'
 
 /** Detail tab 条目 id（index.ts 注册与命令编排共用） */
@@ -56,6 +56,26 @@ export const useCodeEditorStore = defineStore('codeeditor-store', () => {
   }
 
   /**
+   * 二进制嗅探：NUL 字节启发式（文本文件不含 0x00，二进制内容前部几乎必现，
+   * 与 VS Code 同思路）。fs.read 按 UTF-8 解码，二进制 → 大量乱码 + \u0000，
+   * 嗅探命中即拒绝入编辑器。兜底路由未接管扩展名时由本函数甄别二进制。
+   */
+  function looksBinary(content: string): boolean {
+    return content.slice(0, 8192).includes('\u0000')
+  }
+
+  /** 二进制处置：交系统默认程序打开（无宿主桥则提示不支持） */
+  async function handOffBinary(path: string): Promise<void> {
+    const openPath = window.mxDesktop?.openPath
+    if (openPath) {
+      const errMsg = await openPath(path)
+      if (errMsg) ElMessage.warning('系统打开失败: ' + errMsg)
+      return
+    }
+    ElMessage.warning('二进制文件无法在代码编辑器中打开')
+  }
+
+  /**
    * 命令 action（契约 §10.3 范式）：打开代码文件到详情轨道。
    * 切换文件存在未保存修改时先确认（放弃则保持现状）。
    */
@@ -77,6 +97,11 @@ export const useCodeEditorStore = defineStore('codeeditor-store', () => {
     error.value = ''
     try {
       const result = await daemon.call<{ content: string }>('fs.read', { path })
+      // 二进制甄别（兜底路由的关键）：拒入编辑器，转交系统默认程序
+      if (looksBinary(result.content)) {
+        await handOffBinary(path)
+        return
+      }
       currentFile.value = path
       diskContent.value = result.content
       code.value = result.content

@@ -36,6 +36,10 @@ export type DetailEntry<C> = Entry<C> & {
   /** 声明式满宽提示：该条目被激活拉出轨道时，宽度默认取当前上限（用户仍可拖拽调窄）。
    * 适合网页浏览 / 终端等宽内容层；缺省 false 取轨道缺省宽 */
   openMax?: boolean
+  /** 声明式理想宽（px）：该条目激活时轨道宽度取此值（clamp 到拖拽边界与平分上限）。
+   * 宽度仲裁优先级 openMax > preferredWidth > 壳缺省——"激活谁用谁的宽"，
+   * 适合 markdown / 代码编辑 / 文档预览等宽内容层与图片等窄内容层混用场景 */
+  preferredWidth?: number
 }
 
 export type OverlayEntry<C> = Entry<C> & { kind: OverlayKind }

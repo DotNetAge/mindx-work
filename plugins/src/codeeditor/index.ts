@@ -18,6 +18,8 @@ export const codeEditorPlugin: VuePlugin = (ctx) => {
     title: '代码',
     icon: 'lucide:file-code',
     component: DetailPanel,
+    // 理想宽：代码行需要宽版面，激活时轨道拉宽（clamp 到平分上限）
+    preferredWidth: 760,
   })
 
   // services：store 延迟外壳（装配期 Pinia 未安装，禁止此时创建 store）

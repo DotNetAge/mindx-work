@@ -1,6 +1,7 @@
 /** 装配入口：执行插件清单、启动期暴露冲突与缺失（契约第 7 节） */
 
 import { createChangeHub } from './changes'
+import { createFileTypesContext, type FileTypesContext } from './fileTypes'
 import { createServiceContext } from './services'
 import {
   createContentView,
@@ -18,7 +19,7 @@ import {
 } from './views'
 import type { Plugin, ServiceContext, Unsubscribe } from './types'
 
-/** AppShell 总面：六视图区 + 服务上下文 + 壳机制状态 */
+/** AppShell 总面：六视图区 + 服务上下文 + 文件类型接管注册表 + 壳机制状态 */
 export interface AppShell<C> {
   readonly Sidebar: SidebarViewApi<C>
   readonly Content: ContentViewApi<C>
@@ -27,6 +28,8 @@ export interface AppShell<C> {
   readonly Toolbar: ToolbarViewApi<C>
   readonly Settings: PreferencesApi<C>
   readonly services: ServiceContext
+  /** 文件类型接管注册表：插件声明扩展名 → 打开服务名（路由方查询分派） */
+  readonly fileTypes: FileTypesContext
   /** 结构版本：任何视图区条目 / 壳状态变更后递增，适配器据此同步 */
   readonly version: number
   /** 订阅结构变更，返回取消订阅函数 */
@@ -67,6 +70,7 @@ export function createApp<C>(plugins: readonly Plugin<C>[]): AppShell<C> {
     Toolbar: createToolbarView<C>(hub),
     Settings: createPreferences<C>(hub),
     services: createServiceContext(),
+    fileTypes: createFileTypesContext(),
     get version() {
       return hub.version
     },

@@ -18,10 +18,18 @@ export const markdownPlugin: VuePlugin = (ctx) => {
     title: 'Markdown',
     icon: 'lucide:file-text',
     component: DetailPanel,
+    // 理想宽：正文阅读需要宽版面，激活时轨道拉宽（clamp 到平分上限）
+    preferredWidth: 760,
   })
 
   // services：store 延迟外壳（装配期 Pinia 未安装，禁止此时创建 store）
   ctx.services.provide('markdown.store', createMarkdownService())
 
-  return () => {}
+  // 文件类型接管：md/markdown → 本插件（打开路由动态注册表，停用摘除）
+  const unregisterFileTypes = ctx.fileTypes.register(['md', 'markdown'], 'markdown.store')
+
+  // 停用清理：文件类型接管摘除
+  return () => {
+    unregisterFileTypes()
+  }
 }

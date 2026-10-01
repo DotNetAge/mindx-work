@@ -108,7 +108,16 @@ export const useSvgboardStore = defineStore('svgboard-store', () => {
     }
   }
 
-  return { currentFile, dirty, loading, error, pendingText, serializer, create, open, save }
+  /** 导出 PNG：dataURL 剥离前缀取纯 base64，系统对话框取路径后 fs.write_base64 落盘 */
+  async function savePng(dataUrl: string): Promise<boolean> {
+    const picked = await window.mxDesktop?.dialog.saveFile('drawing.png')
+    if (!picked) return false
+    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+    await daemon.call('fs.write_base64', { path: picked, content: base64 })
+    return true
+  }
+
+  return { currentFile, dirty, loading, error, pendingText, serializer, create, open, save, savePng }
 })
 
 // ── 服务外壳（装配期 Pinia 尚未安装，provide 延迟解析响应式本体）────────────

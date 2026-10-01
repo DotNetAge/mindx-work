@@ -42,21 +42,6 @@ const dragging = ref(false)
 /** 根元素引用：拖拽时实测「中段一半」约束（frame 宽 - 侧栏宽）/ 2 */
 const rootRef = ref<HTMLElement | null>(null)
 
-/** 声明式满宽（DetailEntry.openMax）：轨道拉出或切层到 openMax 条目时，
- * 宽度默认取当前上限（openMaxActive 由版本订阅驱动，与文件内其余壳状态读取同范式） */
-const openMaxActive = useShellData(
-  () =>
-    shell.Detail.shown &&
-    !!shell.Detail.entries.find((entry) => entry.id === shell.Detail.activeTabId)?.openMax,
-)
-watch(openMaxActive, async (active) => {
-  if (!active) return
-  // 等 v-if 挂载完成再实测上限（rootRef 挂载后才有值）
-  await nextTick()
-  const max = measureMax()
-  if (Number.isFinite(max)) width.value = max
-})
-
 /** 平分约束：Detail 最大 = Sidebar 右侧空间的一半（与 Content 一人一半）。
  * 实测 frame 宽与 --mx-frame-sidebar（AppFrame 绑定，折叠取 rail 80）；
  * CSS max-width 同式兜底窗口 resize，这里保证拖拽 state 不超过显示宽 */
@@ -68,6 +53,40 @@ function measureMax(): number {
   const sidebar = parseFloat(getComputedStyle(frame).getPropertyValue('--mx-frame-sidebar'))
   return (frame.clientWidth - (Number.isFinite(sidebar) ? sidebar : 0)) / 2
 }
+
+/** 宽度仲裁：按当前激活条目的声明取理想宽（openMax 拉满 > preferredWidth > 壳缺省）。
+ * 「激活谁用谁的宽」：explorer 窄轨道打开 markdown / codeeditor 自动拉宽，
+ * 切回图片等窄层自动收窄；用户拖拽随时可临时覆盖，双击手柄回到本条目理想宽 */
+function applyIdealWidth(): void {
+  const entry = shell.Detail.entries.find((e) => e.id === shell.Detail.activeTabId)
+  if (!entry) return
+  if (entry.openMax) {
+    const max = measureMax()
+    if (Number.isFinite(max)) width.value = max
+    return
+  }
+  const max = measureMax()
+  width.value = Math.min(
+    Math.max(entry.preferredWidth ?? WIDTH_DEFAULT, WIDTH_MIN),
+    Number.isFinite(max) ? max : Number.POSITIVE_INFINITY,
+  )
+}
+
+// 条目切换 / 轨道打开时仲裁（openMaxActive 由版本订阅驱动，与文件内其余壳状态读取同范式）；
+// 等 v-if 挂载完成再实测上限（rootRef 挂载后才有值）
+watch(
+  useShellData(() => {
+    if (!shell.Detail.shown) return null
+    const entry = shell.Detail.entries.find((e) => e.id === shell.Detail.activeTabId)
+    return entry ? { id: entry.id, openMax: !!entry.openMax, pw: entry.preferredWidth } : null
+  }),
+  async (cur, prev) => {
+    // 同一条目重复触发（无实义变化）不重设，保住用户拖拽结果
+    if (!cur || (prev && cur.id === prev.id && cur.openMax === prev.openMax && cur.pw === prev.pw)) return
+    await nextTick()
+    applyIdealWidth()
+  },
+)
 
 function onResizeStart(event: PointerEvent) {
   dragging.value = true
@@ -134,12 +153,12 @@ function onResizeStart(event: PointerEvent) {
     <div :class="$style.body">
       <component :is="activeTab.component" v-if="activeTab" :active="true" />
     </div>
-    <!-- 左缘拖拽手柄：悬停时显示分隔高亮，双击重置 -->
+    <!-- 左缘拖拽手柄：悬停时显示分隔高亮，双击重置为当前条目理想宽 -->
     <div
       :class="$style.resizer"
       title="拖拽调节宽度，双击重置"
       @pointerdown="onResizeStart"
-      @dblclick="width = WIDTH_DEFAULT"
+      @dblclick="applyIdealWidth"
     />
   </aside>
 </template>
@@ -154,8 +173,11 @@ function onResizeStart(event: PointerEvent) {
   /* 平分约束兜底：Detail 最大 = Sidebar 右侧空间的一半（与 Content 一人一半）；
    * --mx-frame-sidebar 由 AppFrame 绑定（折叠取 rail 80），拖拽 state 同式 clamp */
   max-width: calc((100% - var(--mx-frame-sidebar, 0px)) / 2);
-  /* 全屏收放时随中列过渡（.expanded 切换 max-width 百分比） */
-  transition: max-width var(--mx-duration-motion) var(--mx-ease-standard);
+  /* 全屏收放时随中列过渡（.expanded 切换 max-width 百分比）；
+   * width 过渡承载条目切换的宽窄自动调节（切层拉宽/收窄平滑移动） */
+  transition:
+    max-width var(--mx-duration-motion) var(--mx-ease-standard),
+    width var(--mx-duration-motion) var(--mx-ease-standard);
   background: var(--mx-bg-surface);
   border-left: 1px solid var(--mx-separator);
   flex-shrink: 0;

@@ -32,7 +32,14 @@ export const videoViewerPlugin: VuePlugin = (ctx) => {
   // services：store 延迟外壳（装配期 Pinia 未安装，禁止此时创建 store）
   ctx.services.provide('video-viewer.store', createVideoViewerService())
 
+  // 文件类型接管：视频扩展名 → 本插件（打开路由动态注册表）
+  const unregisterFileTypes = ctx.fileTypes.register(
+    ['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ogv'],
+    'video-viewer.store',
+  )
+
   return () => {
+    unregisterFileTypes()
     ctx.Detail.removeToolbar('video-viewer-detail-addchat')
   }
 }
