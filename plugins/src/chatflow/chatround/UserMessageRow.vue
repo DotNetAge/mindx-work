@@ -93,10 +93,9 @@ async function copyContent() {
   }
 }
 
-// 点击图片：浏览器原生大图预览（新窗口打开 data URL）
-function previewImage(url: string): void {
-  if (!url) return
-  window.open(url, '_blank')
+// 点击图片：路由到详情轨道大图查看（openFile 按扩展名进 image-viewer，替代 window.open 弹窗）
+function previewImage(path: string): void {
+  if (path) void store.openFile(path)
 }
 </script>
 
@@ -112,7 +111,7 @@ function previewImage(url: string): void {
               :src="imageUrls[img.path]"
               :alt="img.alt_text || '图片'"
               class="user-image-thumb"
-              @click="previewImage(imageUrls[img.path] || '')"
+              @click="previewImage(img.path)"
             />
             <span v-else-if="img.path" class="user-image-broken">读取图片失败</span>
           </template>

@@ -114,7 +114,8 @@ export function useNodeActions() {
       // ── 链接 / 技能 / 子会话 / 任务 / 定时 ──
       case 'open-url':
         if (node.type === 'tool.web_fetch' && node.url) {
-          window.open(node.url, '_blank', 'noopener')
+          // 链接统一路由 web-viewer（详情轨道），不再弹系统新窗口
+          chatStore.openUrl(node.url)
         }
         break
       case 'open-skill-doc': {

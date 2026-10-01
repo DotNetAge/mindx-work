@@ -1708,6 +1708,12 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     handleToolExecEnd(envelope.data, targetSessionOf(envelope))
   })
 
+  // file_open：Agent-Driven UI 命令（mindx ui open）广播，走既有分发表打开对应 Detail
+  onEvent('file_open', (envelope) => {
+    const p = envelope.data?.path
+    if (typeof p === 'string' && p) void openFile(p)
+  })
+
   // subtask_spawned：主会话流插入观察窗卡片 + sponsor 登记 + localStorage 登记
   onEvent('subtask_spawned', (envelope) => {
     const sid = targetSessionOf(envelope)
@@ -2444,8 +2450,17 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
 
   /** markdown 扩展名（explorer 面板同判据） */
   const MARKDOWN_EXTS = new Set(['md', 'markdown'])
-  /** 常见图片扩展名 */
-  const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
+  /** 常见图片扩展名（svg 归 svgboard 可编辑，不在此列） */
+  const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
+  // 文档预览路由（docpreview 插件：pdf 直出、docx/xlsx/pptx 前端渲染）
+  const DOC_EXTS = new Set(['pdf', 'docx', 'xlsx', 'pptx'])
+  // 视频路由（video-viewer 插件：mx-file 流式协议播放；avi/flv 等容器浏览器不解码，
+  // 仍路由进来由面板错误态提示，好于落回资源管理器定位）
+  const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ogv'])
+  // SVG → svgboard（矢量画板：查看与编辑一体）
+  const SVGBOARD_EXTS = new Set(['svg'])
+  // dashboard → 仪表板插件（Agent 生成的动态仪表板布局，Detail 轨道渲染）
+  const KANBAN_EXTS = new Set(['dash'])
 
   /** 代码文件扩展名（codeeditor 承接，CodeMirror 按扩展名语法高亮） */
   const CODE_EXTS = new Set([
@@ -2554,6 +2569,46 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
       ElMessage.warning('图片查看器未启用')
       return
     }
+    // PDF / Office 文档 → docpreview（pdf/docx/xlsx/pptx，Detail 轨道文档 tab）
+    if (!isDir && DOC_EXTS.has(ext)) {
+      const svc = serviceOf<OpenerService>('docpreview.store')
+      if (svc) {
+        await svc.store.open(resolved)
+        return
+      }
+      ElMessage.warning('文档预览未启用')
+      return
+    }
+    // 视频文件 → video-viewer（mx-file 流式协议，Detail 轨道视频 tab）
+    if (!isDir && VIDEO_EXTS.has(ext)) {
+      const svc = serviceOf<OpenerService>('video-viewer.store')
+      if (svc) {
+        svc.store.open(resolved)
+        return
+      }
+      ElMessage.warning('视频播放器未启用')
+      return
+    }
+    // SVG → svgboard（矢量画板查看与编辑一体）
+    if (!isDir && SVGBOARD_EXTS.has(ext)) {
+      const svc = serviceOf<OpenerService>('svgboard.store')
+      if (svc) {
+        await svc.store.open(resolved)
+        return
+      }
+      ElMessage.warning('矢量画板未启用')
+      return
+    }
+    // dashboard → 仪表板插件（Agent-Driven UI：布局 + 数据渲染，Detail 轨道仪表板 tab）
+    if (!isDir && KANBAN_EXTS.has(ext)) {
+      const svc = serviceOf<OpenerService>('kanban.store')
+      if (svc) {
+        await svc.store.open(resolved)
+        return
+      }
+      ElMessage.warning('仪表板未启用')
+      return
+    }
     if (!isDir && CODE_EXTS.has(ext)) {
       const svc = serviceOf<OpenerService>('codeeditor.store')
       if (svc) {
@@ -2561,6 +2616,14 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
         return
       }
       ElMessage.warning('代码编辑器未启用')
+      return
+    }
+    // 未知类型兜底（Agent-Driven UI：file_open 覆盖链 = 内置查看器 → 系统默认
+    // 程序）：无内置查看器/编辑器的文件类型（pdf/office/压缩包等）交系统默认
+    // 程序打开；无宿主桥（纯 Web）落文件浏览器原兜底
+    if (!isDir && window.mxDesktop?.openPath) {
+      const errMsg = await window.mxDesktop.openPath(resolved)
+      if (errMsg) ElMessage.warning('系统打开失败: ' + errMsg)
       return
     }
     const svc = serviceOf<OpenerService>('explorer.store')

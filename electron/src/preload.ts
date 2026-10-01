@@ -21,9 +21,20 @@ interface PluginInstallResult {
   message?: string
 }
 
-/** 主题偏好发布通道 + 设置持久化桥 + 在线插件安装桥（语义校验在渲染侧加载前统一执行，见 plugins.ts 头注） */
+/** 主题偏好发布通道 + 设置持久化桥 + 在线插件安装桥 + 导航兜底回发
+ * （语义校验在渲染侧加载前统一执行，见 plugins.ts 头注） */
 contextBridge.exposeInMainWorld('mxDesktop', {
   setNativeThemeSource: (mode: string) => ipcRenderer.invoke('mx:native-theme-set', mode),
+  /** 主进程导航拦截回发的外部 web 链接（mx:open-url）；返回退订函数 */
+  onOpenUrl: (listener: (url: string) => void): (() => void) => {
+    const wrapped = (_event: unknown, url: string): void => listener(url)
+    ipcRenderer.on('mx:open-url', wrapped)
+    return () => ipcRenderer.removeListener('mx:open-url', wrapped)
+  },
+  /** 系统浏览器打开链接（mx:open-external，主进程侧仅放行 http/https）；拒绝返回 false */
+  openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('mx:open-external', url),
+  /** 系统默认程序打开本地文件（mx:open-path）；成功返回空串，失败返回错误描述 */
+  openPath: (path: string): Promise<string> => ipcRenderer.invoke('mx:open-path', path),
   preferences: {
     getAll: (): Promise<Record<string, unknown> | null> => ipcRenderer.invoke('mx:preferences-get'),
     set: (key: string, value: unknown): Promise<boolean> => ipcRenderer.invoke('mx:preferences-set', key, value),

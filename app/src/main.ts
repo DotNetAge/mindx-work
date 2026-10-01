@@ -23,7 +23,11 @@ import { explorerPlugin } from '@mindx-work/plugins/explorer'
 import { markdownPlugin } from '@mindx-work/plugins/markdown'
 import { codeEditorPlugin } from '@mindx-work/plugins/codeeditor'
 import { imageViewerPlugin } from '@mindx-work/plugins/image-viewer'
+import { docPreviewPlugin } from '@mindx-work/plugins/docpreview'
 import { webViewerPlugin } from '@mindx-work/plugins/web-viewer'
+import { videoViewerPlugin } from '@mindx-work/plugins/video-viewer'
+import { svgboardPlugin } from '@mindx-work/plugins/svgboard'
+import { kanbanPlugin } from '@mindx-work/plugins/kanban'
 import { terminalPlugin } from '@mindx-work/plugins/terminal'
 import { calendarPlugin } from '@mindx-work/plugins/calendar'
 import { usagePlugin } from '@mindx-work/plugins/usage'
@@ -33,7 +37,7 @@ import { diffviewPlugin } from '@mindx-work/plugins/diffview'
 // 启动装配：插件冲突与依赖缺失在启动期暴露（契约第 7 节）
 // demo 插件已下线（源码保留作范式参考）：当前装配仅 market 插件
 // 清单顺序即设置导航顺序（壳自带「通用」恒居首）：插件 → 模型 → 团队 → 技能 → 连接器 → 连接
-const shell = createApp([marketPlugin, modelsPlugin, agentsPlugin, skillsPlugin, connectorsPlugin, connectionPlugin, phonePairPlugin, shellChromePlugin, chatflowPlugin, explorerPlugin, markdownPlugin, codeEditorPlugin, imageViewerPlugin, webViewerPlugin, terminalPlugin, calendarPlugin, usagePlugin, memoryPlugin, diffviewPlugin])
+const shell = createApp([marketPlugin, modelsPlugin, agentsPlugin, skillsPlugin, connectorsPlugin, connectionPlugin, phonePairPlugin, shellChromePlugin, chatflowPlugin, explorerPlugin, markdownPlugin, codeEditorPlugin, imageViewerPlugin, docPreviewPlugin, webViewerPlugin, videoViewerPlugin, svgboardPlugin, kanbanPlugin, terminalPlugin, calendarPlugin, usagePlugin, memoryPlugin, diffviewPlugin])
 
 // 设置持久化归壳所有：控制器以服务形式供设置行与插件消费（键建议 <owner>.<key> 前缀）
 const preferences = createPreferencesController()

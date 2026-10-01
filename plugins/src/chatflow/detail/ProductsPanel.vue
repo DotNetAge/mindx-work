@@ -3,23 +3,28 @@
  * Detail「产物」tab（概念框架 §6.1 三段定稿）：会话产物聚合呈现。
  * - 对话产物：本会话 Write 工具写出的 .md 文档（第一版口径；与"最近文件"的
  *   边界是 §9 开放问题，留后调）
- * - 技能：全局技能清单（第一版口径；会话级技能激活记录依赖工作目录级
- *   存储迁移，落地前先呈现可用清单）
+ * - 技能：当前项目 .agents/skills 发现式清单（点击打开 SKILL.md 正文；
+ *   行尾菜单支持晋升全局技能库 / 删除）
+ * - 待办：工作目录 TODO.md 的 ToDo List（TodoPanel，增删改）
  * - 最近文件：本会话 write/edit 工具痕迹 + 待确认变更集合并（最近在前）
- * 数据全部来自 chatflow store 响应式本体与 daemon RPC（skill.list），无新增持久化。
+ * 数据全部来自 chatflow store 响应式本体与 daemon RPC，无新增持久化。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { MxIcon, useService } from '@mindx-work/ui-shell-vue'
 import { useChatflowStore } from '../store'
+import TodoPanel from './TodoPanel.vue'
 
 // 跨插件服务形状契约（消费侧仅声明所需形状；契约 §10.2 禁止跨插件 import）
 interface DaemonConnectionShape {
   call<T>(method: string, params?: unknown): Promise<T>
 }
-interface SkillItem {
+
+/** 项目级技能条目（skill.list 带 project_dir 的精简投影；不含指令正文） */
+interface ProjectSkill {
   name: string
   description?: string
-  metadata?: { name_zh?: string; description_zh?: string }
+  root_dir?: string
 }
 
 const store = useChatflowStore()
@@ -86,24 +91,76 @@ const fileRows = computed<FileRow[]>(() => {
 /** 对话产物段：Agent 写出的正式文档（第一版 = Write 产生的 .md） */
 const products = computed(() => fileRows.value.filter((row) => row.isProduct))
 
-/** 技能段：全局技能清单（首开拉取一次；空态「暂无内容」） */
-const skills = ref<SkillItem[]>([])
+/** 技能段：当前项目 .agents/skills 发现式清单（跟随工作目录；空态「暂无内容」） */
+const skills = ref<ProjectSkill[]>([])
 const skillsLoading = ref(true)
 
-onMounted(async () => {
+async function loadSkills(): Promise<void> {
+  if (!store.currentProjectDir) {
+    skills.value = []
+    skillsLoading.value = false
+    return
+  }
+  skillsLoading.value = true
   try {
-    skills.value = await daemon.call<SkillItem[]>('skill.list', {})
+    const r = await daemon.call<{ skills: ProjectSkill[] }>('skill.list', {
+      project_dir: store.currentProjectDir,
+    })
+    skills.value = r.skills || []
   } catch {
     skills.value = []
   } finally {
     skillsLoading.value = false
   }
-})
+}
 
-/** 技能展示名：中文名优先（对齐 skills 插件先例，本地实现避免跨插件 import） */
-function skillTitle(skill: SkillItem): string {
-  const zh = skill.metadata?.name_zh
-  return (typeof zh === 'string' && zh.trim()) || skill.name
+// 工作目录随会话切换 → 重拉清单（目录可能晚于挂载就绪，immediate 兜底首拉）
+watch(() => store.currentProjectDir, loadSkills, { immediate: true })
+
+/** 点击技能行：打开 SKILL.md 正文（md 路由 Markdown 查看器） */
+function openSkill(sk: ProjectSkill): void {
+  if (sk.root_dir) void store.openFile(`${sk.root_dir}/SKILL.md`)
+}
+
+/** 安装至技能库：项目级晋升全局库（纯复制搬运；同名默认拒绝，错误透传） */
+async function promoteSkill(sk: ProjectSkill): Promise<void> {
+  try {
+    await daemon.call('skill.promote', {
+      name: sk.name,
+      from: 'project',
+      to: 'global',
+      project_dir: store.currentProjectDir,
+    })
+    ElMessage.success(`已安装至技能库：${sk.name}`)
+  } catch (e) {
+    ElMessage.error(`安装失败：${(e as Error).message}`)
+  }
+}
+
+/** 删除项目技能：移除工作目录内技能目录（不可恢复，先确认） */
+async function removeSkill(sk: ProjectSkill): Promise<void> {
+  if (!sk.root_dir) return
+  try {
+    await ElMessageBox.confirm(
+      `删除项目技能「${sk.name}」？其目录将从工作目录移除，不可恢复。`,
+      '删除技能',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return // 用户取消
+  }
+  try {
+    await daemon.call('fs.rm', { path: sk.root_dir, recurse: true })
+    ElMessage.success(`已删除：${sk.name}`)
+  } catch (e) {
+    ElMessage.error(`删除失败：${(e as Error).message}`)
+  }
+  await loadSkills()
+}
+
+function onSkillMenu(sk: ProjectSkill, command: string): void {
+  if (command === 'promote') void promoteSkill(sk)
+  else if (command === 'remove') void removeSkill(sk)
 }
 
 /** 文件行点击：走 chatflow 文件路由（md→文档查看器、图片→看图器、其余→编辑器） */
@@ -138,14 +195,35 @@ function basename(path: string): string {
       </button>
     </section>
 
-    <!-- 技能段 -->
+    <!-- 技能段：项目级发现式清单（点击开正文，行尾菜单晋升/删除） -->
     <section :class="$style.section">
       <h3 :class="$style.sectionTitle">技能</h3>
       <p v-if="skillsLoading" :class="$style.empty">加载中…</p>
       <p v-else-if="skills.length === 0" :class="$style.empty">暂无内容</p>
-      <div v-for="skill in skills" :key="skill.name" :class="$style.row">
+      <div
+        v-for="sk in skills"
+        :key="sk.name"
+        :class="[$style.row, $style.skillRow]"
+        :title="sk.description || sk.name"
+        @click="openSkill(sk)"
+      >
         <MxIcon name="lucide:sparkles" :size="16" />
-        <span :class="$style.rowName">{{ skillTitle(skill) }}</span>
+        <span :class="$style.rowName">{{ sk.name }}</span>
+        <el-dropdown
+          trigger="click"
+          popper-class="products-skill-menu"
+          @command="(c: string) => onSkillMenu(sk, c)"
+        >
+          <button type="button" :class="$style.rowMenu" title="更多操作" @click.stop>
+            <MxIcon name="lucide:ellipsis" :size="16" />
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="promote">安装至技能库</el-dropdown-item>
+              <el-dropdown-item command="remove" divided>删除</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </section>
 
@@ -167,6 +245,9 @@ function basename(path: string): string {
         <span v-if="row.deletions" :class="$style.del">-{{ row.deletions }}</span>
       </button>
     </section>
+
+    <!-- 待办段：工作目录 TODO.md（增删改，组件内自带分隔线与标题） -->
+    <TodoPanel />
   </div>
 </template>
 
@@ -211,9 +292,35 @@ function basename(path: string): string {
   box-sizing: border-box;
 }
 
-/* 技能行非交互（只读清单），div 形态去指针样式 */
-div.row {
-  cursor: default;
+/* 技能行可点（打开 SKILL.md 正文） */
+.skillRow {
+  cursor: pointer;
+}
+
+.skillRow:hover {
+  background: var(--mx-hover);
+}
+
+/* 行尾「更多」菜单按钮：ghost 图标（点击不触发行点击） */
+.rowMenu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--mx-radius-control);
+  background: transparent;
+  color: var(--mx-text-tertiary);
+  cursor: pointer;
+  outline: none;
+}
+
+.rowMenu:hover,
+.rowMenu:focus-visible {
+  background: var(--mx-hover);
+  color: var(--mx-text);
 }
 
 button.row:hover {
@@ -241,5 +348,42 @@ button.row:hover {
 .del {
   color: var(--mx-danger);
   font: var(--mx-font-caption);
+}
+</style>
+
+<!-- 技能菜单 popper（渲染到 body，全局作用域；对齐 WorkspacePicker 先例，全 --mx-* token） -->
+<style>
+.el-dropdown__popper.products-skill-menu {
+  background: var(--mx-bg-elevated);
+  border: 1px solid var(--mx-separator);
+  border-radius: var(--mx-radius-card);
+  box-shadow: var(--mx-shadow-prominent);
+  padding: var(--mx-space-2);
+}
+
+.el-dropdown__popper.products-skill-menu .el-popper__arrow::before {
+  background: var(--mx-bg-elevated);
+  border-color: var(--mx-separator);
+}
+
+.el-dropdown__popper.products-skill-menu .el-dropdown-menu {
+  background: transparent;
+  padding: 0;
+}
+
+.products-skill-menu .el-dropdown-menu__item {
+  display: flex;
+  align-items: center;
+  padding: var(--mx-space-2) var(--mx-space-3);
+  border-radius: var(--mx-radius-control);
+  color: var(--mx-text);
+  font: var(--mx-font-caption);
+  white-space: nowrap;
+}
+
+.products-skill-menu .el-dropdown-menu__item:not(.is-disabled):hover,
+.products-skill-menu .el-dropdown-menu__item:not(.is-disabled):focus {
+  background: color-mix(in srgb, var(--mx-text) 5%, transparent);
+  color: var(--mx-text);
 }
 </style>

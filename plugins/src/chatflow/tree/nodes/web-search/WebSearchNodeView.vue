@@ -5,10 +5,17 @@
 // 两者皆空才显示"无搜索结果"。行/链接点击经名片操作统一处理。
 import { computed } from 'vue'
 import { parseToolResult } from '../../../toolViewUtils'
+import { useChatflowStore } from '../../../store'
 import FormattedContent from '../../../chatround/FormattedContent.vue'
 import type { WebSearchToolNode } from '../../types/tool'
 
 const props = defineProps<{ node: WebSearchToolNode }>()
+
+// 链接点击统一路由 web-viewer（详情轨道），拦截默认新窗口行为
+function openInViewer(event: MouseEvent, url: string): void {
+  event.preventDefault()
+  useChatflowStore().openUrl(url)
+}
 
 interface SearchHit {
   title: string
@@ -57,8 +64,7 @@ const fallbackText = computed(() =>
         :key="i"
         class="hit-item"
         :href="h.url"
-        target="_blank"
-        rel="noopener"
+        @click="openInViewer($event, h.url)"
       >
         <div class="hit-title">{{ h.title || h.url }}</div>
         <div v-if="h.snippet" class="hit-snippet">{{ h.snippet }}</div>

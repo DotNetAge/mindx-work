@@ -17,6 +17,7 @@
 
 ## Electron 终端与壳布局（2026-09-28）
 
+- **文件路径转自定义协议 URL 必须 `path.split('/').map(encodeURIComponent).join('/')`**：`encodeURI` 不编码 `#`/`?`/`%`（视作 URL 结构字符），含 `#` 文件名的 mx-file:// 路径会被截成 fragment；逐段 encodeURIComponent 才完整还原。
 - **pty 必须用 @lydell/node-pty，禁用原版 node-pty**：原版 1.1.0 在本机 macOS 上 `posix_spawnp failed` 全矩阵失败（electron 主进程 / ELECTRON_RUN_AS_NODE / 系统 node 三种环境一致复现，与 env/cwd/绝对路径无关），加载成功但 spawn 必挂。@lydell/node-pty（活跃维护 fork，带 prebuild）spawn 正常。降级路径 `/usr/bin/script -q /dev/null zsh -l` 在新版 macOS 同样不可用（要求 stdin 是 tty，管道 stdin 直接报 tcgetattr 错退出）。
 - **壳布局是三列制，Toolbar 只属 Content**：AppFrame 为单行三列——Sidebar 全高在左（darwin 交通灯悬浮其顶部 topBand）｜中列 = Toolbar + Content｜Detail 轨道全高独立成列（其 48px 头部行与 Toolbar 同一水平线）。ToolbarPane 禁止横跨全窗（2026-09-28 曾做成通栏顶条被用户否决："Sidebar 上方就是系统三按钮，Toolbar 只能在 Content 顶部"）。
 - **xterm 主题色经 probe 元素解析**：xterm 不认 `var()`/`color-mix()`，CSS 变量需先塞进临时 span 的 color 再取 computedStyle 得 rgb()/rgba() 串；等宽字体同样取 `--mx-font-mono` 的 computed 值。

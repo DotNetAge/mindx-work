@@ -14,6 +14,8 @@ import { registerPluginBridge, registerPluginProtocol } from './plugins'
 import { registerPreferencesBridge } from './preferences'
 import { registerDialogBridge } from './dialogs'
 import { registerTerminalBridge } from './terminal'
+import { installNavigationGuard, registerOpenExternalBridge, registerOpenPathBridge } from './navigation'
+import { registerFileStreamProtocol } from './file-stream'
 
 /** 开发模式连接 Vite 服务（MX_DEV_URL 可覆盖）；产物模式加载 app 构建目录 */
 const DEV_URL = 'http://localhost:5273'
@@ -77,6 +79,9 @@ function createWindow(): void {
   } else {
     void win.loadURL(DEV_URL)
   }
+
+  // 导航兜底网：外部网络链接统一回发渲染层进 web-viewer（新窗口与自身跳转全拦）
+  installNavigationGuard(win)
 }
 
 /** 托盘图标资源定位：dev 取仓库 resources/；打包产物在 Contents/Resources/tray */
@@ -139,11 +144,14 @@ function createTray(): void {
 
 app.whenReady().then(() => {
   registerPluginProtocol()
+  registerFileStreamProtocol()
   registerNativeThemeBridge()
   registerPluginBridge()
   registerPreferencesBridge()
   registerDialogBridge()
   registerTerminalBridge()
+  registerOpenExternalBridge()
+  registerOpenPathBridge()
   createWindow()
   createTray()
   // dock 点击（macOS）/ 任务栏重开（Windows）：有窗口则唤出，无则重建

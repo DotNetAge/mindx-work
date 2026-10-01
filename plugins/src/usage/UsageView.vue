@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * UsageView — Token 用量看板（Content 满高页，移植自 mindx-desktop TokenUsageReport）。
+ * UsageView — Token 用量仪表板（Content 满高页，移植自 mindx-desktop TokenUsageReport）。
  * 数据经 daemon.connection：月度汇总 token.usage.monthly {year, month}，
  * 当前会话明细 token.usage.session.detail {session_id}（方法名经 handler_registry.go 实证）。
  * 会话 id 消费 chatflow.store 延迟外壳（服务契约，禁止跨插件 import）。

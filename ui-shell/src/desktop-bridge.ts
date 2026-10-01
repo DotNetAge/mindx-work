@@ -75,9 +75,15 @@ export interface PreferencesController {
 /** 设置持久化控制器的 services 注册名（提供方 app 装配层） */
 export const PREFERENCES_SERVICE = 'shell.preferences'
 
-/** 宿主桥总面：主题偏好发布 + 设置持久化 + 系统文件对话框 + 在线插件安装管理 */
+/** 宿主桥总面：主题偏好发布 + 设置持久化 + 系统文件对话框 + 在线插件安装管理 + 导航兜底回发 */
 export interface MxDesktopBridge {
   setNativeThemeSource(mode: string): Promise<boolean>
+  /** 订阅主进程导航拦截回发的外部 web 链接（mx:open-url）；返回退订函数 */
+  onOpenUrl(listener: (url: string) => void): () => void
+  /** 系统浏览器打开链接（mx:open-external，主进程侧仅放行 http/https）；拒绝返回 false */
+  openExternal(url: string): Promise<boolean>
+  /** 系统默认程序打开本地文件（mx:open-path）；成功返回空串，失败返回错误描述 */
+  openPath(path: string): Promise<string>
   preferences: {
     /** 读整表（机械校验与代际分流在主进程侧执行） */
     getAll(): Promise<Record<string, unknown> | null>

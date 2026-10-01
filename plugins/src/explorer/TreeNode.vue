@@ -27,10 +27,26 @@ interface MarkerServiceLike {
 interface ImageViewerServiceLike {
   readonly store: { open(path: string): Promise<void> }
 }
+interface DocPreviewServiceLike {
+  readonly store: { open(path: string): Promise<void> }
+}
+interface VideoViewerServiceLike {
+  readonly store: { open(path: string): void }
+}
+interface SvgboardServiceLike {
+  readonly store: { open(path: string): Promise<void> }
+}
+interface KanbanServiceLike {
+  readonly store: { open(path: string): Promise<void> }
+}
 // 服务外壳在 setup 捕获（useService 是 inject，只能在组件同步上下文调用）；
 // 缺失（插件停用）静默降级为仅定位高亮。
 let markdownSvc: MarkerServiceLike | null = null
 let imageSvc: ImageViewerServiceLike | null = null
+let docSvc: DocPreviewServiceLike | null = null
+let videoSvc: VideoViewerServiceLike | null = null
+let svgSvc: SvgboardServiceLike | null = null
+let kanbanSvc: KanbanServiceLike | null = null
 try {
   markdownSvc = useService<MarkerServiceLike>('markdown.store')
 } catch {
@@ -41,9 +57,33 @@ try {
 } catch {
   imageSvc = null
 }
+try {
+  docSvc = useService<DocPreviewServiceLike>('docpreview.store')
+} catch {
+  docSvc = null
+}
+try {
+  videoSvc = useService<VideoViewerServiceLike>('video-viewer.store')
+} catch {
+  videoSvc = null
+}
+try {
+  svgSvc = useService<SvgboardServiceLike>('svgboard.store')
+} catch {
+  svgSvc = null
+}
+try {
+  kanbanSvc = useService<KanbanServiceLike>('kanban.store')
+} catch {
+  kanbanSvc = null
+}
 
 const MARKDOWN_EXTS = new Set(['md', 'markdown'])
-const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
+const DOC_EXTS = new Set(['pdf', 'docx', 'xlsx', 'pptx'])
+const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'ogv'])
+const SVGBOARD_EXTS = new Set(['svg'])
+const KANBAN_EXTS = new Set(['dash'])
 
 function extOf(path: string): string {
   const base = path.split('/').pop() || path
@@ -138,6 +178,18 @@ function onClick(): void {
   } else if (IMAGE_EXTS.has(ext)) {
     if (imageSvc) void imageSvc.store.open(props.entry.path)
     else ElMessage.warning('图片查看器未启用')
+  } else if (DOC_EXTS.has(ext)) {
+    if (docSvc) void docSvc.store.open(props.entry.path)
+    else ElMessage.warning('文档预览未启用')
+  } else if (VIDEO_EXTS.has(ext)) {
+    if (videoSvc) videoSvc.store.open(props.entry.path)
+    else ElMessage.warning('视频播放器未启用')
+  } else if (SVGBOARD_EXTS.has(ext)) {
+    if (svgSvc) void svgSvc.store.open(props.entry.path)
+    else ElMessage.warning('矢量画板未启用')
+  } else if (KANBAN_EXTS.has(ext)) {
+    if (kanbanSvc) void kanbanSvc.store.open(props.entry.path)
+    else ElMessage.warning('仪表板未启用')
   }
 }
 

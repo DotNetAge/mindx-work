@@ -5,6 +5,7 @@
 
 import type { VuePlugin } from '@mindx-work/ui-shell-vue'
 import DetailPanel from './DetailPanel.vue'
+import AddToChat from './AddToChat.vue'
 import {
   bindImageViewerShell,
   createImageViewerService,
@@ -24,8 +25,13 @@ export const imageViewerPlugin: VuePlugin = (ctx) => {
     component: DetailPanel,
   })
 
+  // DetailToolbar 尾段按钮（owner 归属本条目）：「添加到对话」引用 chip
+  ctx.Detail.addToolbar({ id: 'image-viewer-detail-addchat', owner: IMAGE_VIEWER_DETAIL_ID, component: AddToChat })
+
   // services：store 延迟外壳（装配期 Pinia 未安装，禁止此时创建 store）
   ctx.services.provide('image-viewer.store', createImageViewerService())
 
-  return () => {}
+  return () => {
+    ctx.Detail.removeToolbar('image-viewer-detail-addchat')
+  }
 }

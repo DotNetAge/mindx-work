@@ -21,7 +21,11 @@
     "./markdown": "./src/markdown/index.ts",
     "./codeeditor": "./src/codeeditor/index.ts",
     "./image-viewer": "./src/image-viewer/index.ts",
+    "./docpreview": "./src/docpreview/index.ts",
     "./web-viewer": "./src/web-viewer/index.ts",
+    "./video-viewer": "./src/video-viewer/index.ts",
+    "./svgboard": "./src/svgboard/index.ts",
+    "./kanban": "./src/kanban/index.ts",
     "./terminal": "./src/terminal/index.ts",
     "./calendar": "./src/calendar/index.ts",
     "./usage": "./src/usage/index.ts",
@@ -43,14 +47,17 @@
     "@tiptap/vue-3": "^3.31.3",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "docx-preview": "^0.4.1",
     "dompurify": "^3.2.5",
     "element-plus": "^2.14.6",
     "highlight.js": "^11.10.0",
     "marked": "^14.0.0",
     "mermaid": "^11.4.1",
     "pinia": "^3.0.2",
+    "pptx-preview": "^1.0.7",
     "qrcode": "^1.5.4",
-    "vue": "^3.5.13"
+    "vue": "^3.5.13",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/qrcode": "^1.5.6"

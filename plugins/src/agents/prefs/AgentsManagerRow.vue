@@ -969,29 +969,28 @@ onMounted(() => {
           <span v-else :class="$style.cfgAvatar">{{ (agentDisplayName(selectedAgent) || '?').charAt(0).toUpperCase() }}</span>
           <div :class="$style.cfgMain">
             <div :class="$style.cfgNameRow">
-              <h3 :class="$style.cfgName">{{ agentDisplayName(selectedAgent) }}</h3>
+              <!-- 昵称（展示主名）双态：点击 inline 编辑（agent.update nick_name，空串清空，展示回退 role/name） -->
+              <input
+                v-if="editingNick"
+                ref="nickInputEl"
+                v-model="nickDraft"
+                :class="$style.cfgNickInput"
+                :disabled="store.operating === selectedAgent.name"
+                placeholder="设置昵称，留空清除"
+                @keydown.enter.prevent="saveNick"
+                @keydown.esc.prevent="cancelNick"
+                @blur="saveNick"
+              />
+              <h3
+                v-else
+                :class="[$style.cfgName, $style.cfgNameEditable]"
+                title="点击修改昵称"
+                @click="startNickEdit"
+              >{{ agentDisplayName(selectedAgent) }}</h3>
               <span v-if="agentRoleSubtitle(selectedAgent)" :class="$style.cfgRole">{{ agentRoleSubtitle(selectedAgent) }}</span>
               <!-- Leader 在标题旁显示团队名 -->
               <span v-if="selectedAgent.is_leader && selectedAgent.team" class="mx-tag" data-tone="info">{{ selectedAgent.team }}</span>
             </div>
-            <!-- 标识行（name 小字）：点击进入昵称编辑（改名不影响目录名，展示名随之刷新） -->
-            <input
-              v-if="editingNick"
-              ref="nickInputEl"
-              v-model="nickDraft"
-              :class="$style.cfgId"
-              :disabled="store.operating === selectedAgent.name"
-              placeholder="设置昵称，留空清除"
-              @keydown.enter.prevent="saveNick"
-              @keydown.esc.prevent="cancelNick"
-              @blur="saveNick"
-            />
-            <span
-              v-else
-              :class="[$style.cfgId, $style.cfgIdEditable]"
-              title="点击修改昵称"
-              @click="startNickEdit"
-            >{{ selectedAgent.name }}</span>
             <p :class="$style.cfgDesc">{{ selectedAgent.description || '暂无描述' }}</p>
           </div>
           <!-- 团队区：有团队显示成员头像堆叠（紧密排列，前一个覆盖后一个左边一半）；
@@ -1899,30 +1898,27 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.cfgId {
-  font: var(--mx-font-caption);
-  color: var(--mx-text-tertiary);
-}
-
-/* 标识行可编辑态：悬浮提示可点（虚线下划线），点击进入昵称编辑 */
-.cfgIdEditable {
+/* 昵称可编辑态：悬浮提示可点（虚线下划线），点击进入 inline 编辑 */
+.cfgNameEditable {
   cursor: pointer;
-  text-decoration: underline dashed color-mix(in srgb, var(--mx-text-tertiary) 55%, transparent);
-  text-underline-offset: 3px;
+  text-decoration: underline dashed transparent;
+  text-underline-offset: 4px;
 }
 
-.cfgIdEditable:hover {
+.cfgNameEditable:hover {
   color: var(--mx-text-secondary);
+  text-decoration-color: color-mix(in srgb, var(--mx-text-tertiary) 55%, transparent);
 }
 
-/* 编辑态输入框：沿用标识行字形，仅保留底边线（对齐 inline 编辑惯例） */
-input.cfgId {
+/* 昵称编辑输入框：标题字形 + 底边线（对齐 inline 编辑惯例） */
+.cfgNickInput {
   width: 160px;
   padding: 0 var(--mx-space-1);
   border: none;
   border-bottom: 1px solid var(--mx-accent);
   background: transparent;
   outline: none;
+  font: var(--mx-font-heading);
   color: var(--mx-text);
 }
 

@@ -1,5 +1,5 @@
 /**
- * usage 插件：Token 用量看板（移植自 mindx-desktop TokenUsageReport）。
+ * usage 插件：Token 用量仪表板（移植自 mindx-desktop TokenUsageReport）。
  * Content 主工作区视图承载月度汇总 + 当前会话明细（满高型页面），
  * Sidebar Footer 固定区提供入口行（排日历 90 之下、设置行 100 之上）。
  * 数据归组件：token.usage.monthly / token.usage.session.detail RPC

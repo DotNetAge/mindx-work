@@ -14,6 +14,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useService } from '@mindx-work/ui-shell-vue'
+import { pendingTerminalCommand } from './pending'
 
 // 跨插件服务形状契约（消费侧仅声明所需形状）
 interface DaemonConnectionShape {
@@ -72,7 +73,9 @@ async function resolveCwd(): Promise<string> {
 async function spawnSession(term: Terminal): Promise<void> {
   if (!bridge) return
   const gen = ++spawnGen
-  const id = await bridge.create(await resolveCwd(), term.cols, term.rows)
+  // terminal_run 待执行命令携带的 cwd（Agent 工作区）优先，空则回退当前会话目录
+  const pendingCwd = pendingTerminalCommand.value?.cwd || ''
+  const id = await bridge.create(pendingCwd || (await resolveCwd()), term.cols, term.rows)
   if (gen !== spawnGen) {
     // spawn 期间又发生切换：本会话已过期，丢弃
     if (id) void bridge.kill(id)
@@ -104,6 +107,14 @@ async function restartSession(): Promise<void> {
   await spawnSession(xterm)
 }
 
+/** 消费 terminal_run 待执行命令：会话就绪即写入执行（写入后清空防重复） */
+function consumePending(): void {
+  const pending = pendingTerminalCommand.value
+  if (!pending || !sessionId || !bridge) return
+  pendingTerminalCommand.value = null
+  void bridge.write(sessionId, pending.command + '\r')
+}
+
 onMounted(async () => {
   bridge = (window as unknown as { mxDesktop?: { terminal?: TerminalBridgeShape } }).mxDesktop?.terminal ?? null
   if (!bridge || !host.value) return
@@ -128,6 +139,9 @@ onMounted(async () => {
   fitAddon.fit()
 
   await spawnSession(term)
+
+  // terminal_run 待执行命令：会话就绪立即消费（tab 打开前收到时在此落执行）
+  consumePending()
 
   // 键入 → pty（读 sessionId 变量本身：重启换新 id 后自动指向新会话）
   // 输出/退出接线在 spawnSession 内（退订函数收于 onUnmounted / restartSession）
@@ -169,6 +183,10 @@ watch(
     void restartSession()
   }
 )
+
+// 终端已开时收到 terminal_run：写入现有会话执行（tab 未开场景由 index.ts 拉开
+// 后走 onMounted 消费路径）
+watch(pendingTerminalCommand, () => consumePending())
 </script>
 
 <template>
