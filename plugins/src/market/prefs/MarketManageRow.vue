@@ -52,10 +52,28 @@ function onSwitchVersion(view: InstalledPluginView, version: string) {
   verMenuFor.value = null
   if (version !== view.version) void store.switchVersion(view, version)
 }
+
+function onExport(view: InstalledPluginView) {
+  void store.exportPlugin(view)
+}
 </script>
 
 <template>
   <div :class="$style.wrap">
+    <section>
+      <div :class="$style.sectionHead">
+        <span :class="$style.sectionTitle">内置</span>
+        <span :class="$style.count">{{ store.corePlugins.length }}</span>
+      </div>
+      <div v-for="core in store.corePlugins" :key="core.id" :class="$style.item">
+        <div :class="$style.itemText">
+          <span :class="$style.itemName">{{ core.name }}</span>
+          <span :class="$style.itemVersion">{{ core.description }}</span>
+        </div>
+        <span class="mx-pill">内置</span>
+      </div>
+    </section>
+
     <section>
       <div :class="$style.sectionHead">
         <span :class="$style.sectionTitle">已安装</span>
@@ -99,6 +117,15 @@ function onSwitchVersion(view: InstalledPluginView, version: string) {
         <button
           type="button"
           class="mx-icon-btn"
+          aria-label="导出插件包"
+          :disabled="store.busyId === view.id"
+          @click="onExport(view)"
+        >
+          <MxIcon name="lucide:folder-output" :size="16" />
+        </button>
+        <button
+          type="button"
+          class="mx-icon-btn"
           aria-label="卸载"
           :disabled="store.busyId === view.id"
           @click="store.uninstall(view)"
@@ -107,22 +134,33 @@ function onSwitchVersion(view: InstalledPluginView, version: string) {
         </button>
       </div>
       <p v-if="store.installed.length === 0" :class="$style.hint">
-        尚未安装在线插件，从下方市场选择安装。
+        尚未安装在线插件，从下方市场选择安装，或导入本地插件包。
       </p>
     </section>
 
     <section>
       <div :class="$style.sectionHead">
         <span :class="$style.sectionTitle">插件市场</span>
-        <button
-          type="button"
-          class="mx-icon-btn"
-          aria-label="刷新市场"
-          :disabled="store.loadingMarket"
-          @click="store.refreshMarket()"
-        >
-          <MxIcon name="lucide:refresh-cw" :size="16" />
-        </button>
+        <div :class="$style.headActions">
+          <button
+            type="button"
+            class="mx-icon-btn"
+            aria-label="导入本地插件包"
+            :disabled="store.busyId !== null"
+            @click="store.importFromFile()"
+          >
+            <MxIcon name="lucide:package-plus" :size="16" />
+          </button>
+          <button
+            type="button"
+            class="mx-icon-btn"
+            aria-label="刷新市场"
+            :disabled="store.loadingMarket"
+            @click="store.refreshMarket()"
+          >
+            <MxIcon name="lucide:refresh-cw" :size="16" />
+          </button>
+        </div>
       </div>
       <p v-if="store.marketError" :class="$style.error">{{ store.marketError }}</p>
       <div v-for="entry in store.market" :key="entry.id" :class="$style.marketItem">
@@ -161,6 +199,13 @@ function onSwitchVersion(view: InstalledPluginView, version: string) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--mx-space-2);
+}
+
+/* 节头动作组：导入 + 刷新按钮 */
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-1);
 }
 
 .sectionTitle {

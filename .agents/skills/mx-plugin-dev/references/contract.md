@@ -1,4 +1,4 @@
-# mindx-work 六区契约（完整版）
+# mindx-work 八区契约（完整版）
 
 本文件是 `ui-shell` 内核契约的完整说明，签名与实现一一对应（来源：`ui-shell/src/views.ts` / `createApp.ts` / `services.ts` / `changes.ts` / `registry.ts`）。SKILL.md 只留速查，用到哪个区的细节来这里查。
 
@@ -30,7 +30,7 @@ interface ViewProps {
 }
 ```
 
-**order 排序语义（九席位通用，实证：`registry.ts` / `views.ts`）**：全部注册表（Sidebar 节 / Header / Footer、Content、Detail、Overlay、Toolbar、Preferences 页 / 行）统一按 order 升序排列，缺省 100，小者在前；同 order 保持注册先后（`Array.prototype.sort` 稳定排序）。例外：Sidebar 节内的行（SidebarRow）无 order 字段，按给定数组顺序渲染。
+**order 排序语义（十一席位通用，实证：`registry.ts` / `views.ts`）**：全部注册表（Sidebar 节 / Header / Footer、Content、Detail、Overlay、Sheet、Floater、Toolbar、Preferences 页 / 行）统一按 order 升序排列，缺省 100，小者在前；同 order 保持注册先后（`Array.prototype.sort` 稳定排序）。例外：Sidebar 节内的行（SidebarRow）无 order 字段，按给定数组顺序渲染。
 
 **order 保留范围（硬约定，违反即错误实现）**：1–1000 为保留值——壳内置条目与预置插件（core）专用；market 在线（扩展）插件注册任何条目必须从 1001 起。该范围是**约定而非运行期校验**（registry 与动态加载器均不做区间拦截，违反不报错），但扩展条目侵入保留段会与未来预置条目抢位，禁止。
 
@@ -100,7 +100,7 @@ interface DetailViewApi<C> {
 
 ## 6. Overlay — 全局浮层
 
-只收全局层；popover / sheet 这类贴着触发点的局部浮层由插件组件自己渲染。
+只收全局层；popover 这类贴着触发点的局部浮层由插件组件自己渲染。
 
 ```ts
 type OverlayKind = 'modal' | 'banner'
@@ -116,6 +116,43 @@ interface OverlayViewApi<C> {
 - `kind` 非法值抛错。
 - **modal 互斥**：已存在 modal 条目时再 add modal 直接抛错（不是静默覆盖）。编排惯例：重复打开同 id 时先 `has(id)` 守卫再 `remove`（`remove` 对不存在条目同样抛错，直接裸 remove 首开即炸）。
 - banner 顶部可堆叠，用自增序列号区分 id。
+
+## 6.1 Sheet — 全屏抽层
+
+由下向上滑入覆盖整个界面的浮层级视图（抽屉语义），与 Overlay / Settings 同为壳级公共能力。头部是壳固有 chrome：注册者提供的 Title 居中呈现，尾端固有关闭钮（关闭 = 移除条目）；本体为注册者组件，填充头部以下全部空间。
+
+```ts
+interface SheetViewApi<C> {
+  add(entry: Entry<C> & { title: string }): void  // title 由壳渲染于头部居中；缺失抛错
+  remove(id: string): void   // 关闭 = 移除
+  has(id: string): boolean
+  readonly entries: readonly SheetEntry<C>[]
+}
+```
+
+- **sheet 互斥**：同时至多一个，已有条目时再 add 直接抛错（对齐 modal 互斥）。
+- 关闭通道三处：右上角固有关闭钮、Esc（modal 在场时 Esc 先关 modal）、注册者自行 `remove`。
+- 条目 component 只写本体内容排版；头部（Title + 关闭钮）由壳容器提供，禁止自绘头部。
+
+## 6.2 Floater — 可拖动浮窗
+
+无阻塞浮动件：风格与主窗浮层族一致（elevated 底 / window 圆角 / shadow-lv3 锐利边界），**无传统 titlebar**——头部为细带，左侧模拟 macOS 交通灯（仅红灯，点击关闭，`--mx-traffic-light-close` token）+ 注册者标题小字；按住头部拖动（pointer capture），clamp 保证头部始终可抓取。
+
+```ts
+interface FloaterViewApi<C> {
+  add(entry: Entry<C> & { title: string; width?: number; height?: number; animation?: FloaterAnimation }): void
+  remove(id: string): void   // 关闭 = 移除
+  has(id: string): boolean
+  readonly entries: readonly FloaterEntry<C>[]
+}
+```
+
+- **允许多开**（不互斥）：每个条目独立成窗；点击任意浮窗将其置顶（同层 DOM 顺序）。
+- 无遮罩不阻塞、不抢 Esc；关闭通道 = 红灯 / 注册者自行 `remove`。
+- 条目缺 `title` 抛错（零文案壳）；`width` / `height` 可选（px，缺省 360×480 适配层本地常量）。
+- `animation` 出现/消失动画预设（缺省 `'zoom'` 放大出现、缩小消失，对齐对话框 Apple 动画参数 scale 0.82 + 标准曲线）；`'fade'` 纯淡入淡出；`'none'` 无动画（瞬时出现/消失）；非法值抛错。
+- 位置归适配层本地状态（刷新重置；持久化为契约开放点）。
+- 条目 component 只写本体内容排版；头部（红灯 + 标题）由壳容器提供，禁止自绘头部。
 
 ## 7. Toolbar — 窗口工具栏
 
@@ -161,6 +198,8 @@ interface AppShell<C> {
   readonly Content: ContentViewApi<C>
   readonly Detail:  DetailViewApi<C>
   readonly Overlay: OverlayViewApi<C>
+  readonly Sheet:   SheetViewApi<C>
+  readonly Floater: FloaterViewApi<C>
   readonly Toolbar: ToolbarViewApi<C>
   readonly Settings: PreferencesApi<C>
   readonly services: ServiceContext
@@ -282,7 +321,7 @@ interface ChangeHub {
 }
 ```
 
-- 全部六区命令 API（add / remove / show / hide / activate / open / close / setActivePage / toggleSidebar…）改完注册表或机制状态后统一 `hub.bump()`。
+- 全部八区命令 API（add / remove / show / hide / activate / open / close / setActivePage / toggleSidebar…）改完注册表或机制状态后统一 `hub.bump()`。
 - **这不是事件总线**：无载荷、无主题、无多播事件语义，只表达"数据变了，重读"。消费方拉模式按需重读，不存在事件时序耦合。
 - Vue 适配器薄桥（`ui-shell-vue/src/reactivity.ts`）：
   - `useShell()`：取壳上下文（不在装配组件树内则抛错）；
@@ -291,28 +330,30 @@ interface ChangeHub {
 
 ## 12. 启动期校验（违反即抛错，装配失败）
 
-| 校验               | 规则                                         |
-| ------------------ | -------------------------------------------- |
-| 条目 id 唯一       | 同区重复注册同名 id 抛错（registry 层）      |
-| Sidebar 行映射     | 行 id 必须能在 Content 条目中找到            |
-| Settings 行归属    | 行的 `page` 必须指向已注册的页               |
-| Sidebar 条目形状   | 缺 `rows`、行缺 `id` / `label` 抛错          |
-| Overlay modal 互斥 | 已有 modal 再 add modal 抛错                 |
-| Toolbar slot       | 非 `leading` / `trailing` 抛错               |
-| 服务               | 空名 / 重复 provide 抛错；use 未提供服务抛错 |
+| 校验               | 规则                                                |
+| ------------------ | --------------------------------------------------- |
+| 条目 id 唯一       | 同区重复注册同名 id 抛错（registry 层）             |
+| Sidebar 行映射     | 行 id 必须能在 Content 条目中找到                   |
+| Settings 行归属    | 行的 `page` 必须指向已注册的页                      |
+| Sidebar 条目形状   | 缺 `rows`、行缺 `id` / `label` 抛错                 |
+| Overlay modal 互斥 | 已有 modal 再 add modal 抛错                        |
+| Sheet 形状与互斥   | 缺 `title` 抛错；已有 sheet 再 add 抛错             |
+| Floater 形状       | 缺 `title` 抛错；`animation` 非法值抛错；多开不互斥 |
+| Toolbar slot       | 非 `leading` / `trailing` 抛错                      |
+| 服务               | 空名 / 重复 provide 抛错；use 未提供服务抛错        |
 
-同一组硬约束经 `validateShellConstraints`（createApp 导出）在**动态插件激活后复调**（§18.1 六区契约对动态插件完全适用）：插件注册完成即校验，违规视为激活失败——执行其清理函数回滚注册后抛错，进失败 banner。禁止只查启动期（动态注册会绕过）。
+同一组硬约束经 `validateShellConstraints`（createApp 导出）在**动态插件激活后复调**（§18.1 八区契约对动态插件完全适用）：插件注册完成即校验，违规视为激活失败——执行其清理函数回滚注册后抛错，进失败 banner。禁止只查启动期（动态注册会绕过）。
 
 ## 13. 编排语义（关键决策）
 
 1. **导航联动归框架**：Sidebar 行 → Content 条目靠 id 映射，选中态壳唯一持有，插件零连线。
-2. **Overlay 收窄**：全局层只有 modal（互斥）与 banner（可叠）；popover / sheet 归插件局部渲染。
+2. **Overlay 收窄**：全局层只有 modal（互斥）与 banner（可叠）；popover 归插件局部渲染。全屏抽层是独立视图区 Sheet（互斥单开，头部壳固有 chrome：居中 Title + 尾端关闭钮）。
 3. **Detail 双语义合一**：tab 归属（多插件共存）+ 轨道（Content 让位），`show / hide` 是壳的编排 API。
 4. **壳唯一写**：`activeId` / `shown` / `isOpen` / `sidebarCollapsed` 等机制状态的写入点只有壳的编排 API，插件只读（经 `useShellData`）或经命令 API 请求变更。
 
 ## 14. 视图区几何速查
 
-壳 = 六区，由 AppFrame 网格组装：
+壳 = 八区，由 AppFrame 组装（Floater 浮窗、Sheet 抽层与 Overlay / Settings 浮于各区之上）：
 
 ```text
 ┌─ Sidebar ─┬──────── Content ────────┬─ Detail ─┐
@@ -321,7 +362,8 @@ interface ChangeHub {
 │  滚动节    │                         │  轨道体   │
 │  Footer   │                         │ (可收起)  │
 └───────────┴─────────────────────────┴──────────┘
-  Overlay（modal 居中互斥 / banner 顶部可堆叠）与 Settings（大面板）浮于其上
+  Overlay（modal 居中互斥 / banner 顶部可堆叠）、Sheet（全屏抽层）
+  与 Settings（大面板）浮于其上
 ```
 
 - **Sidebar**：展开宽 248 / 折叠 rail 80（容纳 macOS 红绿灯排；右缘拖拽手柄调宽、双击重置，折叠后禁用）；Header/Footer 固定区不随内容滚动；行高梯度：导航行 34 / 节头 36 / 新会话按钮卡 38 / footer 行 42。
@@ -339,26 +381,28 @@ interface ChangeHub {
 | 拖拽手柄 | 6 | Sidebar/Detail 边缘手柄，须高于 Content dragBand（实证：z-index 1 时顶部 48px 手柄条被 dragBand 盖住无法抓取） |
 | banner | 40 | 顶部通知，不阻塞交互 |
 | Settings 面板 | 60 | 全屏遮罩大面板 |
-| modal | 70 | 互斥阻塞层，必须高于设置面板（面板内确认 modal 的常态） |
+| Sheet 抽层 | 62 | 全屏抽层，盖住设置面板（设置行内唤起 sheet 的常态），低于 banner（sheet 内动作触发的通知必须可见）与 modal（sheet 内确认框的常态） |
+| Floater 浮窗 | 55 | 无阻塞浮窗，任何浮层族之下（设置/抽层/通知/modal/menu 都盖得住），Content 基准层之上；同层叠放次序 = DOM 顺序（点击置顶） |
+| modal | 70 | 互斥阻塞层，必须高于设置面板与抽层（面板/抽层内确认 modal 的常态） |
 | menu | 100 | 下拉菜单，浮于一切常规层 |
 | toast | 1100 | 最高瞬时反馈 |
 
-**Esc 分层**（随层级表联动）：Esc 只关最上层——modal 存在时先关 modal（OverlayPane **捕获期**监听 + `stopPropagation`，使设置面板的 Esc 冒泡监听不触发）；无 modal 时 Esc 关设置面板。禁止两层同时响应同一 Esc（实证坑：modal 在前时按 Esc 会同时关掉下层设置面板）。
+**Esc 分层**（随层级表联动）：Esc 只关最上层——modal 存在时先关 modal（OverlayPane **捕获期**监听 + `stopPropagation`，使设置面板的 Esc 冒泡监听不触发）；无 modal 时 Esc 关 sheet（SheetPane 捕获期监听，`defaultPrevented` 守卫 + modal 在场守卫双保险）；再无 sheet 时 Esc 关设置面板。禁止两层同时响应同一 Esc（实证坑：modal 在前时按 Esc 会同时关掉下层设置面板）。
 
 ## 15. 样式与文案纪律
 
-- 主题 token 一律 `--mx-*` 命名空间；亮暗切换归壳；插件组件禁止书写字面色值（细节读 mx-uikit 技能）。
+- 主题 token 一律 `--mx-*` 命名空间；亮暗切换归壳；插件组件禁止书写字面色值（细节读本技能 references/uikit.md）。
 - 零文案壳：壳骨架不含任何文案，标题、按钮文字全部由注册者提供。
 - 视图区几何（宽度、让位）由壳计算，条目组件不自算布局边界。
 
 ## 16. 契约变更规则
 
 - 新增**可选**字段不破坏契约；删除或改语义需升版本。
-- 硬约束不可协商：条目 id 区内唯一、Sidebar 行 id → Content 映射校验、modal 互斥、`--mx-*` token 纪律、零文案壳。
+- 硬约束不可协商：条目 id 区内唯一、Sidebar 行 id → Content 映射校验、modal / sheet 互斥、`--mx-*` token 纪律、零文案壳。
 
 ## 17. 数据校验边界（同进程信 TS，边界才校验）
 
-**同进程内信任 TypeScript 静态类型**：类型化调用链（六区 API、services store、组件 props）不加运行时校验、不加回退分支、不为静态接口已保证的值写防御判断——重复校验是噪声，且掩盖真实边界。
+**同进程内信任 TypeScript 静态类型**：类型化调用链（八区 API、services store、组件 props）不加运行时校验、不加回退分支、不为静态接口已保证的值写防御判断——重复校验是噪声，且掩盖真实边界。
 
 **校验只发生在系统边界**（数据从不可信一侧进入之处）：
 
@@ -373,7 +417,7 @@ interface ChangeHub {
 
 ## 18. 动态插件（在线插件 / market）
 
-六区契约对动态插件**完全适用**：入口签名、注册 API、样式军规、id 前缀、清理函数一视同仁。在线插件（market）与预置插件（core）的唯一差异是**可删除性**——机制零分叉。order 取值一条必须遵守：在线插件注册条目 order 一律 ≥ 1001（1–1000 为壳内置与预置插件保留段，§2）。
+八区契约对动态插件**完全适用**：入口签名、注册 API、样式军规、id 前缀、清理函数一视同仁。在线插件（market）与预置插件（core）的唯一差异是**可删除性**——机制零分叉。order 取值一条必须遵守：在线插件注册条目 order 一律 ≥ 1001（1–1000 为壳内置与预置插件保留段，§2）。
 
 ### 18.1 入口签名与 SDK 注入
 
@@ -382,7 +426,7 @@ interface ChangeHub {
 export default function (app: AppShell<unknown>, mx: { h: typeof h; MxIcon: typeof MxIcon }): void | (() => void)
 ```
 
-- 第一参与静态插件完全相同（AppShell 六区 + services）。
+- 第一参与静态插件完全相同（AppShell 八区 + services）。
 - 第二参注入渲染工具（`h` 与 `MxIcon`）：动态插件从 `mx-plugin://` 协议加载，**无 npm import 通道**（无法 import ui-shell-vue），渲染工具由加载器注入补偿。动态插件代码禁止 import 任何工程内模块。
 - 卸载语义：market 插件返回的清理函数在启停（`setEnabled`）与卸载时由壳装配层调用。
 
@@ -436,3 +480,43 @@ zip 包 = `manifest.json` + `entry`（.mjs）+ 静态资源（.json / .css / .sv
 
 - 市场服务器形态 = **静态托管**：`index.json`（多版本数组 `versions: […]`）+ zip 包，主进程 `market:list` 拉取、`market:install` 下载 zip 走同一安装管线（sha256 + 代际落盘 + 指针迁移）。放弃了动态注册中心：无服务端状态、可 CDN 化、离线可缓存。
 - 信任模型 = **显式安装即信任**（对齐 DSH"面板手势免审批"分级）：安装确认 UI 必须完整呈现 author / url / repo / license / permissions / versions，用户确认后落盘；安装时 sha256 校验完整性。放弃了 node:vm 沙箱隔离：桌面端安装即本机手势，与 core 插件同权。
+
+### 18.7 mw CLI — Agent 安装回路（自扩展闭环）
+
+- 动机：把插件能力**传导给 Agent**——Agent 在终端调 `mw plugin …` 安装/管理插件，app 即时感知激活，Agent「自己扩展自己」。CLI 与 UI 是同一安装管线的两个入口（electron/src/plugin-store.ts 纯 Node 工厂 + cli.ts / plugins.ts 两个薄壳）。
+- 运行形态：`ELECTRON_RUN_AS_NODE=1 <Electron二进制> <dist/cli.js> …`（node-pty 同机制）；`mw install-cli` 把 wrapper 写进 **`~/.mindx/bin`**（mindx 同款路径——其安装器已在 shell rc 导入该目录，规避 /usr/local/bin 系统权限；rc 全无导入行时 CLI 补写 .zshrc 并提示 source）。存储根按平台 userData 约定推导（productName「MindX Work」，勿改），`MW_PLUGIN_ROOT` env 可覆盖（多实例/验收）。
+- Agent 工作回路（写完插件包后）：
+
+```bash
+mw plugin install ./dist/my-plugin.zip   # 本地包直装；市场 URL 同样支持（SSRF 防线 + sha256）
+mw plugin list --json                    # 机器可读回执：{ ok, data }；人读输出面向终端
+mw plugin use <id> <version>             # 切版回滚；enable / disable / uninstall / export 同套
+```
+
+- 即时生效链：CLI 原子写 installed.json → 主进程 watch 安装根目录（防抖 300ms；**watch 目录而非文件**——原子替换走 rename，文件句柄失效）→ 广播 `plugins:changed` → market store 差分激活（新装且启用 → activate；停用 → deactivate；切版 → 先停再激活；首刷只建快照防误激活）。
+- Agent 写包验收注意：manifest 全量校验仍由渲染侧 manifestIssues 执行（§18.5）——CLI 安装只过机械校验，包合法但契约违规会在激活期失败并回滚；用 `mw plugin list` 确认落盘状态 + 设置 → 插件页确认激活状态。
+
+### 18.8 真机验收链路（market 机制专用，与普通插件 dev 5273 链路并行）
+
+electron 走 `MX_PROD_DIST` 加载 **app 构建产物**而非 dev server——改了渲染侧源码必须重新构建再重启，否则验收的是旧产物（实踩）。四步循环：
+
+```bash
+# 1. 渲染侧代码改动后：重建 app 产物（electron 不认源码）
+cd mindx-work/app && pnpm build
+
+# 2. 终止旧实例（pkill 模式匹配不清 Helper 进程树，grep 确认后按 PID kill -9 兜底）
+pkill -f "remote-debugging-port=9223"; sleep 2
+ps aux | grep "[9]223" | awk '{print $2}' | xargs kill -9 2>/dev/null
+
+# 3. 启动（市场源与产物目录均为 env 注入；默认域是占位符，本地验收必须覆盖）
+cd mindx-work/electron && \
+  MX_MARKET_INDEX_URL="http://127.0.0.1:8899/index.json" \
+  MX_PROD_DIST="/<仓库绝对路径>/mindx-work/app/dist" \
+  nohup npx electron . --remote-debugging-port=9223 > /tmp/<验收目录>/electron.log 2>&1 &
+
+# 4. Python Playwright 连 CDP 断言（勿硬编码机器路径与端口之外的任何本机值）
+python3 -c "from playwright.sync_api import sync_playwright"  # 环境自检
+```
+
+- 市场源 = 本地静态服务器：`python3 -m http.server 8899`（托管 index.json + zip；测试包生成脚本放 /tmp 验收目录，不入仓库）。
+- 验收脚本统一模式：`connect_over_cdp('http://127.0.0.1:9223')` → 取非 devtools 页 → `pageerror`/`console error` 全程收集 → 末尾断言"过滤 mx-plugin:// 后错误为 0"。判据军规读本技能 SKILL.md 验证节。

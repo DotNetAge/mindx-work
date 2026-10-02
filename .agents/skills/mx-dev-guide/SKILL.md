@@ -12,7 +12,7 @@ description: mindx-work 开发指南。开始任何 mindx-work 相关开发前�
 
 ## 项目背景
 
-mindx-work 是一个构建类 Mac 应用的 **UI 框架（shell）**：无渲染内核 + 六视图区（Sidebar / Content / Detail / Overlay / Toolbar / Settings）+ 插件运行时组装。框架 API 零业务词汇、渲染库无关、不做状态管理；界面由预置插件组装而成。全栈 NodeJS：Vue 3 + Pinia + Vite + TypeScript strict + pnpm workspace，Electron 只做窗口壳。
+mindx-work 是一个构建类 Mac 应用的 **UI 框架（shell）**：无渲染内核 + 八视图区（Sidebar / Content / Detail / Overlay / Sheet / Floater / Toolbar / Settings）+ 插件运行时组装。框架 API 零业务词汇、渲染库无关、不做状态管理；界面由预置插件组装而成。全栈 NodeJS：Vue 3 + Pinia + Vite + TypeScript strict + pnpm workspace，Electron 只做窗口壳。
 
 ## 总体架构
 
@@ -21,7 +21,7 @@ mindx-work 是一个构建类 Mac 应用的 **UI 框架（shell）**：无渲染
 | 层 | 包 | 职责 |
 | --- | --- | --- |
 | 内核层 | ui-shell | 可变注册表 + ChangeHub 版本通知 + services + 启动期校验 |
-| 适配层 | ui-shell-vue | 六区渲染组件 + MxIcon + 主题 + 薄桥 + mx-UIKit 样式 |
+| 适配层 | ui-shell-vue | 八区渲染组件 + MxIcon + 主题 + 薄桥 + mx-UIKit 样式 |
 | 插件层 | plugins | 插件 = 函数 + ctx + 清理函数；插件间共享走 services |
 | 装配层 | app | createApp(插件清单) → services.provide → mountVueApp |
 | 宿主层 | electron | macOS vibrancy / 平台标记 / 窗口拖动带 / 系统驻留图标（托盘），零业务 |
@@ -55,13 +55,12 @@ mindx-work 是一个构建类 Mac 应用的 **UI 框架（shell）**：无渲染
 | 任务 | 去处 |
 | --- | --- |
 | 界面设计、控件、样式 | mx-uikit 技能 |
-| 新插件从零起意（需求收集 / 席位设计 / 交互编排） | mx-plugin-design 技能 |
-| 插件开发（新插件 / 改插件） | mx-plugin-dev 技能 |
+| 新插件（从零起意 / 规格收集 / 开发改造） | mx-plugin-dev 技能 |
 | 在线插件机制（market / 包格式 / 版本代际 / 协议 / 市场安装） | mx-plugin-dev → references/contract.md §18；架构决策读本技能 → references/architecture.md §7 |
 | 打包发布（安装产物 / 证书公证 / CI 发布） | mx-release 技能 |
 | 插件发布市场（zip 打包 / index.json 登记 / 市场链路验收） | mx-plugin-publish 技能 |
 | 全面代码审计 / 安全审查 / 机制体检 | mx-audit 技能 |
-| 六区契约细节 | mx-plugin-dev → references/contract.md |
+| 八区契约细节 | mx-plugin-dev → references/contract.md |
 | 场景化插件生成 | mx-plugin-dev → references/examples.md + scripts/scaffold_plugin.py |
 | 架构与选型 | 本技能 → references/architecture.md |
 | 驻留图标菜单 / 关窗驻留 / 原生壳交互 | 本技能 → references/desktop-shell.md |

@@ -71,6 +71,7 @@
   --mx-state-warn-label: rgb(221, 134, 41);  /* static-amber-600（warn 深字，双主题同值） */
   --mx-toast-bg: rgb(53, 54, 56);            /* static-neutral-bluish-800（toast 双主题恒暗） */
   --mx-hovercard-bg: rgb(44, 44, 46);        /* hovercard #2C2C2E（双主题同值） */
+  --mx-traffic-light-close: #ff5f57;         /* macOS 交通灯红（Apple 官方色，双主题同值；Floater 浮窗模拟红灯） */
   --mx-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02),
     0 12px 32px 0 rgba(0, 0, 0, 0.08);      /* shadow-lv3（双主题同值） */
   --mx-nav-hover: rgb(241, 243, 245);        /* sidebar-nav-item-hover: neutral-bluish-75 */

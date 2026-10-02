@@ -6,6 +6,7 @@
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import DemoModal from '../overlays/DemoModal.vue'
 import DemoBanner from '../overlays/DemoBanner.vue'
+import DemoFloater from '../overlays/DemoFloater.vue'
 import { DEMO_MODAL_ID } from '../ids'
 
 const shell = useShell()
@@ -30,12 +31,25 @@ const pushBanner = () => {
   })
 }
 
+// 浮窗可多开：每个条目独立成窗（拖动、置顶互不影响）
+let floaterSeq = 0
+const openFloater = () => {
+  floaterSeq += 1
+  shell.Floater.add({
+    id: `demo-floater-${floaterSeq}`,
+    title: `浮窗 ${floaterSeq}`,
+    component: DemoFloater,
+  })
+}
+
 const zones = [
   { icon: 'lucide:panel-top', label: 'Toolbar', text: '窗口工具栏两席位（leading / trailing）' },
   { icon: 'lucide:panel-left', label: 'Sidebar', text: '分节导航，行是数据模型由壳渲染' },
   { icon: 'lucide:square', label: 'Content', text: '单活动视图，activeId 壳唯一写' },
   { icon: 'lucide:panel-right', label: 'Detail', text: 'tabs + 轨道，show / hide 编程开合' },
   { icon: 'lucide:bell', label: 'Overlay', text: '全局浮层：modal 互斥，banner 可堆叠' },
+  { icon: 'lucide:panel-bottom', label: 'Sheet', text: '全屏抽层：自底向上覆盖界面，互斥单开' },
+  { icon: 'lucide:app-window', label: 'Floater', text: '可拖动浮窗：交通灯红灯关闭，可多开并存' },
   { icon: 'lucide:settings', label: 'Settings', text: '设置面板由壳自动生成，注册者只给页与行' },
 ]
 </script>
@@ -43,7 +57,7 @@ const zones = [
 <template>
   <div :class="$style.page">
     <h1 :class="$style.title">总览</h1>
-    <p :class="$style.caption">六视图区由预置插件注册组装；本页演示壳的编排能力。</p>
+    <p :class="$style.caption">八视图区由预置插件注册组装；本页演示壳的编排能力。</p>
 
     <div class="mx-card" :class="$style.card">
       <h2 :class="$style.heading">编排演示</h2>
@@ -60,12 +74,16 @@ const zones = [
           <MxIcon name="lucide:bell" :size="16" />
           顶部通知
         </button>
+        <button type="button" class="mx-btn" @click="openFloater">
+          <MxIcon name="lucide:app-window" :size="16" />
+          打开浮窗
+        </button>
       </div>
-      <p :class="$style.hint">连点"顶部通知"可验证 banner 堆叠；对话框同时至多一个。</p>
+      <p :class="$style.hint">连点"顶部通知"可验证 banner 堆叠；对话框同时至多一个；浮窗可拖动可多开。</p>
     </div>
 
     <div class="mx-card" :class="$style.card">
-      <h2 :class="$style.heading">六视图区</h2>
+      <h2 :class="$style.heading">八视图区</h2>
       <ul :class="$style.zones">
         <li v-for="zone in zones" :key="zone.label" :class="$style.zone">
           <MxIcon :name="zone.icon" :size="16" />

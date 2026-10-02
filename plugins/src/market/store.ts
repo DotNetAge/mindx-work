@@ -9,6 +9,8 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   MARKET_RUNTIME_SERVICE,
+  PLUGIN_CATALOG_SERVICE,
+  type CorePluginInfo,
   type InstalledPluginView,
   type MarketPluginView,
   type MarketRuntime,
@@ -68,8 +70,12 @@ export const useMarketStore = defineStore('market', () => {
   // 运行期控制在 store 初始化时捕获（首次 useMarketStore 发生在组件 setup 内，
   // inject 有效；action/异步任务里 useService 会因脱离 setup 上下文抛错）
   const runtime = useService<MarketRuntime>(MARKET_RUNTIME_SERVICE)
+  // 预置插件目录（app 装配层 provide）：全量视图的「内置」段数据源
+  const coreCatalog = useService<CorePluginInfo[]>(PLUGIN_CATALOG_SERVICE)
 
   const installed = ref<InstalledPluginView[]>([])
+  /** 预置插件快照（拷贝防外部改写 provide 的原数组） */
+  const corePlugins = ref<CorePluginInfo[]>([...coreCatalog])
   const market = ref<MarketPluginView[]>([])
   const marketError = ref<string | null>(null)
   const loadingMarket = ref(false)
@@ -82,14 +88,68 @@ export const useMarketStore = defineStore('market', () => {
 
   const hasBridge = computed(() => window.mxDesktop?.plugins != null)
 
+  /** 上一帧清单快照（id → { enabled, version }）；null = 尚未首刷（首刷只建快照不触发激活，
+   * 避免把 app 启动期已激活的插件误判为「CLI 新装」重复 activate） */
+  let lastSnapshot: Map<string, { enabled: boolean; version: string }> | null = null
+
+  function snapshotOf(views: InstalledPluginView[]): Map<string, { enabled: boolean; version: string }> {
+    return new Map(views.map((v) => [v.id, { enabled: v.enabled, version: v.version }]))
+  }
+
+  /** 刷新清单并与上一帧差分：来自 mw CLI 的盘上变更即时落到运行期——
+   * 新装且启用 → 激活；停用 → 停活；激活版本变化 → 先停活再激活（自扩展闭环的 app 侧感知）。
+   * UI 自身的安装/启停/切版也走此路径：无差异时 diff 空转，幂等安全 */
   async function refreshInstalled(): Promise<void> {
     try {
       const list = await bridge().list()
-      installed.value = Array.isArray(list) ? list : []
+      const fresh = Array.isArray(list) ? list : []
+      const next = snapshotOf(fresh)
+      if (lastSnapshot !== null) {
+        for (const [id, cur] of next) {
+          const old = lastSnapshot.get(id)
+          // 值比较（快照对象逐帧重建，引用恒异）
+          if (old && old.enabled === cur.enabled && old.version === cur.version) continue
+          try {
+            if (!old) {
+              if (cur.enabled) {
+                const view = fresh.find((v) => v.id === id)
+                if (view) await runtime.activate(view)
+              }
+            } else if (old.enabled && !cur.enabled) {
+              runtime.deactivate(id)
+            } else if (old.enabled && cur.enabled && old.version !== cur.version) {
+              runtime.deactivate(id)
+              const view = fresh.find((v) => v.id === id)
+              if (view) await runtime.activate(view)
+            }
+          } catch (error) {
+            lastError.value = error instanceof Error ? error.message : String(error)
+          }
+        }
+        // 卸载（快照有、新帧无）：运行期兜底停活
+        for (const id of lastSnapshot.keys()) {
+          if (!next.has(id)) {
+            try {
+              runtime.deactivate(id)
+            } catch {
+              // 已未激活：幂等忽略
+            }
+          }
+        }
+      }
+      installed.value = fresh
+      lastSnapshot = next
     } catch (error) {
       installed.value = []
       lastError.value = error instanceof Error ? error.message : String(error)
     }
+  }
+
+  // mw CLI 落盘 → 主进程 watch 广播 → 即时重扫激活（订阅在 store 初始化期，hasBridge 宿主才生效）
+  if (hasBridge.value) {
+    bridge().onChanged(() => {
+      void refreshInstalled()
+    })
   }
 
   async function refreshMarket(): Promise<void> {
@@ -230,8 +290,43 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
+  /** 导出激活代际为 zip（保存对话框归主进程）；返回回执供组件提示，失败走 lastError */
+  async function exportPlugin(view: InstalledPluginView): Promise<{ ok: boolean; path?: string }> {
+    if (!beginBusy(view.id)) return { ok: false }
+    lastError.value = null
+    try {
+      const result = await bridge().export(view.id)
+      if (!result.ok) throw new Error(result.message ?? '导出失败')
+      return { ok: true, path: result.path }
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : String(error)
+      return { ok: false }
+    } finally {
+      busyId.value = null
+    }
+  }
+
+  /** 导入本地插件包（zip）：主进程弹选择对话框 → 同一安装管线落盘 → 刷新清单 */
+  async function importFromFile(): Promise<void> {
+    if (!beginBusy('__import__')) return
+    lastError.value = null
+    try {
+      const result = await bridge().installFromFile()
+      if (!result.ok) {
+        if (result.message !== '已取消') throw new Error(result.message ?? '导入失败')
+        return
+      }
+      await refreshInstalled()
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      busyId.value = null
+    }
+  }
+
   return {
     installed,
+    corePlugins,
     market,
     marketError,
     loadingMarket,
@@ -248,5 +343,7 @@ export const useMarketStore = defineStore('market', () => {
     disable,
     switchVersion,
     uninstall,
+    exportPlugin,
+    importFromFile,
   }
 })

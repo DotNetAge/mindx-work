@@ -6,7 +6,7 @@ Agent 生成插件的高频路径：**选场景 → scaffold 生成 → 按需�
 
 ```bash
 # 在 mindx-work 仓库根目录执行
-python3 ../.skills/mx-plugin-dev/scripts/scaffold_plugin.py my-plugin --with detail settings
+python3 .agents/skills/mx-plugin-dev/scripts/scaffold_plugin.py my-plugin --with detail settings
 ```
 
 - 场景可任意叠加（空格分隔）；不带 `--with` 即 basic。
@@ -48,7 +48,7 @@ python3 ../.skills/mx-plugin-dev/scripts/scaffold_plugin.py my-plugin --with det
 - **通用配置行**：`ctx.Settings.row({ id, component })` 不传 `page`，归入壳自带"通用"页（views.ts：缺省归 `GENERAL_PAGE_ID`，该页不可移除）。
 - **自定义配置页**：`ctx.Settings.page({ id, title, icon, component })` + `ctx.Settings.row({ id, page: '<name>-prefs', component })`；`page` 指向未注册的页启动期抛错。
 - **读取配置**：配置本体就是 store 的可写状态，行组件 `v-model.number="store.limit"` 直读直写（Pinia）。壳不提供配置存储 API（契约：框架不做状态管理；实证：theme 控制器为内存态、无持久化）。其他组件读同一份 store 即响应生效；**跨插件读走 services**（见下）。
-- 设置行排版用 `.mx-pref-row` 等原语（读 mx-uikit 技能）。
+- 设置行排版用 `.mx-pref-row` 等原语（读 [uikit.md](./uikit.md)）。
 
 ## overlay——浮层：modal 互斥 + banner 堆叠
 

@@ -1,30 +1,51 @@
 ---
 name: mx-plugin-dev
-description: mindx-work 插件开发技能。当为 mindx-work 编写新插件、给界面新增页面/侧栏节/设置页/浮层/详情轨道、或需要查六区契约 API 与界面构成时使用，涵盖军规、场景化脚手架用法、契约索引与开发规范。
+description: mindx-work 插件开发技能（规格收集 + 施工全流程）。当为 mindx-work 编写新插件、给界面新增页面/侧栏节/设置页/浮层/全屏抽层/可拖动浮窗/详情轨道、新插件规格未定（要哪些界面席位、怎么交互、放哪里）、或需要查八区契约 API、界面样式规范与界面构成时使用，涵盖问卷收规格、军规、场景化脚手架用法、契约索引与开发规范。
+metadata:
+  name_zh: MindX Work 插件开发
 ---
-
-# mindx-work 插件开发技能
 
 ## 何时使用
 
 - 为 mindx-work 写新插件（`plugins/` 下新增插件模块）。
 - 在现有插件里加页面、侧栏节、设置页、浮层、详情轨道、工具栏席位。
-- 分流出口：规格未定的新插件（缺席位清单 / 交互编排）→ 先走 mx-plugin-design 技能收规格，回本技能施工。
+- 规格未定的新插件（缺席位清单 / 交互编排 / order 布局 / 配置项任一）→ 先走下方「规格收集」阶段收规格，再施工。
+
+## 规格收集（阶段 0：零代码产出，规格已完整则跳过直接施工）
+
+军规：
+
+1. **问卷驱动，禁止猜测**：四轮问卷未收齐不开工；每题用多选式问答（AskUser，单次至多 4 题、带"其他"兜底），禁止用开放问题让用户替 Agent 设计。
+2. **选项必须来自真实席位**：候选选项一律对照 references/seats.md 席位映射表（八区契约），禁止发明不存在的席位或 API。
+3. **按轮裁剪**：轮 1 必问；轮 2/3 按前轮答案裁剪（用户选了"无配置"就不问配置项）；轮 4 必做。
+4. **产物 = 插件规格表**：按 references/spec.md 模板汇总，经用户确认后进入施工；确认前不写一行代码。
+5. **规格直通脚手架**：规格表必须给出 `scaffold_plugin.py` 场景参数（映射规则见 spec.md），确认即施工起点。
+
+四轮问卷结构：
+
+| 轮  | 目标                                               | 题库                              |
+| --- | -------------------------------------------------- | --------------------------------- |
+| 一  | 核心价值：解决什么问题、什么场景用、主交互形态     | seats.md 轮 1 题库（必问）        |
+| 二  | 席位选择：需要哪些界面席位                         | seats.md 席位映射表转多选题       |
+| 三  | 交互编排：跨区联动、通知与确认、配置项、order 布局 | seats.md 轮 3 题库（按轮 2 裁剪） |
+| 四  | 规格确认：规格表汇总请用户拍板                     | spec.md 模板                      |
 
 本技能是**军规 + 快速索引**；实现细节按下表取用，不在本文件重复：
 
 | 需求                                                                                 | 去处                                                                        |
 | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| 插件规格收集（席位映射表 + 四轮问卷题库）                                            | references/seats.md                                                         |
+| 插件规格表模板 + 脚手架场景映射规则                                                  | references/spec.md                                                          |
 | 按场景生成插件骨架（basic / detail / settings / overlay / services）                 | `scripts/scaffold_plugin.py`，场景用法与机制依据读 `references/examples.md` |
-| 六区契约全 API 签名、版本通知机制、启动期校验、编排语义、视图区几何                  | `references/contract.md`                                                    |
+| 八区契约全 API 签名、版本通知机制、启动期校验、编排语义、视图区几何                  | `references/contract.md`                                                    |
 | 跨插件响应/联动（另一插件对某动作或状态变化做出反应）                                | `references/contract.md` §10（双形态选型 + 职责规则 + Detail 范式）         |
 | 在线插件（market）：包格式 / manifest 字段 / 版本代际 / mx-plugin:// 协议 / 市场安装 | `references/contract.md` §18                                                |
-| 样式与控件（token、原语、伪类、色彩/字体/布局三大规范）                              | mx-uikit 技能                                                               |
-| 工程装配（五包依赖、主题、mount）                                                    | `mindx-work/docs/界面层选型.md`                                             |
+| 样式与控件（token、原语、伪类、色彩/字体/布局三大规范）                              | references/uikit.md（mx-UIKit 全量融入版，自包含）                          |
+| 工程装配（五包依赖、主题、mount；仓库内路径）                                        | `docs/界面层选型.md`                                                        |
 
 ## 军规（违反任何一条都是错误实现）
 
-1. **样式与界面开发必须严格使用 mx-uikit 技能**：token、控件原语、色彩/字体/布局规范一律从 mx-uikit 取；禁止自造样式、字面色值、页内 style。
+1. **样式与界面开发必须严格使用 UIKit 规范**：token、控件原语、色彩/字体/布局规范一律从 `references/uikit.md` 取（mx-UIKit 全量融入版）；禁止自造样式、字面色值、页内 style。
 2. **MVVM，禁事件总线**：界面状态与联动一律 MVVM，EventEmitter / mitt / 自造 pub-sub 不得出现。两条链路：壳机制联动 = 命令 API + ChangeHub 版本通知（拉模式，无载荷无主题，壳不提供任何事件出口）；插件内部状态 = Pinia store + SFC 声明式绑定。机制细节读 `references/contract.md`。
 3. **读壳状态必须经 `useShellData` 包裹**：直接读 `shell.xxx` 是裸值，界面不随壳变更更新。
 4. **联动只走既有通路**：导航归壳（行点击切页零连线）、跨区编排走命令 API（`Detail.show` / `Overlay.add` 等）、跨插件共享走 services（流动的是 Pinia store 响应式本体）、业务数据放自己的 store；插件间禁止 import。
@@ -55,19 +76,19 @@ plugins/src/<name>/
 
 资产引用实证坑：`import.meta.glob` 的匹配路径**相对当前模块文件**解析（非包根 / src），不匹配时 Vite **静默返回空 map、无任何报错**，调用方再有兜底分支（如首字母占位）则缺陷双重隐身（实证：models/providerIcons.ts 写 `../assets/` 而模块位于包根，品牌图标全部静默落入兜底）。glob 路径必须以引用方文件为原点核对；验收必须断言资源渲染本体，且 dev 下小体积 SVG 经 `?url` 导入会被 Vite 内联为 `data:` URI——按 src 路径关键字写的选择器在 dev 会失配。
 
-项目级目录地图（壳/适配器/装配各放哪）读 mx-dev-guide 技能。
+项目级目录归属速记：壳与视图区层改 `ui-shell/src`（Vue 适配层 `ui-shell-vue/src`）；插件一律 `plugins/src/<name>/`；装配在 `app/src/main.ts`（CORE_PLUGINS 清单 + services provide）。详图读仓库 `docs/界面层选型.md`。
 
 ## 开发流程
 
 1. 按场景生成骨架（mindx-work 根目录执行；场景可任意叠加，不带 `--with` 即 basic）：
 
    ```bash
-   python3 ../.skills/mx-plugin-dev/scripts/scaffold_plugin.py my-plugin --with detail settings
+   python3 .agents/skills/mx-plugin-dev/scripts/scaffold_plugin.py my-plugin --with detail settings
    ```
 
    脚本自动完成三处注册：`plugins/package.json` exports 子路径、`plugins/src/index.ts` re-export、`app/src/main.ts` 装配清单；锚点不匹配时跳过并提示手工步骤。
-2. 按需填充业务逻辑：骨架注释即范式注释；样式严格用 mx-uikit；图标一律 `<MxIcon name="lucide:xxx" :size="16 或 20" />`。
-3. 每轮验证（mindx-work 目录）：`pnpm typecheck`（vue-tsc 校验 SFC + TS）+ Python Playwright 断言（浏览器二进制经 `launch(executable_path=...)` 指向本机已缓存版本，勿硬编码版本号）：断言渲染、交互与 0 页面错误，截图确认。禁止猜测。普通插件走 dev 5273；**market/动态插件走真机验收链路**（构建产物 + env + CDP，读 mx-dev-guide → references/architecture.md §7"真机验收链路"）。
+2. 按需填充业务逻辑：骨架注释即范式注释；样式严格按 `references/uikit.md`；图标一律 `<MxIcon name="lucide:xxx" :size="16 或 20" />`。
+3. 每轮验证（mindx-work 目录）：`pnpm typecheck`（vue-tsc 校验 SFC + TS）+ Python Playwright 断言（浏览器二进制经 `launch(executable_path=...)` 指向本机已缓存版本，勿硬编码版本号）：断言渲染、交互与 0 页面错误，截图确认。禁止猜测。普通插件走 dev 5273；**market/动态插件走真机验收链路**（构建产物 + env + CDP，读 `references/contract.md` §18.8）。
 
    **Playwright 判据军规**（每条都是实踩教训，违反即断言不可信）：
    - 多元素断言一律 `count()` 判定，严禁裸 `get_by_text(...).is_visible()`——命中多元素抛 strict violation、单元素不可见返回 False，两种失败形态都会把脚本带进错误方向。

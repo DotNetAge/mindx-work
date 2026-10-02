@@ -1414,13 +1414,21 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
   }
 
   /**
-   * 模型初始化链：models → providers → 当前模型解析（顺序依赖：解析匹配需要
-   * models 就位；ChatFlowPage.fetchInitialData 单一入口调用）
+   * 模型目录刷新链：models → providers → 当前模型解析（顺序依赖：解析匹配需要
+   * models 就位）。两个入口：①ChatFlowPage.fetchInitialData 连接后初始化；
+   * ②ModelSelector 打开选择器时刷新——models 插件与 chatflow 是各自缓存的
+   * 两个消费者（daemon 无变更推送），打开时刻拉取保证供应商配置侧的新增/
+   * 删除/启停即时反映到选择器。
    */
-  async function initModels(): Promise<void> {
+  async function refreshModelCatalog(): Promise<void> {
     await fetchModels()
     await fetchProviders()
     await resolveCurrentModel()
+  }
+
+  /** 连接后模型初始化（与刷新同链单一实现） */
+  async function initModels(): Promise<void> {
+    await refreshModelCatalog()
   }
 
   /**
@@ -2665,6 +2673,7 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     currentModelProvider,
     fetchModels,
     fetchProviders,
+    refreshModelCatalog,
     formatProviderTitle,
     initModels,
     switchModel,

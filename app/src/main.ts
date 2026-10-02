@@ -1,6 +1,6 @@
 /** 组装入口：执行预置插件清单 + 主题机制挂载 + 在线插件激活 + Vue 挂载 */
 
-import { createApp } from '@mindx-work/ui-shell'
+import { createApp, PLUGIN_CATALOG_SERVICE, type CorePluginInfo } from '@mindx-work/ui-shell'
 import {
   createPreferencesController,
   createThemeController,
@@ -38,6 +38,35 @@ import { diffviewPlugin } from '@mindx-work/plugins/diffview'
 // demo 插件已下线（源码保留作范式参考）：当前装配仅 market 插件
 // 清单顺序即设置导航顺序（壳自带「通用」恒居首）：插件 → 模型 → 团队 → 技能 → 连接器 → 连接
 const shell = createApp([marketPlugin, modelsPlugin, agentsPlugin, skillsPlugin, connectorsPlugin, connectionPlugin, phonePairPlugin, shellChromePlugin, chatflowPlugin, explorerPlugin, markdownPlugin, codeEditorPlugin, imageViewerPlugin, docPreviewPlugin, webViewerPlugin, videoViewerPlugin, svgboardPlugin, dashboardPlugin, terminalPlugin, calendarPlugin, usagePlugin, memoryPlugin, diffviewPlugin])
+
+// 预置插件目录（全量视图数据源）：装配处是唯一知道插件清单的地方，经 services
+// 提供给 market 插件的「已安装」视图（运行期消费——market store 初始化晚于此 provide）
+const CORE_PLUGINS: CorePluginInfo[] = [
+  { id: 'market', name: '插件', description: '插件市场与已安装插件管理' },
+  { id: 'models', name: '模型', description: '模型供应商与模型配置' },
+  { id: 'agents', name: '团队', description: '智能体团队管理' },
+  { id: 'skills', name: '技能', description: '技能库管理' },
+  { id: 'connectors', name: '连接器', description: '连接器配置' },
+  { id: 'connection', name: '连接', description: '智能主机连接状态与诊断' },
+  { id: 'phone-pair', name: '设备配对', description: '手机设备扫码配对' },
+  { id: 'shell-chrome', name: '壳工具栏', description: '窗口工具栏与全局动作' },
+  { id: 'chatflow', name: '任务', description: '任务对话工作流' },
+  { id: 'explorer', name: '文件', description: '工作区文件浏览' },
+  { id: 'markdown', name: 'Markdown 预览', description: 'Markdown 渲染查看' },
+  { id: 'codeeditor', name: '代码编辑', description: '源码编辑器' },
+  { id: 'image-viewer', name: '图片查看', description: '图片查看器' },
+  { id: 'docpreview', name: '文档预览', description: 'Office 等文档格式预览' },
+  { id: 'web-viewer', name: '网页查看', description: '内嵌网页浏览' },
+  { id: 'video-viewer', name: '视频播放', description: '视频播放器' },
+  { id: 'svgboard', name: 'SVG 画板', description: 'SVG 矢量画板' },
+  { id: 'dashboard', name: '仪表盘', description: '数据仪表盘' },
+  { id: 'terminal', name: '终端', description: '集成终端' },
+  { id: 'calendar', name: '日历', description: '日历视图' },
+  { id: 'usage', name: '用量', description: '模型用量统计' },
+  { id: 'memory', name: '记忆', description: '智能体记忆库' },
+  { id: 'diffview', name: '差异对比', description: '文件差异对比视图' },
+]
+shell.services.provide(PLUGIN_CATALOG_SERVICE, CORE_PLUGINS)
 
 // 设置持久化归壳所有：控制器以服务形式供设置行与插件消费（键建议 <owner>.<key> 前缀）
 const preferences = createPreferencesController()

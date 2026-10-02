@@ -49,6 +49,8 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'select', model: ModelInfo): void
   (e: 'open-model-settings'): void
+  /** 选择列表打开：宿主此刻重拉模型目录（供应商配置侧变更无推送，打开时拉取） */
+  (e: 'open'): void
 }>()
 
 // 模型选择 Popover 显隐
@@ -171,6 +173,7 @@ function openManager() {
       placement="bottom-start"
       :width="300"
       popper-class="model-selector-popover"
+      @show="emit('open')"
     >
       <template #reference>
         <div class="provider-info picker-trigger">

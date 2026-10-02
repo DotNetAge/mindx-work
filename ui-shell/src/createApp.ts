@@ -6,25 +6,31 @@ import { createServiceContext } from './services'
 import {
   createContentView,
   createDetailView,
+  createFloaterView,
   createOverlayView,
   createPreferences,
+  createSheetView,
   createSidebarView,
   createToolbarView,
   type ContentViewApi,
   type DetailViewApi,
+  type FloaterViewApi,
   type OverlayViewApi,
   type PreferencesApi,
+  type SheetViewApi,
   type SidebarViewApi,
   type ToolbarViewApi,
 } from './views'
 import type { Plugin, ServiceContext, Unsubscribe } from './types'
 
-/** AppShell 总面：六视图区 + 服务上下文 + 文件类型接管注册表 + 壳机制状态 */
+/** AppShell 总面：八视图区 + 服务上下文 + 文件类型接管注册表 + 壳机制状态 */
 export interface AppShell<C> {
   readonly Sidebar: SidebarViewApi<C>
   readonly Content: ContentViewApi<C>
   readonly Detail: DetailViewApi<C>
   readonly Overlay: OverlayViewApi<C>
+  readonly Sheet: SheetViewApi<C>
+  readonly Floater: FloaterViewApi<C>
   readonly Toolbar: ToolbarViewApi<C>
   readonly Settings: PreferencesApi<C>
   readonly services: ServiceContext
@@ -67,6 +73,8 @@ export function createApp<C>(plugins: readonly Plugin<C>[]): AppShell<C> {
     Content,
     Detail,
     Overlay: createOverlayView<C>(hub),
+    Sheet: createSheetView<C>(hub),
+    Floater: createFloaterView<C>(hub),
     Toolbar: createToolbarView<C>(hub),
     Settings: createPreferences<C>(hub),
     services: createServiceContext(),
@@ -142,7 +150,7 @@ export function createApp<C>(plugins: readonly Plugin<C>[]): AppShell<C> {
 
 /** 契约硬约束校验：Sidebar 行 id → Content 条目映射、Preferences 行 → 页归属。
  * 启动期由 createApp 调用一次；动态插件注册完成后由 loader 复调
- * （契约 §18.1 六区契约对动态插件完全适用——激活期违规同样要暴露） */
+ * （契约 §18.1 八区契约对动态插件完全适用——激活期违规同样要暴露） */
 export function validateShellConstraints<C>(shell: AppShell<C>): void {
   const contentIds = new Set(shell.Content.entries.map((entry) => entry.id))
   for (const section of shell.Sidebar.entries) {

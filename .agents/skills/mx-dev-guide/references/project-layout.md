@@ -23,7 +23,7 @@ mindx-work/
 | --- | --- |
 | `types.ts` | 通用类型：Entry / ViewProps / Unsubscribe 等 |
 | `registry.ts` | 条目注册表：add/remove/has/entries，id 冲突抛错 |
-| `views.ts` | 六区 API 定稿（Sidebar/Content/Detail/Overlay/Toolbar/Preferences 的全签名与校验） |
+| `views.ts` | 八区 API 定稿（Sidebar/Content/Detail/Overlay/Sheet/Floater/Toolbar/Preferences 的全签名与校验） |
 | `changes.ts` | ChangeHub：版本递增 + 订阅（联动的通知源，非事件总线） |
 | `services.ts` | ServiceContext：provide / use（重复提供、缺失消费抛错） |
 | `createApp.ts` | AppShell 总面组装 + 启动期校验（行 id→Content 映射、Settings 行归属）+ dispose |
@@ -33,8 +33,8 @@ mindx-work/
 
 | 文件 | 职责 |
 | --- | --- |
-| `components/AppFrame.vue` | 壳骨架网格：六区组装、拖动带、让位 |
-| `components/` 其余六件 | 各区渲染：SidebarPane（行点击→activate）/ ContentPane（v-if 单活动）/ DetailPane / OverlayPane（modal+banner 容器）/ ToolbarPane / SettingsPane |
+| `components/AppFrame.vue` | 壳骨架网格：八区组装、拖动带、让位 |
+| `components/` 其余八件 | 各区渲染：SidebarPane（行点击→activate）/ ContentPane（v-if 单活动）/ DetailPane / OverlayPane（modal+banner 容器）/ SheetPane（全屏抽层容器）/ FloaterPane（可拖动浮窗容器）/ ToolbarPane / SettingsPane |
 | `MxIcon.vue` | 图标原语（Iconify 名称，单色 currentColor，16/20 两档） |
 | `reactivity.ts` | 薄桥：`useShell` / `useShellVersion` / `useShellData` / `useService` + SHELL_KEY |
 | `theme.ts` | 主题控制器（light/dark/auto，token 切换） |
@@ -88,13 +88,13 @@ plugins/
 | --- | --- |
 | 新插件 / 插件内页面、组件 | `plugins/src/<name>/`（mx-plugin-dev 生成） |
 | 插件静态资源 | 插件模块内 `assets/`（仓库级资源才进根 `assets/`） |
-| 六区 API / 校验 / 内核机制 | `ui-shell/src`（改动 → 同步 mx-plugin-dev 契约） |
+| 八区 API / 校验 / 内核机制 | `ui-shell/src`（改动 → 同步 mx-plugin-dev 契约） |
 | 渲染组件 / 薄桥 / 样式原语 | `ui-shell-vue/src`（样式改动 → 同步 mx-uikit） |
 | 窗口 / 系统能力 | `electron/src`（禁止业务逻辑） |
 | 架构定稿文档 | `docs/` + 本技能 references 同步 |
 
 ## 引用（细节不在此重复）
 
-- 六区契约 / 插件机制：mx-plugin-dev 技能（references/contract.md）
+- 八区契约 / 插件机制：mx-plugin-dev 技能（references/contract.md）
 - 样式与控件：mx-uikit 技能
 - 选型决策与运行链路：本技能 references/architecture.md

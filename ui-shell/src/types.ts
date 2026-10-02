@@ -24,7 +24,7 @@ export interface ViewProps {
   compact?: boolean
 }
 
-/** 全局浮层种类：modal（互斥）与 banner（可堆叠）；popover/sheet 归插件局部渲染 */
+/** 全局浮层种类：modal（互斥）与 banner（可堆叠）；全屏抽层是独立视图区 Sheet，popover 归插件局部渲染 */
 export type OverlayKind = 'modal' | 'banner'
 
 /** Sidebar 行：数据模型而非组件，由壳统一渲染（SwiftUI selection 语义） */

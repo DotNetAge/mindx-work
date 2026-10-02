@@ -1,5 +1,5 @@
 /**
- * 六视图区实现（契约第 4 节）：条目注册 + 壳机制状态（壳唯一写）。
+ * 八视图区实现（契约第 4 节）：条目注册 + 壳机制状态（壳唯一写）。
  * 全部变更经 ChangeHub 广播，适配器订阅后映射为渲染层响应式。
  */
 
@@ -43,6 +43,27 @@ export type DetailEntry<C> = Entry<C> & {
 }
 
 export type OverlayEntry<C> = Entry<C> & { kind: OverlayKind }
+
+export type SheetEntry<C> = Entry<C> & {
+  /** 头部标题（零文案壳：标题由注册者提供，壳统一渲染居中 Title + 尾端关闭钮） */
+  title: string
+}
+
+/** 浮窗出现/消失动画预设：zoom 放大出现、缩小消失（缺省）；fade 纯淡入淡出；none 无动画 */
+export type FloaterAnimation = 'zoom' | 'fade' | 'none'
+
+/** 可拖动浮窗：无 titlebar，头部为模拟交通灯（仅红灯 = 关闭）+ 标题细带；
+ * 多条目并存、无遮罩不阻塞，尺寸可选声明（缺省由适配层定） */
+export type FloaterEntry<C> = Entry<C> & {
+  /** 头部标题（零文案壳：红灯右侧展示） */
+  title: string
+  /** 浮窗宽度 px，缺省由适配层定 */
+  width?: number
+  /** 浮窗高度 px，缺省由适配层定 */
+  height?: number
+  /** 出现/消失动画预设，缺省 'zoom'（放大出现、缩小消失） */
+  animation?: FloaterAnimation
+}
 
 export type ToolbarEntry<C> = Entry<C> & {
   slot: 'leading' | 'trailing'
@@ -115,6 +136,22 @@ export interface OverlayViewApi<C> {
   remove(id: string): void
   has(id: string): boolean
   readonly entries: readonly OverlayEntry<C>[]
+}
+
+/** 全屏抽层（自底向上覆盖整个界面）：互斥单开，关闭 = 移除条目 */
+export interface SheetViewApi<C> {
+  add(entry: SheetEntry<C>): void
+  remove(id: string): void
+  has(id: string): boolean
+  readonly entries: readonly SheetEntry<C>[]
+}
+
+/** 可拖动浮窗（无阻塞浮动件）：多条目并存，关闭 = 移除条目 */
+export interface FloaterViewApi<C> {
+  add(entry: FloaterEntry<C>): void
+  remove(id: string): void
+  has(id: string): boolean
+  readonly entries: readonly FloaterEntry<C>[]
 }
 
 export interface ToolbarViewApi<C> {
@@ -323,6 +360,56 @@ export function createOverlayView<C>(hub: ChangeHub): OverlayViewApi<C> {
       if (entry.kind === 'modal' && registry.entries.some((item) => item.kind === 'modal')) {
         throw new Error(`Overlay 已存在 modal 条目，modal 同时至多一个（冲突：${entry.id}）`)
       }
+      registry.add(entry)
+    },
+    remove: registry.remove,
+    has: registry.has,
+    get entries() {
+      return registry.entries
+    },
+  }
+}
+
+export function createSheetView<C>(hub: ChangeHub): SheetViewApi<C> {
+  const registry = createRegistry<SheetEntry<C>>(hub, 'Sheet')
+  return {
+    add: (entry) => {
+      if (!entry.title) {
+        throw new Error(`Sheet 条目 "${entry.id}" 缺少 title（壳统一渲染头部标题）`)
+      }
+      // 互斥：全屏抽层同时至多一个（对齐 modal 互斥先例）
+      if (registry.entries.length > 0) {
+        throw new Error(`Sheet 已存在条目，sheet 同时至多一个（冲突：${entry.id}）`)
+      }
+      registry.add(entry)
+    },
+    remove: registry.remove,
+    has: registry.has,
+    get entries() {
+      return registry.entries
+    },
+  }
+}
+
+export function createFloaterView<C>(hub: ChangeHub): FloaterViewApi<C> {
+  const registry = createRegistry<FloaterEntry<C>>(hub, 'Floater')
+  return {
+    add: (entry) => {
+      if (!entry.title) {
+        throw new Error(`Floater 条目 "${entry.id}" 缺少 title（壳统一渲染头部标题）`)
+      }
+      // 动画预设边界校验（对齐 OverlayKind kind 非法值抛错先例）
+      if (
+        entry.animation !== undefined &&
+        entry.animation !== 'zoom' &&
+        entry.animation !== 'fade' &&
+        entry.animation !== 'none'
+      ) {
+        throw new Error(
+          `Floater 条目 "${entry.id}" 的 animation 非法：${String(entry.animation)}（可用：zoom / fade / none）`,
+        )
+      }
+      // 浮窗允许多开（各自独立拖动），不互斥
       registry.add(entry)
     },
     remove: registry.remove,

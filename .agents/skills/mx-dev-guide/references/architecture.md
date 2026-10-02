@@ -4,7 +4,7 @@
 
 ## 1. 项目定位
 
-mindx-work 是一个构建类 Mac 应用的 **UI 框架（shell）**：无渲染内核 + 六视图区 + 插件运行时组装。框架 API 零业务词汇、渲染库无关、不做状态管理；界面由预置插件组装而成，换业务领域框架代码零改动。
+mindx-work 是一个构建类 Mac 应用的 **UI 框架（shell）**：无渲染内核 + 八视图区 + 插件运行时组装。框架 API 零业务词汇、渲染库无关、不做状态管理；界面由预置插件组装而成，换业务领域框架代码零改动。
 
 全栈 NodeJS：主进程、渲染进程、预置插件均为 Node/TS 生态。
 
@@ -48,7 +48,7 @@ mindx-work 是一个构建类 Mac 应用的 **UI 框架（shell）**：无渲染
 
 ```text
 mindx-work/
-├── ui-shell/          # 内核：AppShell + 六区 + 插件契约（渲染无关，零 Vue 依赖）
+├── ui-shell/          # 内核：AppShell + 八区 + 插件契约（渲染无关，零 Vue 依赖）
 ├── ui-shell-vue/      # Vue 适配器：条目渲染 + 类型收窄（C = Vue 组件）
 ├── plugins/           # 预置插件（Pinia；daemon-link 通信插件在此）
 ├── electron/          # 主进程窗口壳（薄，无业务）
@@ -61,8 +61,8 @@ mindx-work/
 
 | 层 | 包 | 职责 |
 | --- | --- | --- |
-| 内核层 | ui-shell | 可变注册表（六区条目）+ ChangeHub 版本通知 + services + 启动期校验（`validateOrThrow`） |
-| 适配层 | ui-shell-vue | 六区渲染组件（AppFrame/各 Pane）+ MxIcon + 主题控制器 + 薄桥（`useShell`/`useShellData`/`useService`）+ mx-UIKit 样式 |
+| 内核层 | ui-shell | 可变注册表（八区条目）+ ChangeHub 版本通知 + services + 启动期校验（`validateOrThrow`） |
+| 适配层 | ui-shell-vue | 八区渲染组件（AppFrame/各 Pane）+ MxIcon + 主题控制器 + 薄桥（`useShell`/`useShellData`/`useService`）+ mx-UIKit 样式 |
 | 插件层 | plugins | 插件 = 函数 `(ctx) => void \| cleanup`；demo 为范式；配置与服务经 services 共享 |
 | 装配层 | app | `createApp([插件...])` → services.provide → `mountVueApp`（装配 SHELL_KEY 上下文与 Pinia） |
 | 宿主层 | electron | macOS vibrancy 材质、平台标记（`data-platform`）、窗口拖动带；零业务 |
@@ -114,25 +114,4 @@ pnpm test         # node --test（scripts/*.spec.mjs；脚本关键逻辑同受�
 
 ### 真机验收链路（market 机制专用，与普通插件 dev 5273 链路并行）
 
-electron 走 `MX_PROD_DIST` 加载 **app 构建产物**而非 dev server——改了渲染侧源码必须重新构建再重启，否则验收的是旧产物（实踩）。四步循环：
-
-```bash
-# 1. 渲染侧代码改动后：重建 app 产物（electron 不认源码）
-cd mindx-work/app && pnpm build
-
-# 2. 终止旧实例（pkill 模式匹配不清 Helper 进程树，grep 确认后按 PID kill -9 兜底）
-pkill -f "remote-debugging-port=9223"; sleep 2
-ps aux | grep "[9]223" | awk '{print $2}' | xargs kill -9 2>/dev/null
-
-# 3. 启动（市场源与产物目录均为 env 注入；默认域是占位符，本地验收必须覆盖）
-cd mindx-work/electron && \
-  MX_MARKET_INDEX_URL="http://127.0.0.1:8899/index.json" \
-  MX_PROD_DIST="/<仓库绝对路径>/mindx-work/app/dist" \
-  nohup npx electron . --remote-debugging-port=9223 > /tmp/<验收目录>/electron.log 2>&1 &
-
-# 4. Python Playwright 连 CDP 断言（勿硬编码机器路径与端口之外的任何本机值）
-python3 -c "from playwright.sync_api import sync_playwright"  # 环境自检
-```
-
-- 市场源 = 本地静态服务器：`python3 -m http.server 8899`（托管 index.json + zip；测试包生成脚本放 /tmp 验收目录，不入仓库）。
-- 验收脚本统一模式：`connect_over_cdp('http://127.0.0.1:9223')` → 取非 devtools 页 → `pageerror`/`console error` 全程收集 → 末尾断言"过滤 mx-plugin:// 后错误为 0"。判据军规读 mx-plugin-dev SKILL.md 验证节。
+已归 mx-plugin-dev 技能 `references/contract.md` §18.8（2026-10-02 迁移，机制细节统一归 contract.md）；本节不再重复。

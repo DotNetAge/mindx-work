@@ -596,6 +596,7 @@ function handleOpenModelSettings() {
           @send="onSend"
           @model-select="handleModelSelect"
           @open-model-settings="handleOpenModelSettings"
+          @refresh-models="store.refreshModelCatalog()"
           @select-workspace="handleSelectWorkspace"
           @add-workspace="handleAddWorkspace"
         />
@@ -669,6 +670,7 @@ function handleOpenModelSettings() {
         @send="onSend"
         @model-select="handleModelSelect"
         @open-model-settings="handleOpenModelSettings"
+        @refresh-models="store.refreshModelCatalog()"
       />
 
       <!-- 阻塞交互 Drawer：active 阻塞直接交互；子会话阻塞弹「提示 + 跳转」，

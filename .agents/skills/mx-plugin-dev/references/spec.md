@@ -38,7 +38,7 @@
 
 ## 脚手架场景
 - 场景参数：<basic / --with detail settings overlay services 叠加>
-- 生成命令：`python3 ../.skills/mx-plugin-dev/scripts/scaffold_plugin.py <模块名> <场景参数>`
+- 生成命令：`python3 .agents/skills/mx-plugin-dev/scripts/scaffold_plugin.py <模块名> <场景参数>`（mindx-work 仓库根目录执行）
 
 ## 验收判据
 - 断言点：<逐席位一条——分节出现 / 页面呈现 / 详情打开 / 通知弹出 / 配置生效>

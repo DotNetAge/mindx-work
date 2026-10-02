@@ -134,5 +134,10 @@ contextBridge.exposeInMainWorld('mxDesktop', {
     uninstall: (id: string) => ipcRenderer.invoke('plugins:uninstall', id),
     setEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke('plugins:set-enabled', id, enabled),
     setActiveVersion: (id: string, version: string) => ipcRenderer.invoke('plugins:set-active-version', id, version),
+    export: (id: string): Promise<PluginInstallResult & { path?: string }> =>
+      ipcRenderer.invoke('plugins:export', id),
+    onChanged: (cb: () => void): void => {
+      ipcRenderer.on('plugins:changed', () => cb())
+    },
   },
 })

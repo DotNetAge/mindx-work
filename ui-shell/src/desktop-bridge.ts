@@ -58,6 +58,25 @@ export interface MarketRuntime {
 /** 在线插件运行期控制的 services 注册名（提供方 app 装配层，消费方 market 插件） */
 export const MARKET_RUNTIME_SERVICE = 'shell.market-runtime'
 
+/** 预置（内置）插件展示条目：编译进应用的插件无独立版本号，随应用整体发版 */
+export interface CorePluginInfo {
+  /** 展示用短 id（仅目录显示用，非注册身份） */
+  id: string
+  name: string
+  description: string
+}
+
+/** 预置插件目录的 services 注册名（提供方 app 装配层——唯一知道全量插件清单的地方，
+ * 消费方 market 插件的「已安装插件」全量视图） */
+export const PLUGIN_CATALOG_SERVICE = 'shell.plugin-catalog'
+
+/** 导出插件回执：ok 时 path 为写入的 zip 绝对路径 */
+export interface PluginExportResult {
+  ok: boolean
+  path?: string
+  message?: string
+}
+
 /** 设置持久化控制器（提供方 app 装配层，消费方设置行/插件）：
  * 内存缓存 + 经宿主桥落盘 userData/preferences.json（无宿主桥时降级为仅内存）。
  * 键语义归消费方解释（建议前缀 `<owner>.<key>` 防跨插件撞键） */
@@ -194,6 +213,10 @@ export interface MxDesktopBridge {
     uninstall(id: string): Promise<boolean>
     setEnabled(id: string, enabled: boolean): Promise<boolean>
     setActiveVersion(id: string, version: string): Promise<boolean>
+    /** 导出已装插件为 zip（主进程弹保存对话框）；取消返回 ok=false */
+    export(id: string): Promise<PluginExportResult>
+    /** 订阅清单变更（mw CLI 落盘后主进程广播）：回调内拉取 list 重扫激活 */
+    onChanged(cb: () => void): void
   }
 }
 

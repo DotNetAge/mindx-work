@@ -90,6 +90,7 @@ const emit = defineEmits<{
   (e: 'send', payload: { text: string; images: Array<{ path: string; media_type: string }> }): void
   (e: 'model-select', model: ModelInfo): void
   (e: 'open-model-settings'): void
+  (e: 'refresh-models'): void
   (e: 'select-workspace', dir: string): void
   (e: 'add-workspace'): void
 }>()
@@ -504,6 +505,7 @@ defineExpose({ fillText, fillAndSend, appendFileRef })
             :current-model-provider="currentModelProvider"
             @select="(m) => emit('model-select', m)"
             @open-model-settings="emit('open-model-settings')"
+            @open="emit('refresh-models')"
           />
           <!-- 插入图片（本地文件选择后上传到会话临时目录 fs.write_base64） -->
           <el-tooltip v-if="!isRecording" content="插入图片" placement="top" effect="dark">

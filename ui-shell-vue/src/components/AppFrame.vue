@@ -15,6 +15,8 @@ import SidebarPane from './SidebarPane.vue'
 import ContentPane from './ContentPane.vue'
 import DetailPane from './DetailPane.vue'
 import OverlayPane from './OverlayPane.vue'
+import SheetPane from './SheetPane.vue'
+import FloaterPane from './FloaterPane.vue'
 import SettingsPane from './SettingsPane.vue'
 
 /** 与 SidebarPane WIDTH_DEFAULT 对齐（适配器本地常量不上抛初始值） */
@@ -41,6 +43,8 @@ const effSidebar = computed(() => (collapsed.value ? SIDEBAR_RAIL : sidebarWidth
     </div>
     <DetailPane />
     <OverlayPane />
+    <SheetPane />
+    <FloaterPane />
     <SettingsPane v-if="settingsOpen" />
   </div>
 </template>

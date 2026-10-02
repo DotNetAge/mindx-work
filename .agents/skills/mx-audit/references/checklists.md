@@ -8,7 +8,7 @@
 
 **范围**：`ui-shell/src/` 全部（changes.ts / registry.ts / views.ts / createApp.ts / services.ts / types.ts / plugin-manifest.ts / desktop-bridge.ts）
 
-**对照条款**：contract.md §2-§12（通用条目模型、六区 API、版本通知、启动期校验）
+**对照条款**：contract.md §2-§12（通用条目模型、八区 API、版本通知、启动期校验）
 
 **检查项**：
 
@@ -29,7 +29,7 @@
 
 ## 分片二：ui-shell-vue 渲染层
 
-**范围**：`ui-shell-vue/src/`（components/ 六区组件、styles/ controls.css + tokens.css、reactivity）
+**范围**：`ui-shell-vue/src/`（components/ 八区组件、styles/ controls.css + tokens.css、reactivity）
 
 **对照条款**：contract.md §14（浮层层级表 + Esc 分层）+ mx-uikit 军规（--mx-* token、伪类全量显式、禁字面色值）
 

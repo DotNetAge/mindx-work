@@ -1,20 +1,12 @@
----
-name: mx-uikit
-description: mindx-work 界面开发必读的 UIKit 使用手册。当为 mindx-work 写或改任何界面（页面、设置行、控件、浮层、侧栏、插件组件）时使用，涵盖色彩/字体/布局三大规范、token 体系、控件原语用法与样式纪律。
----
+# 界面样式规范（mx-UIKit 全量融入版）
 
-# mx-UIKit 使用手册
+> 同源注记：本文与仓库技能 `mx-uikit/SKILL.md` 同源（2026-10-02 快照）。本技能自包含样式规范，脱离仓库技能生态可用；两处改动须双向同步。
 
-## 何时使用
-
-- 为 mindx-work 任意包写或改界面时（唯一界面样式来源）。
-- 新增页面、设置行、控件、浮层、侧栏内容时。
-
-分流：壳契约（八区/席位/注册 API）读 `mindx-work/docs/组件层契约.md`；工程结构与装配读 `mindx-work/docs/界面层选型.md`。
+界面样式一律服从本规范；壳契约（八区/席位/注册 API）读 [contract.md](./contract.md)。
 
 ## 权威与纪律
 
-1. **mx-UIKit 是唯一权威**：`ui-shell-vue/src/styles/tokens.css`（token）、`controls.css`（控件原语）、`docs/样式原语.md`（清单）。界面实现一律服从这三处定义，禁止绕开自行造样式。
+1. **mx-UIKit 是唯一权威**：权威定义位于仓库 `ui-shell-vue/src/styles/tokens.css`（token）、`controls.css`（控件原语）、`docs/样式原语.md`（清单）。界面实现一律服从这三处定义，禁止绕开自行造样式。
 2. **禁止字面色值**：一律 `var(--mx-*)`。新颜色先入 tokens.css（亮暗两块都写）再使用。
 3. **禁止页内样式**：一律 CSS Modules；唯一例外是动态数值经 CSS 自定义属性注入。
 4. **伪类全量显式**：`:hover/:active/:focus-visible/:disabled` 一个不许省。
@@ -111,26 +103,26 @@ description: mindx-work 界面开发必读的 UIKit 使用手册。当为 mindx-
 
 ## 控件原语用法
 
-全部在 `controls.css`，各节头部注释就是用法说明。清单：
+全部位于仓库 `ui-shell-vue/src/styles/controls.css`，各节头部注释就是用法说明。清单：
 
-按钮 `.mx-btn`（`--primary` 变体）、图标按钮 `.mx-icon-btn`、输入框 `.mx-input`、徽标 `.mx-badge`、卡片 `.mx-card`、下拉 chip `.mx-pill`、首选项行 `.mx-pref-row`/`-title`/`-desc`、开关 `.mx-switch`+`-thumb`（`role="switch"` + `aria-checked`）、复选框 `.mx-checkbox`、菜单卡 `.mx-menu`+`.mx-menu-item`（宿主 `position:relative`）、工具提示 `.mx-tooltip`（fixed 定位由使用方算）、状态点 `.mx-dot[data-state]`（颜色 = `color`）、标签 `.mx-tag[data-tone=outline|solid|neutral|quiet|success|info|warning|danger]`、分段页签 `.mx-tabs`+`.mx-tabs-indicator`+`.mx-tab[aria-selected]`（指示器位移经 JS 写 `transform`）、展开行 `.mx-disclosure` 系列（双图标交叉淡切）、轻提示 `.mx-toast`+`-icon`+`-action`（停留时长传 `--mx-toast-hold`）、连接指示 `.mx-indicator[data-tone]`+`-icon`+`-dots`（三点省略动画）、微光文本 `.mx-shimmer`（必传 `--mx-text-shimmer-spread`）、悬停卡 `.mx-hovercard-host`+`.mx-hovercard`、步进数字框（见 `plugins/src/demo/prefs/FontSizeRow.vue` 范式：36 高 / radius 18 / 箭头 hover 显现用 `opacity`）、24 栏栅格 `.mx-row`+`.mx-col-N`+`.mx-col-offset-N`（断点变体与组合语义见上方「布局规范」）。
+按钮 `.mx-btn`（`--primary` 变体）、图标按钮 `.mx-icon-btn`、输入框 `.mx-input`、徽标 `.mx-badge`、卡片 `.mx-card`、下拉 chip `.mx-pill`、首选项行 `.mx-pref-row`/`-title`/`-desc`、开关 `.mx-switch`+`-thumb`（`role="switch"` + `aria-checked`）、复选框 `.mx-checkbox`、菜单卡 `.mx-menu`+`.mx-menu-item`（宿主 `position:relative`）、工具提示 `.mx-tooltip`（fixed 定位由使用方算）、状态点 `.mx-dot[data-state]`（颜色 = `color`）、标签 `.mx-tag[data-tone=outline|solid|neutral|quiet|success|info|warning|danger]`、分段页签 `.mx-tabs`+`.mx-tabs-indicator`+`.mx-tab[aria-selected]`（指示器位移经 JS 写 `transform`）、展开行 `.mx-disclosure` 系列（双图标交叉淡切）、轻提示 `.mx-toast`+`-icon`+`-action`（停留时长传 `--mx-toast-hold`）、连接指示 `.mx-indicator[data-tone]`+`-icon`+`-dots`（三点省略动画）、微光文本 `.mx-shimmer`（必传 `--mx-text-shimmer-spread`）、悬停卡 `.mx-hovercard-host`+`.mx-hovercard`、步进数字框（范式见仓库 `plugins/src/demo/prefs/FontSizeRow.vue`：36 高 / radius 18 / 箭头 hover 显现用 `opacity`）、24 栏栅格 `.mx-row`+`.mx-col-N`+`.mx-col-offset-N`（断点变体与组合语义见上方「布局规范」）。
 
-## 布局范式（看 demo）
+## 布局范式（仓库内 demo 路径，供 clone 仓库者查阅）
 
-| 场景                               | 范式文件                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------- |
-| 设置页标准行（标题+说明+右控件）   | `plugins/src/demo/prefs/InfoRows.ts`                                      |
-| 设置行内交互控件（步进数字框）     | `plugins/src/demo/prefs/FontSizeRow.vue`                                  |
-| 三卡选择（图标上文字下、选中描边） | `plugins/src/demo/prefs/ThemeRow.vue`                                     |
-| 侧栏节与行                         | `plugins/src/demo/index.ts`                                               |
-| 图标                               | 见下节「图标（MxIcon）」                                                  |
+| 场景                               | 范式文件                                 |
+| ---------------------------------- | ---------------------------------------- |
+| 设置页标准行（标题+说明+右控件）   | `plugins/src/demo/prefs/InfoRows.ts`     |
+| 设置行内交互控件（步进数字框）     | `plugins/src/demo/prefs/FontSizeRow.vue` |
+| 三卡选择（图标上文字下、选中描边） | `plugins/src/demo/prefs/ThemeRow.vue`    |
+| 侧栏节与行                         | `plugins/src/demo/index.ts`              |
+| 图标                               | 见下节「图标（MxIcon）」                 |
 
 ## 图标（MxIcon）
 
 图标是 Vue 组件原语（非 CSS 原语），纪律归界面军规第 9 条：
 
-- **名称来源**：Iconify 图标库，名称格式 `{collection}:{name}`（如 `lucide:plus`、`lucide:panel-left`）。名称在 Iconify 图标站检索（icon-sets.iconify.design）。项目预打包 `@iconify-json/lucide` 整集作离线兜底，其余集合运行时经 Iconify API 在线加载（MxIcon.vue 实证）——优先用 lucide 集。
-- **用法**：`<MxIcon name="lucide:xxx" :size="16 或 20" />`。尺寸仅两档：16 常规、20 大位（如折叠钮）——`size` 是字面量联合 `16 | 20`（MxIcon.vue props 类型，缺省 16），传其他数值（如 14）vue-tsc 直接报错，没有第三档；颜色经 `currentColor` 继承文字色，禁止写死 color。
+- **名称来源**：Iconify 图标库，名称格式 `{collection}:{name}`（如 `lucide:plus`、`lucide:panel-left`）。名称在 Iconify 图标站检索（icon-sets.iconify.design）。项目预打包 `@iconify-json/lucide` 整集作离线兜底，其余集合运行时经 Iconify API 在线加载——优先用 lucide 集。
+- **用法**：`<MxIcon name="lucide:xxx" :size="16 或 20" />`。尺寸仅两档：16 常规、20 大位（如折叠钮）——`size` 是字面量联合 `16 | 20`（缺省 16），传其他数值（如 14）vue-tsc 直接报错，没有第三档；颜色经 `currentColor` 继承文字色，禁止写死 color。
 - **纪律**：只用单色图标集；禁止手写内联 SVG 图标；禁止引入多色图标。
 
 ## 高频错误
@@ -141,6 +133,6 @@ description: mindx-work 界面开发必读的 UIKit 使用手册。当为 mindx-
 - hover 才出现的按钮用 `opacity` 不用 `visibility`（保键盘 focus-within 可达）。
 - 恒白/恒暗文本误用主题墨色：`--mx-static-white` 与双主题同值的底配套，不随主题翻转。
 
-## 验证（每轮必做）
+## 验证（仓库内开发语境）
 
-`pnpm typecheck`（mindx-work 目录，vue-tsc 校验 SFC）+ Python Playwright 直连 dev 服务 5273 断言几何与主题（浏览器用 `launch(executable_path=...)` 指向本机已缓存版本，勿硬编码版本号）。结论必须有断言或截图证据，禁止猜测。
+在 mindx-work 仓库内开发时每轮必做：`pnpm typecheck`（仓库根目录，vue-tsc 校验 SFC）+ Python Playwright 直连 dev 服务 5273 断言几何与主题（浏览器用 `launch(executable_path=...)` 指向本机已缓存版本，勿硬编码版本号）。结论必须有断言或截图证据，禁止猜测。market 在线插件（无仓库 dev 流程）的验收方式见 SKILL.md「开发流程·验证」。

@@ -4,7 +4,7 @@
  * 项目插件（core）与在线插件（market）运行形态完全一致，唯一差异是可删除性。
  */
 
-/** 壳契约版本：动态插件可用的 mx API 面（六区注册 / services / SDK 注入参数）定稿序号。
+/** 壳契约版本：动态插件可用的 mx API 面（八区注册 / services / SDK 注入参数）定稿序号。
  * 契约破坏性变更时递增；manifest.mxApiVersion 不等于当前值即拒绝加载（未知版本明确拒绝，不猜测兼容） */
 export const MX_API_VERSION = '1'
 
