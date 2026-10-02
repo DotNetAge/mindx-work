@@ -10,11 +10,11 @@
  */
 import { onMounted } from 'vue'
 import { MxIcon } from '@mindx-work/ui-shell-vue'
-import { useKanbanStore } from './store'
+import { useDashboardStore } from './store'
 
 const props = defineProps<{ compact?: boolean }>()
 
-const store = useKanbanStore()
+const store = useDashboardStore()
 
 // 挂载补一次清单（store 内 watch 已随连接/工作目录拉取，此处为晚挂载兜底）
 onMounted(() => {

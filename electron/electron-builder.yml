@@ -19,8 +19,19 @@ extraResources:
   # 系统驻留图标（macOS 模板图 + Windows 彩色图），主进程经 process.resourcesPath/tray 定位
   - from: ../resources/tray
     to: tray
-# 上传发布另行处理（当前 CI 只产出 artifact，不上传 Release）：
-# pack.mjs 固定 --publish never，此处不配置 publish，杜绝意外发版。
+  # MindX 智能主机随包产物（daemon tar.gz + onnxruntime；打包前由 electron/scripts/build-mindx-bundle.mjs
+  # 按 mindx 仓库 git tag 下载），主进程 daemon-installer.ts 优先解压随包产物、缺失回退在线下载
+  - from: resources/mindx
+    to: mindx
+# afterPack：删除与当前构建架构不匹配的随包资源（双架构分包各留各的）
+afterPack: ./scripts/after-pack-prune-arch.cjs
+# 发布源定稿（2026-10-02）：GitHub Releases，electron-updater 运行时经打包生成的
+# app-update.yml 自动读取，代码无需 setFeedURL。releaseType 缺省即 draft——CI 直传后
+# 人工确认发布；本地 pack.mjs 固定 --publish never 不受影响。
+publish:
+  provider: github
+  owner: DotNetAge
+  repo: mindx-work
 mac:
   category: public.app-category.developer-tools
   icon: ../resources/icon.png

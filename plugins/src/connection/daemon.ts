@@ -111,7 +111,7 @@ export class DaemonSocket {
   call<T>(method: string, params?: unknown, timeoutMs = 60000): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('尚未连接到 mindx-daemon'))
+        reject(new Error('尚未连接到智能主机'))
         return
       }
       const id = `msg_${Date.now()}_${++this.messageId}`

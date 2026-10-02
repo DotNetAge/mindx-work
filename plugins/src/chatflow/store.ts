@@ -1198,11 +1198,11 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     pendingBackendTsUserBySession[targetSessionId] = msgs?.[msgs.length - 1]?.id || ''
 
     if (daemon.state !== 'connected') {
-      lastError.value = '尚未连接到 mindx-daemon'
+      lastError.value = '尚未连接到智能主机'
       return { sent: false }
     }
     if (!notifyUserMessage(text, targetSessionId, images)) {
-      lastError.value = '尚未连接到 mindx-daemon'
+      lastError.value = '尚未连接到智能主机'
       return { sent: false }
     }
     isProcessing.value = true

@@ -16,23 +16,30 @@ const isRemote = computed(() => connection.mode === 'remote')
 const connected = computed(() => connection.state === 'connected')
 const isConnecting = computed(() => connection.state === 'connecting' || connection.state === 'reconnecting')
 
+/** 未连接/出错态给向导重入入口（mx:wizard-open 常驻通道；无宿主桥不渲染） */
+const showWizardEntry = computed(() => !!window.mxDesktop && !connected.value && !isConnecting.value)
+
 /** 描述文案（错误态红字展示 lastError，见模板 data-error；连接进行中走流光文字） */
 const desc = computed(() => {
   if (connection.state === 'error') return connection.lastError || '连接出错'
   if (isRemote.value && !connection.remoteUrl) return '请先配置远程机器地址'
   if (connected.value) {
     return isRemote.value
-      ? `已进入远程智能体主机（${connection.remoteUrl}）`
-      : '已连接本地智能体主机'
+      ? `已进入远程智能主机（${connection.remoteUrl}）`
+      : '已连接本地智能主机'
   }
   if (isConnecting.value) {
-    return isRemote.value ? '正在进入远程智能体主机…' : '正在连接本地智能体主机…'
+    return isRemote.value ? '正在进入远程智能主机…' : '正在连接本地智能主机…'
   }
   return '未连接'
 })
 
 function onToggle(): void {
   connection.switchMode(isRemote.value ? 'local' : 'remote')
+}
+
+function openWizard(): void {
+  void window.mxDesktop?.wizard.open()
 }
 </script>
 
@@ -41,6 +48,9 @@ function onToggle(): void {
     <div class="mx-pref-label">
       <span class="mx-pref-title">连接方式</span>
       <span :class="[$style.desc, { 'mx-text-loading': isConnecting }]" :data-error="connection.state === 'error'">{{ desc }}</span>
+      <button v-if="showWizardEntry" type="button" :class="$style.wizardLink" @click="openWizard()">
+        打开初始化向导重新配置
+      </button>
     </div>
     <span :class="$style.modeSwitch">
       <span :class="$style.modeLabel" :data-active="!isRemote">本地</span>
@@ -61,6 +71,21 @@ function onToggle(): void {
 
 .desc[data-error='true'] {
   color: var(--mx-state-error);
+}
+
+/* 向导重入入口：行内链接样式（仅未连接/出错态渲染，用后即达 mx:wizard-open） */
+.wizardLink {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: var(--mx-font-caption);
+  color: var(--mx-accent);
+  cursor: pointer;
+}
+
+.wizardLink:hover {
+  text-decoration: underline;
 }
 
 .modeSwitch {

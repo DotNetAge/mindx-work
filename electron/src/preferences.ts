@@ -40,6 +40,11 @@ function readPreferences(): PreferencesFile {
   return { schemaVersion: SCHEMA_VERSION, values: shape.values }
 }
 
+/** 主进程侧读整表（向导门判定用）：损坏/代际不符按空表（与 IPC 读同语义） */
+export function readPreferencesValues(): Record<string, unknown> {
+  return readPreferences().values
+}
+
 /** 合并单键并原子写盘（writeFileSync tmp + renameSync，断电不留半文件） */
 function setPreference(key: string, value: unknown): boolean {
   if (typeof key !== 'string' || key.length === 0) return false

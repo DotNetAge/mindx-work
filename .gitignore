@@ -7,6 +7,9 @@ dist/
 *.tsbuildinfo
 coverage/
 
+# MindX 智能主机随包产物（build-mindx-bundle.mjs 打包期下载，约 660MB，绝不入库）
+electron/resources/mindx/
+
 # 编辑器本地配置
 .vscode/
 .idea/

@@ -1,6 +1,7 @@
-# mindx-work CI 发布：三平台产物构建（macOS 含签名与公证），上传 GitHub Release 暂不启用，
-# 产物以 workflow artifact 形式保留。机制复刻 mindx-desktop（pack.mjs tag 驱动版本 +
-# 镜像注入 + --publish never），公证凭据全部来自仓库 secrets，缺失时自动降级为未签名打包。
+# mindx-work CI 发布：三平台产物构建（macOS 含签名与公证），tag 构建直传 GitHub Release
+# （electron-builder GitHub publisher 缺省 releaseType=draft，上传后人工确认发布）。
+# 机制复刻 mindx-desktop（pack.mjs tag 驱动版本 + 镜像注入），发布开关 = MX_PUBLISH=always；
+# 公证凭据全部来自仓库 secrets，缺失时自动降级为未签名打包（产物经 mxAdhoc 标记禁用自动更新）。
 name: release
 
 on:
@@ -68,19 +69,22 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
 
-      # ── 打包（pack.mjs 内部：构建 → tag 解析版本 → electron-builder --publish never）──
+      # ── 打包（pack.mjs 内部：构建 → tag 解析版本 → MX_PUBLISH=always 直传 GitHub Release draft）──
       # 公证凭据经环境变量透传给 electron-builder v26 notarize（Apple ID 方式）：
       #   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID
       # 任一缺失时 electron-builder 跳过公证仅告警；keychain profile 方式仅适用于
       # 本机（CI 无预存 profile），见 electron-builder.yml mac 段注释。
+      # GH_TOKEN 供 electron-builder GitHub publisher 直传产物（GITHUB_TOKEN 内置凭据）。
       - name: 打包
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MX_PUBLISH: always
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: node scripts/pack.mjs ${{ matrix.pack_args }}
 
-      # ── 产物收集（artifact 保留供下载；Release 上传后续接入 publish-github 机制）──
+      # ── 产物收集（artifact 留档；正式发布物已直传 draft Release，此处补齐更新元数据）──
       - uses: actions/upload-artifact@v4
         with:
           name: mindx-work-${{ matrix.os }}
@@ -90,4 +94,6 @@ jobs:
             dist/*.exe
             dist/*.AppImage
             dist/*.deb
+            dist/*.blockmap
+            dist/latest*.yml
           if-no-files-found: error

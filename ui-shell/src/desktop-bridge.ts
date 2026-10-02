@@ -75,7 +75,49 @@ export interface PreferencesController {
 /** 设置持久化控制器的 services 注册名（提供方 app 装配层） */
 export const PREFERENCES_SERVICE = 'shell.preferences'
 
-/** 宿主桥总面：主题偏好发布 + 设置持久化 + 系统文件对话框 + 在线插件安装管理 + 导航兜底回发 */
+/** 更新状态快照（主进程 updater.ts 同名类型同构）：驱动渲染层纯图标的出现与进度态 */
+export interface UpdaterSnapshot {
+  /** 自动更新能力是否启用（dev / ad-hoc 未公证构建 = false） */
+  enabled: boolean
+  /** 当前应用版本 */
+  currentVersion: string
+  /** 事件机状态：idle 无事 / checking 检查中 / downloading 下载中 / ready 待安装 */
+  status: 'idle' | 'checking' | 'downloading' | 'ready'
+  /** 发现的更新版本 */
+  availableVersion: string | null
+  /** 下载进度 0-100（downloading 态） */
+  percent: number | null
+}
+
+/** 智能主机安装状态（与主进程 daemon-installer.ts InstallerStatus 同构） */
+export interface InstallerStatus {
+  state:
+    | 'boot'
+    | 'detecting'
+    | 'downloading'
+    | 'extracting'
+    | 'registering'
+    | 'starting'
+    | 'ready'
+    | 'error'
+    | /** 当前平台无内置分发（Windows 第四期） */ 'unsupported'
+  /** 下载进度 0-100；非下载阶段为 null */
+  progress?: number | null
+  /** 人类可读的阶段/错误信息 */
+  message?: string
+  /** 原始错误详情（stderr/命令输出），供复制诊断 */
+  errorDetail?: string
+  /** 全局二进制安装位置 */
+  installDir?: string
+}
+
+/** 手动检查更新回执：ok=false 时 reason 为中文原因文案 */
+export interface UpdaterCheckResult {
+  ok: boolean
+  reason?: string
+}
+
+/** 宿主桥总面：主题偏好发布 + 设置持久化 + 系统文件对话框 + 在线插件安装管理 + 导航兜底回发 + 应用自动更新 */
 export interface MxDesktopBridge {
   setNativeThemeSource(mode: string): Promise<boolean>
   /** 订阅主进程导航拦截回发的外部 web 链接（mx:open-url）；返回退订函数 */
@@ -105,6 +147,42 @@ export interface MxDesktopBridge {
     /** 订阅输出回推；返回退订函数 */
     onData(listener: (payload: { id: string; data: string }) => void): () => void
     onExit(listener: (payload: { id: string }) => void): () => void
+  }
+  updater: {
+    /** 拉取状态快照（构造时先拉一次，后续靠事件推送）；无宿主能力返回 null */
+    getState(): Promise<UpdaterSnapshot | null>
+    /** 手动检查更新；disabled 构建返回 { ok:false, reason } */
+    checkNow(): Promise<UpdaterCheckResult>
+    /** 确认安装已下载的更新（quitAndInstall 立即重启安装；仅 ready 态有效） */
+    install(): Promise<boolean>
+    /** 主进程状态推送订阅；返回退订函数 */
+    onEvent(listener: (snapshot: UpdaterSnapshot) => void): () => void
+  }
+  wizard: {
+    /** 打开首启向导窗（设置页重入入口；主进程幂等——已有向导窗则唤出） */
+    open(): Promise<boolean>
+    /** 向导关闭通知订阅（连接运行时据此重读配置重连）；返回退订函数 */
+    onFinished(listener: () => void): () => void
+  }
+  /** 首启向导探测通道族（仅向导窗存在期间在主进程注册；报告形态见 ProbeReport） */
+  probe: {
+    /** 全量环境探测（只读；凭据只回键名与来源，不回值） */
+    run(): Promise<unknown>
+    /** 验证单条凭据（供应商最小请求；不回显 key） */
+    verifyCredential(key: string): Promise<{ ok: boolean; reason?: string }>
+    /** 取回已验证凭据的值（一次性，仅存渲染层内存用于 daemon RPC 参数） */
+    takeCredential(key: string): Promise<string | null>
+  }
+  /** 智能主机本机安装服务（常驻注册；向导「本机安装」步消费） */
+  installer: {
+    /** 拉取安装状态快照（进安装步先拉一次，后续靠事件推送）；无宿主能力返回 null */
+    getStatus(): Promise<InstallerStatus | null>
+    /** 启动安装（幂等：并发调用合并为一次执行） */
+    start(): Promise<InstallerStatus | null>
+    /** 读取 daemon 错误日志尾部（200 行/256KB 截断） */
+    getLog(): Promise<{ path: string; content: string }>
+    /** 安装状态推送订阅（各阶段迁移时触发）；返回退订函数 */
+    onEvent(listener: (status: InstallerStatus) => void): () => void
   }
   plugins: {
     list(): Promise<InstalledPluginView[] | null>

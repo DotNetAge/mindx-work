@@ -5,8 +5,9 @@
  * HTML/CSS/JS 即 Widget 本体——Agent 写静态网页 = 构建界面，无预置类型、
  * 无外部数据文件（此前八类注册表 + dataRef 方案已废弃，与「Skill 供给
  * 千变万化」的心智冲突）。
- * 命名：对外语义统一「仪表板」（.dash / .agents/dashboards/）——「仪表板」
- * 留给 Kanban 任务流语义，避免 Agent 歧义；代码标识符保留 kanban 词根。
+ * 命名：对外语义统一「仪表板」（.dash / .agents/dashboards/）；目录与代码
+ * 标识符 2026-10-02 起统一 dashboard 词根（此前「保留 kanban 词根」的旧决定
+ * 已废止，Kanban 词根让位给将来的任务流看板语义）。
  * 数据通道：daemon fs.list（清单）+ fs.read_base64（base64 经 UTF-8 解码，
  * atob 直转会中文乱码）。
  * 刷新通道：订阅 daemon tool_exec_end / loop_end，400ms trailing 合并静默
@@ -19,7 +20,7 @@ import { defineStore } from 'pinia'
 import type { VueAppShell } from '@mindx-work/ui-shell-vue'
 
 /** Detail tab 条目 id（index.ts 注册与命令编排共用） */
-export const KANBAN_DETAIL_ID = 'kanban-detail'
+export const DASHBOARD_DETAIL_ID = 'dashboard-detail'
 
 /** 工具事件后统一等待时长（trailing：Agent 连写多文件只在最后一事件后触发一次） */
 const RELOAD_DEBOUNCE_MS = 400
@@ -29,7 +30,7 @@ const RELOAD_DEBOUNCE_MS = 400
 let shellRef: VueAppShell | null = null
 
 /** 插件函数体内绑定 AppShell 本体 */
-export function bindKanbanShell(shell: VueAppShell): void {
+export function bindDashboardShell(shell: VueAppShell): void {
   shellRef = shell
 }
 
@@ -53,7 +54,7 @@ interface ChatflowServiceLike {
 // ── 仪表板协议类型与解析 ───────────────────────────────────────────────────────
 
 /** 单卡（<card> 节点解析结果；html = 卡内 HTML 原文，渲染时入 iframe srcdoc） */
-export interface KanbanCard {
+export interface DashboardCard {
   id: string
   /** 24 栏栅格占几栏（1..24，缺省 6） */
   span: number
@@ -66,7 +67,7 @@ export interface KanbanCard {
 }
 
 /** 仪表板（<board> 根解析结果） */
-export interface KanbanBoard {
+export interface DashboardBoard {
   name: string
   /** 栅格列间距 px（0..48，缺省 12） */
   gap: number
@@ -74,7 +75,7 @@ export interface KanbanBoard {
   classes: string[]
   /** board 级共享样式（<style> 直接子节点原文；注入每张卡 head，卡内自带样式可覆盖） */
   style: string
-  cards: KanbanCard[]
+  cards: DashboardCard[]
 }
 
 /** 仪表板清单条目（Sidebar 节渲染用） */
@@ -144,7 +145,7 @@ function peekBoardTitle(text: string): string {
  * 只取 board 的直接子级 card（卡内禁嵌 board/card，SKILL 红线）；
  * 直接子级 <style> 是 board 级共享样式（注入每张卡，非卡片）。
  */
-export function parseBoard(text: string, fallbackName: string): KanbanBoard {
+export function parseBoard(text: string, fallbackName: string): DashboardBoard {
   const doc = new DOMParser().parseFromString(text, 'text/html')
   const root = doc.querySelector('board')
   if (!root) throw new Error('仪表板格式无效：缺少 <board> 根节点')
@@ -170,7 +171,7 @@ export function parseBoard(text: string, fallbackName: string): KanbanBoard {
 
 // ── store ────────────────────────────────────────────────────────────────────
 
-export const useKanbanStore = defineStore('kanban-store', () => {
+export const useDashboardStore = defineStore('dashboard-store', () => {
   const shell = theShell()
   const daemon = shell.services.use<DaemonConnection>('daemon.connection')
 
@@ -185,20 +186,20 @@ export const useKanbanStore = defineStore('kanban-store', () => {
   /** 当前仪表板文件绝对路径（空 = 未打开） */
   const currentFile = ref('')
   /** 已解析的仪表板（reload 静默替换，失败保留旧值） */
-  const board = ref<KanbanBoard | null>(null)
+  const board = ref<DashboardBoard | null>(null)
   const loading = ref(false)
   const error = ref('')
   /** 当前工作区仪表板清单（Sidebar 节数据源） */
   const boardList = ref<BoardListItem[]>([])
 
   /** 工作区仪表板目录（跟随当前会话工作目录；无对话插件 / 未开目录 = 空） */
-  const kanbansDir = computed(() => {
+  const dashboardsDir = computed(() => {
     const dir = (chatflow?.store.currentProjectDir || '').replace(/\/+$/, '')
     return dir ? dir + '/.agents/dashboards' : ''
   })
 
   /** 读仪表板文件并解析 */
-  async function readBoard(path: string): Promise<KanbanBoard> {
+  async function readBoard(path: string): Promise<DashboardBoard> {
     const result = await daemon.call<{ content: string; mime: string }>('fs.read_base64', { path })
     const base = path.split('/').pop() || path
     return parseBoard(decodeBase64Utf8(result.content), base.replace(/\.dash$/i, ''))
@@ -214,7 +215,7 @@ export const useKanbanStore = defineStore('kanban-store', () => {
       const parsed = await readBoard(path)
       currentFile.value = path
       board.value = parsed
-      theShell().Detail.show(KANBAN_DETAIL_ID)
+      theShell().Detail.show(DASHBOARD_DETAIL_ID)
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
@@ -241,7 +242,7 @@ export const useKanbanStore = defineStore('kanban-store', () => {
 
   /** 刷新当前工作区仪表板清单（目录不存在等一律静默置空；标题取 <board name>，回退文件名） */
   async function refreshList(): Promise<void> {
-    const dir = kanbansDir.value
+    const dir = dashboardsDir.value
     if (!dir) {
       boardList.value = []
       return
@@ -291,7 +292,7 @@ export const useKanbanStore = defineStore('kanban-store', () => {
 
   // 工作目录变化 / daemon 重连 → 重拉清单（isConnected 复用 chatflow 连接态）
   watch(
-    [kanbansDir, () => chatflow?.store.isConnected ?? false],
+    [dashboardsDir, () => chatflow?.store.isConnected ?? false],
     () => {
       void refreshList()
     },
@@ -312,16 +313,16 @@ export const useKanbanStore = defineStore('kanban-store', () => {
 
 // ── 服务外壳（装配期 Pinia 尚未安装，provide 延迟解析响应式本体）────────────
 
-export type KanbanStore = ReturnType<typeof useKanbanStore>
+export type DashboardStore = ReturnType<typeof useDashboardStore>
 
-export interface KanbanService {
-  readonly store: KanbanStore
+export interface DashboardService {
+  readonly store: DashboardStore
 }
 
-export function createKanbanService(): KanbanService {
+export function createDashboardService(): DashboardService {
   return {
     get store() {
-      return useKanbanStore()
+      return useDashboardStore()
     },
   }
 }

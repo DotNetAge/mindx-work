@@ -23,6 +23,9 @@ export {
   type PluginInstallResult,
   type PreferencesController,
   PREFERENCES_SERVICE,
+  type InstallerStatus,
+  type UpdaterCheckResult,
+  type UpdaterSnapshot,
 } from './desktop-bridge'
 export {
   GENERAL_PAGE_ID,

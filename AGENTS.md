@@ -1,5 +1,10 @@
 # mindx-work 工作规则
 
+## 客户术语军规（2026-10-02 用户定稿）
+
+- **客户可见文案禁用「Daemon」**：daemon 是团队内部叫法，一切对客户呈现的文本（UI 界面、错误消息、对话框、向导、日志的用户可读部分）一律统一用「**智能主机**」；旧文案「智能体主机」也一并废弃统一。代码层不受限：变量名、preferences 键（`mindx.daemon.*`）、RPC 方法名、类名、代码注释里的 daemon 保留原名。改文案时全局自查：`grep -rn "daemon" --include="*.vue" | grep -v "^\s*//" | grep -E "：|。|（"` 逐条人审（模板文本 vs 代码标识符）。
+- **客户可见文案禁暴露技术细节（2026-10-02 用户红笔标注）**：安装路径（`~/.mindx`）、服务名（launchd/systemd/com.mindx.*）、命令行、目录结构等实现细节一律不进 UI 文案与错误消息——客户只需要知道「做什么、结果如何、下一步怎么办」，路径只在诊断详情（原始错误 detail）里保留。写完文案自查：`grep -rn '~\.\|/usr/\|launchd\|systemd\|\.mindx' --include='*.vue' app/src ui-shell/src` 与主进程 humanizeError 类「讲人话」消息函数逐条过。
+
 ## daemon RPC 调用（Go 结构体参数）
 
 - **bool 字段必须显式传值，绝不依赖缺省**：daemon 侧 Go 结构体（如 `goharnessconfig.ModelConfig`）的 bool 字段是普通 `bool` 而非 `*bool`，JSON payload 缺字段 → 反序列化零值 `false` → 落盘即「停用/关闭」。实例：`addOnlineModel` 漏传 `enabled` 导致在线添加的模型全部落盘 `enabled: false`（2026-09-28 修复）。新增 RPC 调用时逐一核对 Go 侧结构体字段，bool 一律显式传。
@@ -39,3 +44,13 @@
 - **vite dev server 绑定 IPv6 `[::1]`，curl 127.0.0.1 必然连接失败（2026-09-29）**：`curl http://127.0.0.1:5273/` 返回 000 会误判 dev server 已死，实际 `http://localhost:5273/`（解析到 ::1）返回 200。探活一律用 localhost；`lsof -nP -iTCP:5273 -sTCP:LISTEN` 看真实绑定。electron 加载的正是 localhost URL，vite 起来后页面 reload（`Page.reload`）即可恢复，不必重启 electron。
 - **验证主进程行为（pty 等）前必须核对 electron dist 新鲜度（2026-09-29）**：`electron/src/*.ts` mtime 晚于 `electron/dist/*.js`（`pnpm --filter @mindx-work/electron build` 产物），且长跑 electron 实例加载的是启动时刻的 dist——源码、产物、运行实例三层都可能不同步。实例：dist 落后源码 25 分钟、实例落后 dist 2.5 小时，终端 pty 行为误判排查绕远。改主进程源码后：build → 杀实例重启 → 再验证。
 - **zsh + powerlevel10k 环境 pty 启动需 2-10 秒**：spawn 后 prompt 输出明显滞后（首个采样 2 秒 960 字符、4 秒 4009 字符、完整 prompt 可到 10 秒），短等待窗口会把「启动中」误判为「shell 不存活」（实例：3 秒采样零输出误诊 shell 死亡，延长到 10 秒一切正常）。对 pty 输出做断言前用长度轮询等到输出稳定，不要固定短 sleep 后下结论。
+
+## 首启向导与 CDP 断言细节（2026-10-02）
+
+- **Shell 会话内 `&`/nohup/disown 启动的 electron 会随命令结束被杀**（连杀 3 次排查半小时）：Agent 工具的 shell 沙箱在命令返回后清理整个进程组，nohup+disown 也拦不住 SIGTERM。常驻验证实例必须用工具的 `run_in_background` 参数启动。【2026-10-02 二期验证再次连踩 2 次——写完命令顺手 `&` 是肌肉记忆，凡是启动 electron 实例的命令，先想 run_in_background 再动手】
+- **CDP 断言别对 `JSON.stringify` 输出做带空格正则**：`JSON.stringify({hasBridge:true})` 输出 `"hasBridge":true`（无空格），断言 `/hasBridge": true/`（带空格）永远 FAIL——桥明明在却误判缺失，白白排查一轮。
+- **contextBridge 的 preferences 段只有 `getAll`/`set`，没有 `get`**：验证落盘用 `window.mxDesktop.preferences.getAll()`，写 `preferences.get(key)` 直接 TypeError。
+- **CDP 模拟点击必须锁定真实 button，勿用 `querySelectorAll('button, div, label')` 混合选择器**：find 取文档序首个 innerText 匹配会命中卡片祖先容器或错误元素，click 在祖先上派发到不了后代的事件处理器；更危险的是可能命中意外目标触发连锁动作（实例：验证脚本一次误点击意外触发了整批模型导入——行为本身符合设计，但触发源排查耗了数轮）。
+- **Vue 受控 checkbox 在 `click()` 后同步读 `.checked` 是 patch 前旧值**：change → toggle → ref 更新 → DOM 回写走微任务，同步读数是假象；断言勾选态要 sleep 后重读或读按钮计数文案。
+- **向导「已导入」语义 = 验证通过 + 查重命中**：provider/model 已存在时跳过创建同样标记 imported（幂等语义），providers.yml/models.yml mtime 不变不代表导入失败；验证失败（401/403）则不落盘不回显 key。
+- **key 直连供应商 403 不一定是 verify 实现错**：先拿 shell 里的 key 手动 curl 供应商端点（不回显明文，只看状态码）交叉验证——本机 Anthropic/OpenRouter key 直连即 403（key 本身当前网络环境不可用），verify 判定正确。

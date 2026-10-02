@@ -14,6 +14,9 @@ import { registerPluginBridge, registerPluginProtocol } from './plugins'
 import { registerPreferencesBridge } from './preferences'
 import { registerDialogBridge } from './dialogs'
 import { registerTerminalBridge } from './terminal'
+import { registerUpdaterBridge, disposeUpdater } from './updater'
+import { registerWizardBridge, maybeShowWizard, setWizardFinishedHandler } from './wizard'
+import { registerDaemonInstallerIpc } from './daemon-installer'
 import { installNavigationGuard, registerOpenExternalBridge, registerOpenPathBridge } from './navigation'
 import { registerFileStreamProtocol } from './file-stream'
 
@@ -142,7 +145,7 @@ function createTray(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   registerPluginProtocol()
   registerFileStreamProtocol()
   registerNativeThemeBridge()
@@ -150,9 +153,15 @@ app.whenReady().then(() => {
   registerPreferencesBridge()
   registerDialogBridge()
   registerTerminalBridge()
+  registerUpdaterBridge()
+  registerWizardBridge()
+  registerDaemonInstallerIpc()
   registerOpenExternalBridge()
   registerOpenPathBridge()
-  createWindow()
+  // 首启门：四事实全空先弹向导、暂不建主窗；向导关闭经 handler 交接主窗（防双窗同显）
+  setWizardFinishedHandler(showMainWindow)
+  const wizardShown = await maybeShowWizard()
+  if (!wizardShown) createWindow()
   createTray()
   // dock 点击（macOS）/ 任务栏重开（Windows）：有窗口则唤出，无则重建
   app.on('activate', () => {
@@ -164,6 +173,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   quitting = true
+  disposeUpdater()
 })
 
 app.on('window-all-closed', () => {

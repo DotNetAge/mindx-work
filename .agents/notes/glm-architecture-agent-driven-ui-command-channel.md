@@ -79,7 +79,7 @@ LSP 的 `workspace/applyEdit` / `showMessageRequest` 就是「运行时请求客
 
 **mindx-desktop**：connectionStore.registerEventHandlers 三订阅——file_open 内联 `resolveFilePathCandidates + vscode.open`（不 import useNodeActions，防 store→useNodeActions→store 循环依赖）；link_open → `window.api.browser.openExternal`；terminal_run → `vscode.window.createTerminal({cwd}) + show + sendText(cmd, true)`（monaco-vscode-api extension.api 支持确认；node-pty 服务为单 pty，新终端替换旧会话属既有机制）。
 
-**遗留**：daemon 需重启加载新 RPC（~/.mindx/bin 覆盖 + mindx restart，沙箱外操作用户未授权）；端到端验证（mindx ui open → 客户端 Detail 打开）待 daemon 重启后补做。
+**遗留 → 已闭环（2026-10-02）**：daemon 已重启加载新 RPC（2.5.11 部署运行）；端到端验证完成——desktop 侧三事件全链路真机实证通过（file_open 编辑器 Tab + .pdf 兜底 Preview、link_open preload 桥、terminal_run「mindx ui」终端实例 + echo 落 xterm），详见 mindx-desktop/.agents/notes/glm-验收-AgentDrivenUI三大事件端到端.md。
 
 ## 共识：三工具是 Agent 与用户交互的标准通道（2026-10-01 用户拍板）
 

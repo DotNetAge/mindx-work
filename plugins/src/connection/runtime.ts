@@ -3,8 +3,11 @@
  * 形态对齐 shell.theme / shell.market-runtime 先例——机制性控制器以服务提供，
  * 消费方（models 插件与后续功能）经 useService('daemon.connection') 拿同一份响应式状态。
  * 双模式：本地（端点固定 LOCAL_DAEMON_URL）/ 远程（地址自配置，见 RemoteAddressRow）。
- * 模式与远程地址持久化在 localStorage——它们是"连接到谁"的前置条件，
- * 不能存在被连接方（daemon 不可达时无法读取）。
+ * 模式与远程地址持久化在 preferences.json（宿主桥落盘，2026-10-02 自 localStorage 迁移）——
+ * 它们是"连接到谁"的前置条件，不能存在被连接方（daemon 不可达时无法读取）；
+ * 迁移动机：主窗与首启向导窗两个渲染层要共享同一份连接配置（跨窗唯一事实源）。
+ * 无宿主桥（纯 Web）降级回 localStorage。向导窗关闭（wizard.finished）后重读配置，
+ * 配置有变化即按新端点重连（首启向导完成后的主窗自动接上）。
  */
 
 import { ref } from 'vue'
@@ -21,7 +24,7 @@ export const DAEMON_CONNECTION_SERVICE = 'daemon.connection'
 const MODE_KEY = 'mindx.daemon.mode'
 const REMOTE_URL_KEY = 'mindx.daemon.remoteUrl'
 
-function readInitialMode(): DaemonMode {
+function readLocalMode(): DaemonMode {
   try {
     return localStorage.getItem(MODE_KEY) === 'remote' ? 'remote' : 'local'
   } catch {
@@ -29,7 +32,7 @@ function readInitialMode(): DaemonMode {
   }
 }
 
-function readRemoteUrl(): string {
+function readLocalRemoteUrl(): string {
   try {
     return localStorage.getItem(REMOTE_URL_KEY) || ''
   } catch {
@@ -37,7 +40,7 @@ function readRemoteUrl(): string {
   }
 }
 
-function persist(key: string, value: string): void {
+function persistLocal(key: string, value: string): void {
   try {
     localStorage.setItem(key, value)
   } catch {
@@ -67,11 +70,45 @@ export interface DaemonConnection {
 }
 
 export function createDaemonConnection(): DaemonConnection & { dispose(): void } {
-  const mode = ref<DaemonMode>(readInitialMode())
-  const remoteUrl = ref(readRemoteUrl())
-  // 启动即按持久化模式连接：远程未配地址时回落本地端点（无地址的远程不可连）
-  const socket = new DaemonSocket(mode.value === 'remote' && remoteUrl.value ? remoteUrl.value : LOCAL_DAEMON_URL)
-  socket.connect()
+  const mode = ref<DaemonMode>('local')
+  const remoteUrl = ref('')
+  const socket = new DaemonSocket(LOCAL_DAEMON_URL)
+
+  /** 按 mode/remoteUrl 解析目标端点（远程未配地址时回落本地端点保持可用） */
+  function targetUrl(): string {
+    return mode.value === 'remote' && remoteUrl.value ? remoteUrl.value : LOCAL_DAEMON_URL
+  }
+
+  /** reconnectTo 幂等（同端点在途/已连时不重连）：首连与重连同路 */
+  function start(): void {
+    socket.reconnectTo(targetUrl())
+  }
+
+  const bridge = window.mxDesktop?.preferences
+  if (bridge) {
+    // 权威配置读回（preferences.json）：读回前不发起连接；向导写入在主窗加载完成前落盘，
+    // 读回天然拿到向导结果。wizard-finished（重入向导）后重读，有变化即重连
+    void bridge.getAll().then((all) => {
+      mode.value = all?.[MODE_KEY] === 'remote' ? 'remote' : 'local'
+      remoteUrl.value = typeof all?.[REMOTE_URL_KEY] === 'string' ? (all[REMOTE_URL_KEY] as string) : ''
+      start()
+    })
+    window.mxDesktop?.wizard.onFinished(() => {
+      void bridge.getAll().then((all) => {
+        const nextMode: DaemonMode = all?.[MODE_KEY] === 'remote' ? 'remote' : 'local'
+        const nextUrl = typeof all?.[REMOTE_URL_KEY] === 'string' ? (all[REMOTE_URL_KEY] as string) : ''
+        if (nextMode === mode.value && nextUrl === remoteUrl.value) return
+        mode.value = nextMode
+        remoteUrl.value = nextUrl
+        start()
+      })
+    })
+  } else {
+    // 纯 Web 无宿主桥：同步读 localStorage 立即连接（旧路径）
+    mode.value = readLocalMode()
+    remoteUrl.value = readLocalRemoteUrl()
+    start()
+  }
 
   return {
     get state() {
@@ -89,15 +126,16 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
     switchMode(next: DaemonMode): void {
       if (mode.value === next) return
       mode.value = next
-      persist(MODE_KEY, next)
-      const target = next === 'remote' && remoteUrl.value ? remoteUrl.value : LOCAL_DAEMON_URL
-      socket.reconnectTo(target)
+      if (bridge) void bridge.set(MODE_KEY, next)
+      else persistLocal(MODE_KEY, next)
+      socket.reconnectTo(targetUrl())
     },
     setRemoteUrl(url: string): void {
       remoteUrl.value = url
-      persist(REMOTE_URL_KEY, url)
+      if (bridge) void bridge.set(REMOTE_URL_KEY, url)
+      else persistLocal(REMOTE_URL_KEY, url)
       if (mode.value === 'remote') {
-        socket.reconnectTo(url || LOCAL_DAEMON_URL)
+        socket.reconnectTo(targetUrl())
       }
     },
     call: <T,>(method: string, params?: unknown, timeoutMs?: number) =>

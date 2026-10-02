@@ -1,7 +1,10 @@
 // electron-builder 打包统一入口（机制复刻 mindx-desktop/scripts/pack.mjs）：
 // 1. App 版本号从本仓库 git tag 解析注入，不依赖手工维护 package.json 的 version 字段（tag 驱动，杜绝两处漂移）；
-// 2. 固定 --publish never：发布/上传另行处理，杜绝 electron-builder 意外向 GitHub 发版；
-// 3. 注入构建期下载镜像（electron 及 app-builder 工具链直连超时率高，统一走国内镜像；
+// 2. 默认 --publish never（本地构建绝不发版）；CI 设 MX_PUBLISH=always 时改直传 GitHub Release
+//    （electron-builder GitHub 发布缺省 releaseType=draft，上传后人工确认发布，杜绝意外发版）；
+// 3. macOS 公证凭据缺失时注入 mxAdhoc 标记进产物 package.json——主进程 updater 按标记
+//    禁用自动更新（Gatekeeper 会拦未公证更新，见 electron/src/updater.ts）；
+// 4. 注入构建期下载镜像（electron 及 app-builder 工具链直连超时率高，统一走国内镜像；
 //    用户 shell 里显式设置的变量优先）。
 // 公证凭据不写死：electron-builder v26 从环境变量读取（两种方式二选一，见 electron-builder.yml mac 注释），
 // 本地开发者在 shell 里自行 export，CI 由 workflow 从 secrets 注入。
@@ -61,9 +64,28 @@ function main() {
   console.log('[pack] 构建 app/dist 与 electron/dist …')
   execSync('pnpm build', { cwd: ROOT, stdio: 'inherit' })
 
+  // 随包 daemon 产物：按 mindx 仓库 git tag 下载归档进 electron/resources/mindx（extraResources 注入）。
+  // MX_NO_MINDX_BUNDLE=1 可跳过（调试打包流程时省 177MB 下载；运行时缺失回退在线下载）
+  if (process.env.MX_NO_MINDX_BUNDLE === '1') {
+    console.warn('[pack] MX_NO_MINDX_BUNDLE=1，跳过随包 MindX 产物下载（运行时将回退在线下载）')
+  } else {
+    console.log('[pack] 下载随包 MindX 智能主机产物 …')
+    execSync('node scripts/build-mindx-bundle.mjs', { cwd: join(ROOT, 'electron'), stdio: 'inherit' })
+  }
+
   const version = resolveAppVersion()
+  // 发布开关：CI 设 MX_PUBLISH=always 直传 GitHub Release（draft）；缺省 never 杜绝意外发版
+  const publishFlag = process.env.MX_PUBLISH === 'always' ? '--publish always' : '--publish never'
+  // ad-hoc 构建标记：mac 平台公证凭据全缺失时注入（主进程按标记禁用自动更新）
+  const isMac = args.includes('--mac')
+  const notaryEnvMissing =
+    isMac && !process.env.APPLE_ID && !process.env.APPLE_KEYCHAIN_PROFILE
+  const adhocFlag = notaryEnvMissing ? ' -c.extraMetadata.mxAdhoc=true' : ''
+  if (notaryEnvMissing) {
+    console.warn('[pack] macOS 公证凭据缺失，注入 mxAdhoc 标记（产物禁用自动更新）')
+  }
   // electron-builder 在 electron/ 子包执行：主包 = 含 main 入口的包（workspace 根跑会被误判成 app 包）
-  const cmd = `npx electron-builder ${args.join(' ')} --publish never -c.extraMetadata.version=${version}`
+  const cmd = `npx electron-builder ${args.join(' ')} ${publishFlag} -c.extraMetadata.version=${version}${adhocFlag}`
   console.log(`[pack] App 版本 ${version}（来源：git tag）`)
   console.log(`[pack] ${cmd}`)
   if (dryRun) {

@@ -1,19 +1,25 @@
 <script setup lang="ts">
 /**
- * kanban 详情面板：24 栏栅格（el-row/el-col）渲染仪表板卡。每卡 = iframe srcdoc
- * （sandbox="allow-scripts"：Agent 的 HTML/CSS/JS 在隔离文档中执行，无同源
- * 权限，不污染主应用）。srcdoc 注入 UIKit token 快照（宿主 :root 全部 --mx-*
- * 计算值拼 :root 块，卡内 var(--mx-*) 可用；data-mx-theme 切换即时重取跟随）、
- * board 级共享样式与 board/card class（挂卡 body，共享样式的选择器目标）。
- * 高度自适应桥：卡内 ResizeObserver postMessage 上报高度，宿主经 nonce 校验
- * 后跟随（srcdoc 本身不含高度依赖——避免重载循环）。
+ * dashboard 详情面板：24 栏栅格（el-row/el-col）渲染仪表板卡。每卡 = 双层 iframe：
+ *   外层壳（同源 srcdoc，无 sandbox）：仅承载固定转发脚本，不含任何 Agent 内容；
+ *   内层内容（sandbox="allow-scripts" opaque 沙箱）：Agent 的 HTML/CSS/JS 在隔离
+ *   文档中执行。为什么需要壳：本机 Chromium（Electron 33 / Chrome 130）中 opaque
+ *   origin 的 srcdoc 文档视口几何恒为 0（innerWidth/scrollHeight 全 0，2026-10-02
+ *   CDP 实证，对照组同源 srcdoc 正常），高度桥拿不到内容高度；而 allow-same-origin
+ *   会让 Agent JS 与宿主同源，破坏隔离。同源壳 + opaque 内层两者兼得：内层与壳、
+ *   宿主均不同源，Agent JS 无法触碰壳脚本与宿主（与 mindx-desktop 仪表板视图同构）。
+ * srcdoc 注入 UIKit token 快照（宿主 :root 全部 --mx-* 计算值拼 :root 块，卡内
+ * var(--mx-*) 可用；data-mx-theme 切换即时重取跟随）、board 级共享样式与
+ * board/card class（挂卡 body，共享样式的选择器目标）。
+ * 高度自适应桥：内层 ResizeObserver postMessage 上报 → 壳调内层高度并转发 →
+ * 宿主经 nonce 校验后跟随（srcdoc 本身不含高度依赖——避免重载循环）。
  * Agent 重写仪表板文件后 store 重解析，未变卡片 srcdoc 字符串相等不触发重载。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { MxIcon } from '@mindx-work/ui-shell-vue'
-import { useKanbanStore, type KanbanBoard, type KanbanCard } from './store'
+import { useDashboardStore, type DashboardBoard, type DashboardCard } from './store'
 
-const store = useKanbanStore()
+const store = useDashboardStore()
 
 const board = computed(() => store.board)
 
@@ -91,7 +97,7 @@ onUnmounted(() => themeObserver?.disconnect())
 const cardHeights = ref<Record<string, number>>({})
 
 interface RenderedCard {
-  card: KanbanCard
+  card: DashboardCard
   /** 高度桥消息防伪凭证（board 每次重解析更换，旧 iframe 消息自动失效） */
   nonce: string
   doc: string
@@ -103,16 +109,23 @@ interface RenderedCard {
 const TAG_SCRIPT_OPEN = '<scr' + 'ipt>'
 const TAG_SCRIPT_CLOSE = '</scr' + 'ipt>'
 
+/**
+ * 内层高度桥脚本：异步多时机上报（setTimeout 0/80/300 + load + RO）。为什么不能
+ * 同步首报：opaque srcdoc 初次 script 执行时布局未跑，scrollHeight 报 0，且此脏 0
+ * 上报后 opaque 文档中 ResizeObserver 不再触发修正（2026-10-02 CDP 实证），
+ * 异步多次上报覆盖布局完成时机。
+ * script 标签字面量必须拆串：SFC 解析器会把顶层 script 块提前切断 */
 function bridgeScript(cardId: string, nonce: string): string {
-  return `${TAG_SCRIPT_OPEN}(function(){var r=function(){parent.postMessage({type:'kb-card-height',id:${JSON.stringify(cardId)},nonce:${JSON.stringify(nonce)},height:document.documentElement.scrollHeight},'*')};if(window.ResizeObserver){new ResizeObserver(r).observe(document.documentElement)}else{window.addEventListener('resize',r)}r()})()${TAG_SCRIPT_CLOSE}`
+  return `${TAG_SCRIPT_OPEN}(function(){var r=function(){parent.postMessage({type:'dash-card-height',id:${JSON.stringify(cardId)},nonce:${JSON.stringify(nonce)},height:document.documentElement.scrollHeight},'*')};setTimeout(r,0);setTimeout(r,80);setTimeout(r,300);window.addEventListener('load',r);if(window.ResizeObserver){new ResizeObserver(r).observe(document.documentElement)}else{window.addEventListener('resize',r)}})()${TAG_SCRIPT_CLOSE}`
 }
 
 /**
- * 卡文档组装：基底样式 + UIKit token 快照（var(--mx-*) 可用）+ board 级共享
- * 样式（卡内自带 <style> 在 body 中，位置靠后可覆盖）+ body 挂 board/card
- * class（board 级样式的选择器目标）。文字色走 var(--mx-text) 随 token 快照。
+ * 卡文档组装（内层，opaque 沙箱）：基底样式 + UIKit token 快照（var(--mx-*)
+ * 可用）+ board 级共享样式（卡内自带 <style> 在 body 中，位置靠后可覆盖）+
+ * body 挂 board/card class（board 级样式的选择器目标）。文字色走 var(--mx-text)
+ * 随 token 快照。此文档整体作为壳 srcdoc 的属性值注入。
  */
-function buildDoc(card: KanbanCard, nonce: string, board: KanbanBoard): string {
+function buildDoc(card: DashboardCard, nonce: string, board: DashboardBoard): string {
   const classes = [...board.classes, ...card.classes]
     .map((c) => c.replace(/"/g, '&quot;'))
     .join(' ')
@@ -121,33 +134,53 @@ function buildDoc(card: KanbanCard, nonce: string, board: KanbanBoard): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:transparent}body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','PingFang SC','Helvetica Neue',sans-serif;font-size:14px;line-height:1.5;color:var(--mx-text);overflow-wrap:break-word}</style><style>${tokenCss.value}</style>${boardStyle}</head><body${classAttr}>${card.html}${bridgeScript(card.id, nonce)}</body></html>`
 }
 
-/** 每次仪表板解析 / token 快照变化产出一组 srcdoc（nonce 随之更换） */
+/** HTML 属性值转义（内层文档注入壳 srcdoc 属性：& 与 " 必转，单引号属性内无歧义） */
+function escapeHtmlAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}
+
+/**
+ * 壳文档组装（外层，同源 srcdoc，无 sandbox）：固定转发脚本——收内层高度消息
+ * 调内层 iframe 高度并原样转发宿主（宿主再按 nonce 校验设壳高度）。壳内不含
+ * 任何 Agent 内容；内层 opaque 沙箱与壳不同源，无法触碰壳脚本。
+ * script 标签字面量必须拆串：SFC 解析器会把顶层 script 块提前切断。
+ */
+function buildShellDoc(card: DashboardCard, nonce: string, board: DashboardBoard): string {
+  const inner = escapeHtmlAttr(buildDoc(card, nonce, board))
+  const initH = card.h ?? 120
+  const forward = `${TAG_SCRIPT_OPEN}(function(){window.addEventListener('message',function(e){var d=e.data;if(!d||d.type!=='dash-card-height'||typeof d.height!=='number')return;var f=document.getElementById('f');if(f)f.style.height=Math.max(1,Math.min(20000,Math.ceil(d.height)))+'px';parent.postMessage(d,'*')})})()${TAG_SCRIPT_CLOSE}`
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}iframe{width:100%;height:${initH}px;border:0;display:block}</style></head><body><iframe id="f" sandbox="allow-scripts" srcdoc="${inner}"></iframe>${forward}</body></html>`
+}
+
+/** 每次仪表板解析 / token 快照变化产出一组壳 srcdoc（nonce 随之更换，旧消息自动失效） */
 const rendered = computed<RenderedCard[]>(() => {
   const b = board.value
   if (!b) return []
   return b.cards.map((card) => {
     const nonce = Math.random().toString(36).slice(2)
-    return { card, nonce, doc: buildDoc(card, nonce, b) }
+    return { card, nonce, doc: buildShellDoc(card, nonce, b) }
   })
 })
 
 /** 高度桥消息接收（nonce 校验 + 数值钳制；srcdoc 不依赖高度，无重载循环） */
 function onMessage(e: MessageEvent): void {
   const data = e.data as { type?: string; id?: string; nonce?: string; height?: number } | null
-  if (!data || data.type !== 'kb-card-height' || typeof data.id !== 'string') return
+  if (!data || data.type !== 'dash-card-height' || typeof data.id !== 'string') return
   const hit = rendered.value.find((r) => r.card.id === data.id && r.nonce === data.nonce)
   if (!hit) return
   const h = Number(data.height)
-  if (!Number.isFinite(h) || h < 0 || h > 20000) return
+  // 0 值拒绝（视口塌陷时的脏上报）：收下会让壳高度归 0 → 内层视口 0 →
+  // scrollHeight 0 → 永远报 0 的死循环
+  if (!Number.isFinite(h) || h <= 0 || h > 20000) return
   cardHeights.value = { ...cardHeights.value, [data.id]: Math.ceil(h) }
 }
 
 onMounted(() => window.addEventListener('message', onMessage))
 onUnmounted(() => window.removeEventListener('message', onMessage))
 
-/** iframe 高度：卡内上报优先，未上报用 card.h，再缺省 120 */
+/** iframe 高度：卡内上报优先（0 值视为无上报），未上报用 card.h，再缺省 120 */
 function frameHeight(r: RenderedCard): string {
-  return `${cardHeights.value[r.card.id] ?? r.card.h ?? 120}px`
+  return `${cardHeights.value[r.card.id] || r.card.h || 120}px`
 }
 
 function reload(): void {
@@ -196,11 +229,11 @@ function reload(): void {
         <el-col v-for="r in rendered" :key="r.card.id" :span="r.card.span" :class="$style.col">
           <div class="mx-card" :class="$style.card">
             <div v-if="r.card.title" :class="$style.cardTitle">{{ r.card.title }}</div>
+            <!-- 壳文档（同源，无 sandbox；沙箱移到壳内内层 iframe，见文件头说明） -->
             <iframe
               :srcdoc="r.doc"
               :style="{ height: frameHeight(r) }"
               :class="$style.frame"
-              sandbox="allow-scripts"
               title="仪表板卡"
             ></iframe>
           </div>

@@ -41,7 +41,7 @@ async function confirm(): Promise<void> {
 <template>
   <div :class="$style.body">
     <span :class="$style.title">远程机器地址</span>
-    <p :class="$style.desc">请输入远程智能体主机的 daemon 地址（ws:// 或 wss://），保存后将立即尝试连接。</p>
+    <p :class="$style.desc">请输入远程智能主机的地址（ws:// 或 wss://），保存后将立即尝试连接。</p>
     <input
       v-model="urlInput"
       :class="$style.input"

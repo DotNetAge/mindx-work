@@ -7,7 +7,7 @@
  */
 import { ElMessage } from 'element-plus'
 import { ToolbarIconButton, useService } from '@mindx-work/ui-shell-vue'
-import { useKanbanStore } from './store'
+import { useDashboardStore } from './store'
 
 /** chatflow 服务最小形状（消费侧本地声明，禁止跨插件 import） */
 interface ChatflowServiceLike {
@@ -22,7 +22,7 @@ try {
 }
 
 function addToChat(): void {
-  const store = useKanbanStore()
+  const store = useDashboardStore()
   if (!store.currentFile) {
     ElMessage.warning('没有打开的仪表板，无法添加到对话')
     return

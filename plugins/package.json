@@ -25,7 +25,7 @@
     "./web-viewer": "./src/web-viewer/index.ts",
     "./video-viewer": "./src/video-viewer/index.ts",
     "./svgboard": "./src/svgboard/index.ts",
-    "./kanban": "./src/kanban/index.ts",
+    "./dashboard": "./src/dashboard/index.ts",
     "./terminal": "./src/terminal/index.ts",
     "./calendar": "./src/calendar/index.ts",
     "./usage": "./src/usage/index.ts",
