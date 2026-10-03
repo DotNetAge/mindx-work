@@ -10,7 +10,13 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useService } from '@mindx-work/ui-shell-vue'
 import type { MxDesktopBridge } from '@mindx-work/ui-shell'
-import type { BundleInstallResult, MarketListResult, MarketPackageInfo, SkillInfo } from './types'
+import type {
+  BundleInstallResult,
+  MarketListResult,
+  MarketPackageInfo,
+  SkillInfo,
+  SkillPrepareResult,
+} from './types'
 import { FIXED_DOMAINS } from './types'
 
 // 服务以纯字符串名消费（插件间禁止 import；契约 §10.2）
@@ -216,10 +222,12 @@ export const useSkillsStore = defineStore('skills-store', () => {
   /**
    * 安装市场技能包（下载 → sha256 校验 → 进全局库）。
    * 后端对同名技能默认拒绝——错误消息含"已存在同名技能"时抛 SkillExistsError 供覆盖确认。
+   * 安装成功即触发准备流程编排（requires.oauth 授权 / install 命令确认随响应带回）。
    */
   async function installMarket(pkg: MarketPackageInfo, overwrite = false): Promise<string> {
+    let result: BundleInstallResult
     try {
-      await daemon.call<BundleInstallResult>('market.install', {
+      result = await daemon.call<BundleInstallResult>('market.install', {
         kind: 'skill',
         name: pkg.name,
         ...(overwrite ? { overwrite: true } : {}),
@@ -230,6 +238,7 @@ export const useSkillsStore = defineStore('skills-store', () => {
       throw err
     }
     await refresh()
+    handlePrepares(result.prepares)
     return `已安装「${marketDisplayName(pkg)}」`
   }
 
@@ -279,8 +288,86 @@ export const useSkillsStore = defineStore('skills-store', () => {
       throw err
     }
     await refresh()
+    handlePrepares(result.prepares)
     return `已安装「${result.name}」`
   }
+
+  // ---------- 准备流程（requires.oauth 授权 / install 命令块；阶段五） ----------
+  /**
+   * 后端安装响应附带的准备状态编排：needs_confirm 走确认执行（展示命令清单，
+   * 确认一次后自动执行）；oauth_started 提示用户完成浏览器授权（oauth 插件
+   * 经全局订阅自动弹授权窗口，收尾后本 store 联动推进）；blocked 信息呈现。
+   * 复用现有确认弹窗（零新增 UI 机制）；ok 的技能不出现在 prepares 里。
+   */
+
+  /** 等待授权收尾的技能（skill → provider；flow_completed/failed 到达后联动推进） */
+  const pendingPrepareSkills = new Map<string, string>()
+
+  function handlePrepares(prepares: SkillPrepareResult[] | undefined): void {
+    for (const p of prepares || []) handlePrepare(p)
+  }
+
+  function handlePrepare(p: SkillPrepareResult): void {
+    if (p.status === 'needs_confirm') {
+      requestConfirm(
+        '需要安装依赖',
+        `技能「${p.skill}」缺少依赖，需要在执行端运行：${(p.commands || []).join('；')}`,
+        '执行安装',
+        '依赖安装完成',
+        async () => {
+          const final = await daemon.call<SkillPrepareResult>('skill.prepare.confirm_install', { name: p.skill })
+          if (final.status !== 'ok') throw new Error(final.message || `依赖未就绪（${final.status}）`)
+        },
+      )
+      return
+    }
+    if (p.status === 'oauth_started') {
+      if (p.provider) pendingPrepareSkills.set(p.skill, p.provider)
+      requestConfirm(
+        '发起授权',
+        `技能「${p.skill}」需要「${p.provider_title || p.provider}」授权，请在弹出的授权窗口中完成，完成后自动生效。`,
+        '知道了',
+        '',
+        async () => {},
+      )
+      return
+    }
+    if (p.status === 'blocked') {
+      requestConfirm('环境不满足', p.message || '', '知道了', '', async () => {})
+    }
+  }
+
+  // 授权收尾联动：flow_completed 到达且是本插件等待的技能 → 重跑准备检查推进
+  // （可能得到 needs_confirm 呈现命令确认，或 ok 静默收尾）
+  daemon.onNotification('oauth.flow_completed', (params) => {
+    const storeKey = (params as { data?: { store_key?: unknown } } | null)?.data?.store_key
+    if (typeof storeKey !== 'string') return
+    const skill = storeKey.slice(0, storeKey.indexOf(':'))
+    if (!skill || !pendingPrepareSkills.has(skill)) return
+    pendingPrepareSkills.delete(skill)
+    void daemon
+      .call<SkillPrepareResult>('skill.prepare', { name: skill })
+      .then((res) => handlePrepare(res))
+      .catch(() => {})
+  })
+
+  // 授权失败联动：按 provider 匹配等待中的技能，清标记并提示（重新安装可再次发起）
+  daemon.onNotification('oauth.flow_failed', (params) => {
+    const data = (params as { data?: { provider?: unknown; error?: unknown } } | null)?.data
+    const provider = typeof data?.provider === 'string' ? data.provider : ''
+    const reason = typeof data?.error === 'string' ? data.error : ''
+    for (const [skill, pendingProvider] of pendingPrepareSkills) {
+      if (!provider || pendingProvider !== provider) continue
+      pendingPrepareSkills.delete(skill)
+      requestConfirm(
+        '授权未完成',
+        `技能「${skill}」的授权未完成${reason ? `：${reason}` : ''}，可重新安装或稍后再试。`,
+        '知道了',
+        '',
+        async () => {},
+      )
+    }
+  })
 
   // ---------- 详情正文读取 ----------
   /**

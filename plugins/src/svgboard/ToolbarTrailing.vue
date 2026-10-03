@@ -13,7 +13,7 @@ function activate(): void {
 
 <template>
   <ToolbarIconButton
-    icon="lucide:pen-tool"
+    icon="lucide:frame"
     label="新建画板"
     @activate="activate"
   />

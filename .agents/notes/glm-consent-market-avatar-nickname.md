@@ -7,7 +7,7 @@
 1. `mindx-market/assets/avatars/` 是**角色头像库**（编号 1–69；70 已删——用户明确否定自造图入库）。
 2. 头像流程：**从库存选一张未被占用的图** → 缩小成 128×128 → 取 base64 写入 IDENTITY.md 的 icon 字段。**禁止自造新图入库**。
 3. **每个角色的头像必须唯一**（库存图与角色一一对应，不重不造）。
-4. 所有角色的昵称要求**既贴合其角色又能带点幽默**——这是整个角色库的来由；**禁止内部黑话**（用户否定「八区裁缝」，MindX Work 插件专家定名「积木大师」）。
+4. 所有角色的昵称要求**既贴合其角色又能带点幽默**——这是整个角色库的来由；**禁止内部黑话**（用户否定「八区裁缝」，MindX Work 插件专家定名「积木君」，初拟「积木大师」被用户改定——君比大师更伙伴感）。
 
 ## 未占用判定法（指纹比对）
 
@@ -16,7 +16,7 @@
 ## 新增角色 SOP（按共识沉淀，定稿）
 
 1. 头像：指纹比对出**未占用编号** → 选贴合的图 → 缩 128×128 → base64 嵌 icon 字段（不动库存文件）。
-2. 昵称：贴合角色 + 幽默，从消费者视角起名（例：architect=架子工、积木大师=把代码积木拼进应用）；拿不准时给候选让用户拍板。
-3. IDENTITY.md frontmatter：name(slug)/nick_name/role/description/category/skills（技能名列表）/icon。description 同样禁内部黑话，写消费者能懂的价值。
+2. 昵称：贴合角色 + 幽默，从消费者视角起名（例：architect=架子工、积木君=把代码积木拼进应用）；拿不准时给候选让用户拍板。
+3. IDENTITY.md frontmatter：name(slug)/nick_name/role/description/category/skills（技能名列表）/icon。description 用**第三人称陈述岗位职责**（「负责 X 的 <角色名>，覆盖 A、B、C」），禁内部黑话，**禁广告词**（用户两次否定广告词版写法，2026-10-02；规范见 mindx-market/AGENTS.md）。
 4. SOUL.md：行为准则（决策/施工/验收/交互/边界）。
 5. 收尾必须 `npm run build`，发布后 curl 线上包核对 sha256 与内容（发布纪律见 mindx-market/AGENTS.md 与 glm-pitfall-publish-dir-pollution.md）。

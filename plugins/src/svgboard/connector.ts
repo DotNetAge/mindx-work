@@ -43,7 +43,7 @@ export function nearestMid(mids: AnchorPoint[], ref: { x: number; y: number }): 
 }
 
 /** 是否可作为连接端点（text 无准确 bbox 禁止；线自身不作端点） */
-export function connectable(s: BoardShape | undefined): boolean {
+export function connectable(s: BoardShape | null | undefined): boolean {
   return !!s && s.kind !== 'text' && s.kind !== 'line'
 }
 

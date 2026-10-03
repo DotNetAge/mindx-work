@@ -166,6 +166,22 @@ function formatTime(timeStr?: string): string {
   return `${y}-${m}-${d}`
 }
 
+// ── 分组折叠：分组头可点击折叠/展开（内存态，与壳 footerCollapsed 同策略不持久化）──
+/** 键 = 分组标签（工作目录名）；「最近讨论」捷径区用保留前缀避免与目录名撞键 */
+const RECENT_GROUP_KEY = '__recent__'
+const collapsedGroups = ref<Set<string>>(new Set())
+
+function isGroupCollapsed(label: string): boolean {
+  return collapsedGroups.value.has(label)
+}
+
+function toggleGroup(label: string): void {
+  const next = new Set(collapsedGroups.value)
+  if (next.has(label)) next.delete(label)
+  else next.add(label)
+  collapsedGroups.value = next
+}
+
 // ── 动作 ──
 function openSession(sessionId: string): void {
   void store.switchToSession(sessionId)
@@ -321,135 +337,168 @@ watch(
     </button>
 
     <template v-else>
-      <!-- 全量分组制：按目录名分组，行四要素 -->
+      <!-- 全量分组制：按目录名分组，行四要素；分组头可点击折叠/展开（chevron 右缘） -->
       <section v-for="g in groups" :key="g.label" :class="$style.group">
-        <div :class="$style.groupHeader">
+        <button
+          type="button"
+          :class="$style.groupHeader"
+          :aria-expanded="isGroupCollapsed(g.label) ? 'false' : 'true'"
+          @click="toggleGroup(g.label)"
+        >
           <span :class="$style.groupTitle">{{ g.label }}</span>
           <span :class="$style.groupCount">{{ g.items.length }}</span>
-        </div>
-        <div
-          v-for="s in g.items"
-          :key="s.session_id"
-          :class="$style.sessionRow"
-          :data-active="s.session_id === store.activeSessionId ? 'true' : 'false'"
-        >
-          <button
-            v-if="editingId !== s.session_id"
-            type="button"
-            :class="$style.rowMain"
-            @click="openSession(s.session_id)"
-          >
-            <!-- 行首聊天图标：任务分组行无 Agent 头像，以聊天图标标识会话身份；运行中呼吸 -->
-            <MxIcon
-              name="lucide:message-circle"
-              :size="16"
-              :class="[$style.rowChatIcon, { [$style.breathing]: isRunning(s.session_id) }]"
-            />
-            <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
-              <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
-            </el-tooltip>
-            <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
-            <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
-            <span :class="$style.rowTime">{{ formatTime(s.updated_at) }}</span>
-          </button>
-          <!-- 行尾弹出菜单（hover 显现）：重命名 / 删除（编辑态隐藏避免抢占输入焦点） -->
-          <el-dropdown
-            v-if="editingId !== s.session_id"
-            trigger="click"
-            popper-class="chatflow-agent-menu"
-            @command="(cmd: string) => handleSessionCommand(cmd, s)"
-          >
-            <button type="button" :class="$style.rowMore" title="会话操作" @click.stop>
-              <MxIcon name="lucide:ellipsis" :size="16" />
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu class="chatflow-agent-menu">
-                <el-dropdown-item command="rename">重命名</el-dropdown-item>
-                <el-dropdown-item command="delete">删除</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <!-- 行内重命名（底线输入，对齐昵称编辑先例）：编辑态占满整行 -->
-          <input
-            v-if="editingId === s.session_id"
-            :ref="setRenameInput"
-            v-model="editTitle"
-            :class="$style.rowRenameInput"
-            placeholder="任务名"
-            @keydown.enter.prevent="commitRename(s.session_id)"
-            @keydown.esc.prevent="cancelRename"
-            @blur="commitRename(s.session_id)"
-            @click.stop
+          <MxIcon
+            name="lucide:chevron-down"
+            :size="16"
+            :class="[$style.groupChevron, { [$style.groupChevronCollapsed]: isGroupCollapsed(g.label) }]"
           />
+        </button>
+        <!-- grid 0fr→1fr 行高过渡：折叠平滑收拢（对齐壳 footer 折叠技巧） -->
+        <div :class="$style.groupBody" :data-collapsed="isGroupCollapsed(g.label) ? 'true' : 'false'">
+          <div :class="$style.groupClip">
+            <div
+              v-for="s in g.items"
+              :key="s.session_id"
+              :class="$style.sessionRow"
+              :data-active="s.session_id === store.activeSessionId ? 'true' : 'false'"
+            >
+              <button
+                v-if="editingId !== s.session_id"
+                type="button"
+                :class="$style.rowMain"
+                @click="openSession(s.session_id)"
+              >
+                <!-- 行首聊天图标：任务分组行无 Agent 头像，以聊天图标标识会话身份；运行中呼吸 -->
+                <MxIcon
+                  name="lucide:message-circle"
+                  :size="16"
+                  :class="[$style.rowChatIcon, { [$style.breathing]: isRunning(s.session_id) }]"
+                />
+                <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
+                  <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
+                </el-tooltip>
+                <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
+                <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
+                <span :class="$style.rowTime">{{ formatTime(s.updated_at) }}</span>
+              </button>
+              <!-- 行尾弹出菜单（hover 显现）：重命名 / 删除（编辑态隐藏避免抢占输入焦点） -->
+              <el-dropdown
+                v-if="editingId !== s.session_id"
+                trigger="click"
+                popper-class="chatflow-agent-menu"
+                @command="(cmd: string) => handleSessionCommand(cmd, s)"
+              >
+                <button type="button" :class="$style.rowMore" title="会话操作" @click.stop>
+                  <MxIcon name="lucide:ellipsis" :size="16" />
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu class="chatflow-agent-menu">
+                    <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                    <el-dropdown-item command="delete">删除</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <!-- 行内重命名（底线输入，对齐昵称编辑先例）：编辑态占满整行 -->
+              <input
+                v-if="editingId === s.session_id"
+                :ref="setRenameInput"
+                v-model="editTitle"
+                :class="$style.rowRenameInput"
+                placeholder="任务名"
+                @keydown.enter.prevent="commitRename(s.session_id)"
+                @keydown.esc.prevent="cancelRename"
+                @blur="commitRename(s.session_id)"
+                @click.stop
+              />
+            </div>
+          </div>
         </div>
       </section>
 
-      <!-- 「最近讨论」捷径区：跨 Agent 最近活跃（先切 Agent 再切会话，switchToSession 内完成） -->
-      <section v-if="recentSessions.length > 0" :class="$style.recent">
-        <div :class="$style.groupHeader">
-          <span :class="$style.groupTitle">最近讨论</span>
-        </div>
-        <div
-          v-for="s in recentSessions"
-          :key="s.session_id"
-          :class="$style.sessionRow"
-          :data-active="s.session_id === store.activeSessionId ? 'true' : 'false'"
+      <!-- 「最近讨论」捷径区：跨 Agent 最近活跃（先切 Agent 再切会话，switchToSession 内完成）。
+           上方分组列表非空时整区隐藏——捷径区内容与其高度重复，避免同屏双列表 -->
+      <section
+        v-if="recentSessions.length > 0 && groups.length === 0"
+        :class="$style.recent"
+      >
+        <button
+          type="button"
+          :class="$style.groupHeader"
+          :aria-expanded="isGroupCollapsed(RECENT_GROUP_KEY) ? 'false' : 'true'"
+          @click="toggleGroup(RECENT_GROUP_KEY)"
         >
-          <button
-            v-if="editingId !== s.session_id"
-            type="button"
-            :class="$style.rowMain"
-            @click="openSession(s.session_id)"
-          >
-            <!-- 行首 Agent 头像（icon 优先、昵称/英文名首字兜底）：跨 Agent 捷径区标识归属；运行中呼吸 -->
-            <img
-              v-if="agentIconOf(s.agent_name)"
-              :src="agentIconOf(s.agent_name)"
-              :class="[$style.rowAvatar, { [$style.breathing]: isRunning(s.session_id) }]"
-              alt=""
-            />
-            <span
-              v-else-if="s.agent_name"
-              :class="[$style.rowAvatar, $style.rowAvatarFallback, { [$style.breathing]: isRunning(s.session_id) }]"
-            >
-              {{ agentTagLabel(s.agent_name).charAt(0) }}
-            </span>
-            <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
-              <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
-            </el-tooltip>
-            <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
-            <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
-            <span :class="$style.rowTime">{{ formatTime(s.updated_at) }}</span>
-          </button>
-          <!-- 行尾弹出菜单（hover 显现）：重命名 / 删除（编辑态隐藏避免抢占输入焦点） -->
-          <el-dropdown
-            v-if="editingId !== s.session_id"
-            trigger="click"
-            popper-class="chatflow-agent-menu"
-            @command="(cmd: string) => handleSessionCommand(cmd, s)"
-          >
-            <button type="button" :class="$style.rowMore" title="会话操作" @click.stop>
-              <MxIcon name="lucide:ellipsis" :size="16" />
-            </button>
-            <template #dropdown>
-              <el-dropdown-menu class="chatflow-agent-menu">
-                <el-dropdown-item command="rename">重命名</el-dropdown-item>
-                <el-dropdown-item command="delete">删除</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <!-- 行内重命名（底线输入，对齐昵称编辑先例）：编辑态占满整行 -->
-          <input
-            v-if="editingId === s.session_id"
-            :ref="setRenameInput"
-            v-model="editTitle"
-            :class="$style.rowRenameInput"
-            placeholder="任务名"
-            @keydown.enter.prevent="commitRename(s.session_id)"
-            @keydown.esc.prevent="cancelRename"
-            @blur="commitRename(s.session_id)"
-            @click.stop
+          <span :class="$style.groupTitle">最近讨论</span>
+          <MxIcon
+            name="lucide:chevron-down"
+            :size="16"
+            :class="[$style.groupChevron, { [$style.groupChevronCollapsed]: isGroupCollapsed(RECENT_GROUP_KEY) }]"
           />
+        </button>
+        <div :class="$style.groupBody" :data-collapsed="isGroupCollapsed(RECENT_GROUP_KEY) ? 'true' : 'false'">
+          <div :class="$style.groupClip">
+            <div
+              v-for="s in recentSessions"
+              :key="s.session_id"
+              :class="$style.sessionRow"
+              :data-active="s.session_id === store.activeSessionId ? 'true' : 'false'"
+            >
+              <button
+                v-if="editingId !== s.session_id"
+                type="button"
+                :class="$style.rowMain"
+                @click="openSession(s.session_id)"
+              >
+                <!-- 行首 Agent 头像（icon 优先、昵称/英文名首字兜底）：跨 Agent 捷径区标识归属；运行中呼吸 -->
+                <img
+                  v-if="agentIconOf(s.agent_name)"
+                  :src="agentIconOf(s.agent_name)"
+                  :class="[$style.rowAvatar, { [$style.breathing]: isRunning(s.session_id) }]"
+                  alt=""
+                />
+                <span
+                  v-else-if="s.agent_name"
+                  :class="[$style.rowAvatar, $style.rowAvatarFallback, { [$style.breathing]: isRunning(s.session_id) }]"
+                >
+                  {{ agentTagLabel(s.agent_name).charAt(0) }}
+                </span>
+                <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
+                  <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
+                </el-tooltip>
+                <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
+                <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
+                <span :class="$style.rowTime">{{ formatTime(s.updated_at) }}</span>
+              </button>
+              <!-- 行尾弹出菜单（hover 显现）：重命名 / 删除（编辑态隐藏避免抢占输入焦点） -->
+              <el-dropdown
+                v-if="editingId !== s.session_id"
+                trigger="click"
+                popper-class="chatflow-agent-menu"
+                @command="(cmd: string) => handleSessionCommand(cmd, s)"
+              >
+                <button type="button" :class="$style.rowMore" title="会话操作" @click.stop>
+                  <MxIcon name="lucide:ellipsis" :size="16" />
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu class="chatflow-agent-menu">
+                    <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                    <el-dropdown-item command="delete">删除</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <!-- 行内重命名（底线输入，对齐昵称编辑先例）：编辑态占满整行 -->
+              <input
+                v-if="editingId === s.session_id"
+                :ref="setRenameInput"
+                v-model="editTitle"
+                :class="$style.rowRenameInput"
+                placeholder="任务名"
+                @keydown.enter.prevent="commitRename(s.session_id)"
+                @keydown.esc.prevent="cancelRename"
+                @blur="commitRename(s.session_id)"
+                @click.stop
+              />
+            </div>
+          </div>
         </div>
       </section>
     </template>
@@ -466,7 +515,13 @@ watch(
   gap: var(--mx-space-1);
   overflow-y: auto;
   overflow-x: hidden;
+  /* Sidebar 出现滚动时不显示滚动条（滚轮/触控板滚动能力保留） */
+  scrollbar-width: none;
   padding: 0 2px var(--mx-space-1);
+}
+
+.root::-webkit-scrollbar {
+  display: none;
 }
 
 /* ── Agent 切换器触发器（头像 + 昵称主名 + 右侧 Role 小字 + 下拉箭头）── */
@@ -657,18 +712,33 @@ watch(
   flex-shrink: 0;
 }
 
+/* ── 分组头（button：整行可点击折叠/展开，标题左 / 计数与 chevron 右）──
+   用户定稿（2026-10-03 截图批注）：分组头无背景、字体统一小字（caption）、
+   上下留白增大、右侧折叠指示默认隐藏 hover 才显现 */
 .groupHeader {
   display: flex;
   align-items: center;
   gap: 6px;
   height: 24px;
+  margin: var(--mx-space-2) 0 var(--mx-space-1);
   padding: 0 var(--mx-space-1) 0 4px;
   flex-shrink: 0;
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.groupHeader:focus-visible {
+  outline: 2px solid var(--mx-text);
+  outline-offset: -2px;
 }
 
 .groupTitle {
-  font: var(--mx-font-caption);
-  color: var(--mx-text-tertiary);
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -681,6 +751,59 @@ watch(
   border-radius: 999px;
   padding: 0 6px;
   flex-shrink: 0;
+}
+
+/* 折叠指示：靠行右缘，默认隐藏、hover 分组头才显现；折叠转 -90°（朝右），展开朝下 */
+.groupChevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--mx-text-tertiary);
+  opacity: 0;
+  transition: transform var(--mx-duration-fast) var(--mx-ease-standard),
+    opacity var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.groupHeader:hover .groupChevron,
+.groupHeader:focus-visible .groupChevron {
+  opacity: 1;
+}
+
+.groupChevronCollapsed {
+  transform: rotate(-90deg);
+}
+
+/* 折叠体：grid 0fr→1fr 行高过渡（内容随行高收拢，展开/收起平滑） */
+.groupBody {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--mx-duration-motion) var(--mx-ease-standard);
+}
+
+.groupBody[data-collapsed='true'] {
+  grid-template-rows: 0fr;
+}
+
+/* 裁切层：min-height 0 允许行高压到 0；visibility 过渡保证折叠后焦点不可达 */
+.groupClip {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  visibility: visible;
+  transition: visibility var(--mx-duration-motion) var(--mx-ease-standard);
+}
+
+.groupBody[data-collapsed='true'] .groupClip {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .groupChevron,
+  .groupBody,
+  .groupClip {
+    transition: none;
+  }
 }
 
 /* ── 会话行（几何对齐壳行：34 高 / radius 8 / padding 0 8 / gap 6）── */
@@ -837,6 +960,11 @@ watch(
   margin-top: var(--mx-space-1);
   padding-top: var(--mx-space-1);
   border-top: 1px solid var(--mx-separator-soft);
+}
+
+/* 分隔线已承载上方留白，抵消分组头通用 margin-top（避免双重叠加） */
+.recent .groupHeader {
+  margin-top: 0;
 }
 
 /* 最近讨论区行首头像：16px 圆形，icon 优先、首字兜底（accent 淡底居中） */

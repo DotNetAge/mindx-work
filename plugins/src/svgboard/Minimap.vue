@@ -36,10 +36,24 @@ function navigateTo(e: PointerEvent): void {
   })
 }
 
+/** 按下态：仅按下期间拖动导航（悬停划过不劫持主视口） */
+let pressing = false
+
 /** 拖动跳转：pointerdown 起捕获，move 持续导航 */
 function onDown(e: PointerEvent): void {
   mapEl.value?.setPointerCapture(e.pointerId)
+  pressing = true
   navigateTo(e)
+}
+
+/** 按下期间移动才导航 */
+function onMove(e: PointerEvent): void {
+  if (pressing) navigateTo(e)
+}
+
+/** 抬起/取消/划出复位按下态 */
+function onUp(): void {
+  pressing = false
 }
 </script>
 
@@ -50,7 +64,10 @@ function onDown(e: PointerEvent): void {
       :viewBox="`${world.x} ${world.y} ${world.w} ${world.h}`"
       :class="$style.svg"
       @pointerdown="onDown"
-      @pointermove="navigateTo"
+      @pointermove="onMove"
+      @pointerup="onUp"
+      @pointercancel="onUp"
+      @pointerleave="onUp"
     >
       <!-- 文档边界：白底框 -->
       <rect :x="docBox.x" :y="docBox.y" :width="docBox.w" :height="docBox.h" :class="$style.docRect" />

@@ -23,7 +23,7 @@ export const svgboardPlugin: VuePlugin = (ctx) => {
     id: SVGBOARD_DETAIL_ID,
     order: 106,
     title: '画板',
-    icon: 'lucide:pen-tool',
+    icon: 'lucide:frame',
     component: DetailPanel,
     openMax: true,
   })
@@ -45,5 +45,6 @@ export const svgboardPlugin: VuePlugin = (ctx) => {
     unregisterFileTypes()
     ctx.Toolbar.remove('svgboard-toolbar-open')
     ctx.Detail.removeToolbar('svgboard-detail-addchat')
+    ctx.Detail.remove(SVGBOARD_DETAIL_ID)
   }
 }

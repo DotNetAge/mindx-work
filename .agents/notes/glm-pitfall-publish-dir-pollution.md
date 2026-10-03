@@ -26,3 +26,7 @@
 - 线上包 sha256 fa3bca8b = dist 包，内容「积木大师」
 - market.install agent overwrite → 运行期昵称积木大师、skills 声明可解析
 - skill.list 12 个含 mx-plugin-dev（技能闭环维持）
+
+## 后记（同日更晚）
+
+昵称终版定为「积木君」（用户：「积木君比你现在的名字贴切多了」——君比大师更伙伴感）；description 同步改为第三人称职责陈述（规范见 mindx-market/AGENTS.md）。本文所记「积木大师」均为当时历史版本。终版包 sha256 9b1ed27d 已发布并 RPC 重装验证。

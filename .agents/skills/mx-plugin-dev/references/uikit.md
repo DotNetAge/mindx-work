@@ -1,6 +1,4 @@
-# 界面样式规范（mx-UIKit 全量融入版）
-
-> 同源注记：本文与仓库技能 `mx-uikit/SKILL.md` 同源（2026-10-02 快照）。本技能自包含样式规范，脱离仓库技能生态可用；两处改动须双向同步。
+# 界面样式规范
 
 界面样式一律服从本规范；壳契约（八区/席位/注册 API）读 [contract.md](./contract.md)。
 
@@ -93,11 +91,11 @@
 
 **24 栏栅格（结构布局）**：容器加 `.mx-row`（CSS Grid 24 栏），子项加 `.mx-col-1..24`（占 N 栏）、`.mx-col-offset-1..23`（左侧空 N 栏）；gutter 缺省 `--mx-gutter`（16px），`.mx-row-gap-2/3/6`（8/12/24px）覆盖；`.mx-row-justify-start/center/end/between/around/evenly` 与 `.mx-row-align-start/center/end/stretch` 调分布与对齐（行缺省等高拉伸）。响应式三档断点，基础类任意宽度生效、断点类该宽度及以上覆盖：
 
-| 断点 | 阈值      | 类名                                    |
-| ---- | --------- | --------------------------------------- |
-| sm   | >= 768px  | `.mx-col-sm-N` / `.mx-col-sm-offset-N`  |
-| md   | >= 992px  | `.mx-col-md-N` / `.mx-col-md-offset-N`  |
-| lg   | >= 1200px | `.mx-col-lg-N` / `.mx-col-lg-offset-N`  |
+| 断点 | 阈值      | 类名                                   |
+| ---- | --------- | -------------------------------------- |
+| sm   | >= 768px  | `.mx-col-sm-N` / `.mx-col-sm-offset-N` |
+| md   | >= 992px  | `.mx-col-md-N` / `.mx-col-md-offset-N` |
+| lg   | >= 1200px | `.mx-col-lg-N` / `.mx-col-lg-offset-N` |
 
 组合语义：`.mx-col-24.mx-col-md-12` = 窄屏全宽、≥md 半宽。断点数值 token `--mx-breakpoint-*` 仅供 JS `matchMedia` 对齐（media query 内不可用 `var()`）。禁止在栅格外自造百分比/自由宽度做页面分栏。
 
@@ -132,6 +130,10 @@
 - 阴影/颜色自造 color-mix 手拼：用四档 shadow token 与语义色 token。
 - hover 才出现的按钮用 `opacity` 不用 `visibility`（保键盘 focus-within 可达）。
 - 恒白/恒暗文本误用主题墨色：`--mx-static-white` 与双主题同值的底配套，不随主题翻转。
+- **CSS Modules 引用全局类被哈希失配（静默失效，typecheck 全绿 UI 裸奔）**：`<style module>` 里组合选择器含 `mx-*` 全局类（如 `.composer .mx-input`）会把全局类当本地类哈希，规则整条失效不报错——全局类一律 `:global(.mx-input)` 显式声明。自查：`grep -n '\.mx-' <file>.vue | grep -v ':global'`（仅 style module 段）。
+- **模板 `$style` 引用必须与样式定义一一对应**：压缩/合并样式类后漏改模板引用，`$style.xxx` 解析 undefined 被 Vue 静默吞掉。自查：`comm -23 <(grep -oE '\$style\.[a-zA-Z0-9]+' f.vue | sed 's/\$style\.//' | sort -u) <(grep -oE '^\.[a-zA-Z0-9]+' f.vue | sed 's/^\.//' | sort -u)` 必须为空。
+- **script 内取 CSS Modules 类必须 `useCssModule()`**：`$style` 只在模板作用域自动注入，`<script setup>` 函数里直接写是 undefined（类型不报）；动态拼类名先 `const styles = useCssModule()`。
+- **scoped/全局桥接选择器整体包 `:global()`**：`:global(祖先) .后代` 会被编译器丢弃后代选择器（产物只作用于祖先）——需祖先+后代一起 `:global(祖先 .后代)`；改完 curl dev server 的 style 子模块核对产物，不猜。
 
 ## 验证（仓库内开发语境）
 

@@ -115,11 +115,12 @@ function onResizeStart(event: PointerEvent) {
         :title="data.collapsed ? (data.footerCollapsed ? '展开' : '收起') : undefined"
         @click="shell.toggleFooter()"
       >
+        <span v-if="!data.collapsed">{{ data.footerCollapsed ? '展开' : '收起' }}</span>
         <MxIcon
           :name="data.footerCollapsed ? 'lucide:chevron-up' : 'lucide:chevron-down'"
           :size="data.collapsed ? 20 : 16"
+          :class="$style.footerChevron"
         />
-        <span v-if="!data.collapsed">{{ data.footerCollapsed ? '展开' : '收起' }}</span>
       </button>
       <!-- grid 0fr→1fr 行高过渡：折叠平滑收拢，visibility 延迟隐藏保焦点不可达 -->
       <div :class="$style.footerBody" :data-collapsed="data.footerCollapsed ? 'true' : 'false'">
@@ -170,6 +171,12 @@ function onResizeStart(event: PointerEvent) {
   gap: 2px;
   overflow-y: auto;
   overflow-x: hidden;
+  /* Sidebar 出现滚动时不显示滚动条（滚轮/触控板滚动能力保留） */
+  scrollbar-width: none;
+}
+
+.scroll::-webkit-scrollbar {
+  display: none;
 }
 
 /* Header / Footer 固定区：无自带几何（对齐 DSH footArea——占位组件自带样式） */
@@ -178,8 +185,9 @@ function onResizeStart(event: PointerEvent) {
   flex-shrink: 0;
 }
 
-/* Footer 折叠行：几何对齐 footer 行先例（42 高 / radius 12 / margin 4 -2 / padding 0 12），
-   secondary 墨色、hover 实底提升（UsageFooterRow 同口径，darwin 半透明侧栏需实底 hover） */
+/* Footer 折叠行：几何对齐 footer 行先例（42 高 / radius 12 / margin 4 -2 / padding 0 12）。
+   用户定稿（2026-10-03 截图批注）：分组头无背景、字体统一小字（caption），
+   右侧折叠指示默认隐藏 hover 才显现——hover 仅文字加深，不再铺实底 */
 .footerToggle {
   display: flex;
   align-items: center;
@@ -193,19 +201,35 @@ function onResizeStart(event: PointerEvent) {
   border-radius: var(--mx-radius-control);
   background: transparent;
   color: var(--mx-text-secondary);
-  font: var(--mx-font-body);
+  font: var(--mx-font-caption);
   cursor: pointer;
-  transition: background-color var(--mx-duration-fast) var(--mx-ease-standard),
-    color var(--mx-duration-fast) var(--mx-ease-standard);
+  transition: color var(--mx-duration-fast) var(--mx-ease-standard);
 }
 
 .footerToggle:hover {
-  background: var(--mx-bg-surface);
   color: var(--mx-text);
 }
 
-.footerToggle:active {
-  background: var(--mx-active);
+/* 文字占满左段，折叠指示 chevron 靠行右缘（分组头统一形态：标题左 / 指示右） */
+.footerToggle span {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 折叠指示默认隐藏、hover 行才显现；折叠 rail 态无文字仅指示，恒显 */
+.footerChevron {
+  opacity: 0;
+  transition: opacity var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.footerToggle:hover .footerChevron,
+.footerToggle:focus-visible .footerChevron,
+.collapsed .footerChevron {
+  opacity: 1;
 }
 
 .footerToggle:focus-visible {
@@ -290,13 +314,14 @@ function onResizeStart(event: PointerEvent) {
 }
 
 /* 节标题（sectionHeader，WorkspaceBrowser L45-58）：高 36 / 14px tertiary 字 /
-   padding-left 4 / mb 4 / radius 12 */
+   padding-left 4 / mb 4 / radius 12。字体统一小字 caption（2026-10-03 用户定稿：
+   分组头字体一致），与插件分组头同口径 */
 .sectionTitle {
   display: flex;
   align-items: center;
   height: 36px;
   flex-shrink: 0;
-  font: var(--mx-font-body);
+  font: var(--mx-font-caption);
   line-height: 20px;
   color: var(--mx-text-tertiary);
   padding-left: 4px;

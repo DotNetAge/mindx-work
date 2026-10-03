@@ -89,6 +89,8 @@ export function registerFileStreamProtocol(): void {
           'Content-Length': String(range.end - range.start + 1),
           'Content-Range': `bytes ${range.start}-${range.end}/${total}`,
           'Accept-Ranges': 'bytes',
+          // 允许渲染进程 canvas 跨源读取媒体帧（视频剪辑插件 drawImage/导出必需）
+          'Access-Control-Allow-Origin': '*',
         },
       })
     }
@@ -99,6 +101,8 @@ export function registerFileStreamProtocol(): void {
         'Content-Type': mime,
         'Content-Length': String(total),
         'Accept-Ranges': 'bytes',
+        // 允许渲染进程 canvas 跨源读取媒体帧（视频剪辑插件 drawImage/导出必需）
+        'Access-Control-Allow-Origin': '*',
       },
     })
   })

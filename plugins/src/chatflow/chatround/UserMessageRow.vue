@@ -3,7 +3,7 @@
 // 左侧品牌导轨 + 淡底正文 + hover 显现操作组（回退/回收/复制）。
 // work 无 vue-i18n：文案改查证中文字面量；图片加载四期已接线——消息内 base64_data
 // 直出，path 引用走 daemon fs.read_base64 RPC（store 层带缓存，同路径只读一次）。
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { MxIcon } from '@mindx-work/ui-shell-vue'
 import type { ChatMessage } from '../model/message'
@@ -65,6 +65,28 @@ function canUndo(m: ChatMessage): boolean {
   return typeof ts === 'number' && ts > 0
 }
 
+// ── 发送时间显示（操作组行首）──
+// 时间源与回退 API 同源（metadata.backendTimestamp，毫秒）：实时发送由
+// user_message_saved 事件回填，历史恢复时为持久化时间戳，二者一致。
+// 当天只显示时分；跨天补月日，避免历史会话的时间产生误导。
+function formatSentTime(ts?: number): string {
+  if (typeof ts !== 'number' || ts <= 0) return ''
+  const d = new Date(ts)
+  const now = new Date()
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  if (sameDay) return `${hh}:${mm}`
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${mo}-${dd} ${hh}:${mm}`
+}
+
+const sentTime = computed(() => formatSentTime(props.message?.metadata?.backendTimestamp))
+
 const isDeleting = ref(false)
 
 // 回收本轮：restore=true 时先把用户消息回填到输入框（"回退"），restore=false 时直接删除（"删除"）
@@ -119,8 +141,9 @@ function previewImage(path: string): void {
         <FormattedContent :content="message.content" />
       </div>
     </div>
-    <!-- 操作组外挂气泡右侧（hover 显现，不占气泡宽度，保持胶囊随内容自适应） -->
+    <!-- 操作组移至气泡正下方（hover 显现的浮层，不占流式布局）：行首为发送时间 -->
     <span class="user-actions">
+      <span v-if="sentTime" class="action-time">{{ sentTime }}</span>
       <el-popconfirm
         v-if="canUndo(message)"
         title="此操作会彻底删除本轮对话，包括所有相应的消息及中间过程，且不可恢复。确定要执行回收操作吗？"
@@ -228,10 +251,14 @@ function previewImage(path: string): void {
   color: var(--mx-text-tertiary);
 }
 
+/* 操作组悬浮于气泡正下方（行首发送时间 + 回退/回收/复制）。
+ * padding-top 即鼠标热区桥：与气泡底边无缝衔接，鼠标从气泡移入不闪断；
+ * 浮层语义，不占流式布局，显示时覆盖下方轮头行。 */
 .user-actions {
   position: absolute;
-  left: calc(100% + var(--mx-space-2));
-  top: var(--mx-space-2);
+  top: 100%;
+  right: 0;
+  padding-top: 6px;
   display: flex;
   align-items: center;
   gap: var(--mx-space-1);
@@ -239,11 +266,21 @@ function previewImage(path: string): void {
   opacity: 0;
   transition: opacity 0.2s ease;
   pointer-events: none;
+  z-index: 1;
 }
 
 .user-message:hover .user-actions {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* 行首发送时间：弱化级 caption，与按钮垂直居中 */
+.action-time {
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
+  margin-right: var(--mx-space-1);
+  white-space: nowrap;
+  user-select: none;
 }
 
 .action-icon-btn {

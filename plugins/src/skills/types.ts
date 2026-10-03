@@ -55,6 +55,26 @@ export interface BundleInstallResult {
   skills_agent?: string[]
   /** 是否覆盖了已存在的目标 */
   overwritten?: boolean
+  /** 安装即触发的准备流程状态（仅列非 ok 且有警告的技能；阶段五） */
+  prepares?: SkillPrepareResult[]
+}
+
+/** 技能准备流程状态（安装响应 prepares[] 与 skill.prepare 共用形状） */
+export interface SkillPrepareResult {
+  skill: string
+  status: 'ok' | 'oauth_started' | 'needs_confirm' | 'blocked'
+  /** 环境不满足原因或缺失二进制清单 */
+  warnings?: string[]
+  /** oauth_started：提供商名与展示名 */
+  provider?: string
+  provider_title?: string
+  /** oauth_started：令牌落库的凭据名 */
+  env?: string
+  /** needs_confirm：本平台待确认安装命令 */
+  commands?: string[]
+  platform?: string
+  /** blocked：环境不满足原因 */
+  message?: string
 }
 
 /** 市场固定业务分类（中文）——标签栏按数组顺序陈列，清单中出现未收录分类时

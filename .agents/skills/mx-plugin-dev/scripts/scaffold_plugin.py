@@ -266,7 +266,7 @@ const submit = () => {{
   gap: var(--mx-space-2);
 }}
 
-.composer .mx-input {{
+.composer :global(.mx-input) {{
   flex: 1;
 }}
 

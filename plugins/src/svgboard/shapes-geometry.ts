@@ -23,21 +23,45 @@ export function mergeTranslate(shape: BoardShape, dx: number, dy: number): void 
   shape.attrs.transform = `translate(${round1(b.x + dx)} ${round1(b.y + dy)})`
 }
 
-/** path d 的坐标点提取（近似：M/L/T/S/C/Q 全坐标对，A 只取终点，H/V/Z 跳过）。
- * 相对命令按绝对点近似（首版边界：画板自产 path 只有 M/L 绝对命令）。 */
+/** path d 的坐标点提取（近似：M/L/T/S/C/Q 全坐标对，A 只取终点，H/V 补端点，
+ * Z 跳过）。相对命令按绝对点近似（首版边界：画板自产 path 只有 M/L 绝对命令），
+ * 当前点随命令推进，供 H/V 与相对命令取基准。 */
 function pathPoints(d: string): Array<[number, number]> {
   const pts: Array<[number, number]> = []
   const re = /([MLCSQTAHVZmlcsqtahvz])([^MLCSQTAHVZmlcsqtahvz]*)/g
   let m: RegExpExecArray | null
+  let cx = 0
+  let cy = 0
   while ((m = re.exec(d))) {
     const cmd = m[1]!
+    const rel = cmd >= 'a' && cmd <= 'z'
     const nums = (m[2] || '').match(/-?\d*\.?\d+(?:e[-+]?\d+)?/g)?.map(Number) || []
-    if (cmd === 'Z' || cmd === 'z' || cmd === 'H' || cmd === 'h' || cmd === 'V' || cmd === 'v') continue
-    if (cmd === 'A' || cmd === 'a') {
+    if (cmd === 'Z' || cmd === 'z') continue
+    if (cmd === 'H' || cmd === 'h') {
+      // 水平命令：端点 (x, 当前y)
+      for (const x of nums) {
+        cx = rel ? cx + x : x
+        pts.push([cx, cy])
+      }
+    } else if (cmd === 'V' || cmd === 'v') {
+      // 垂直命令：端点 (当前x, y)
+      for (const y of nums) {
+        cy = rel ? cy + y : y
+        pts.push([cx, cy])
+      }
+    } else if (cmd === 'A' || cmd === 'a') {
       // 每组 7 参数（rx ry rot large sweep x y），只取终点对
-      for (let i = 5; i + 1 < nums.length; i += 7) pts.push([nums[i]!, nums[i + 1]!])
+      for (let i = 5; i + 1 < nums.length; i += 7) {
+        cx = rel ? cx + nums[i]! : nums[i]!
+        cy = rel ? cy + nums[i + 1]! : nums[i + 1]!
+        pts.push([cx, cy])
+      }
     } else {
-      for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i]!, nums[i + 1]!])
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        cx = rel ? cx + nums[i]! : nums[i]!
+        cy = rel ? cy + nums[i + 1]! : nums[i + 1]!
+        pts.push([cx, cy])
+      }
     }
   }
   return pts
@@ -48,6 +72,11 @@ export interface BBox {
   top: number
   right: number
   bottom: number
+}
+
+/** XML 文本/属性转义（序列化与预览标记共用一处） */
+export function escapeXml(v: string): string {
+  return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 /** 图形 bbox：纯 attrs 解析 + translate 偏移（含 group 递归）。
@@ -92,10 +121,15 @@ export function shapeBBox(s: BoardShape): BBox | null {
     }
   } else if (s.kind === 'text') {
     const size = n(s.attrs['font-size']) || 24
+    // 字宽按字符类别估算：CJK 全角 1.0em（方块字满宽），拉丁等 0.62em
+    let em = 0
+    for (const ch of s.text || '') {
+      em += /[\u2E80-\u9FFF\uF900-\uFAFF\u3000-\u303F\uFF01-\uFF60]/.test(ch) ? 1 : 0.62
+    }
     b = {
       left: n(s.attrs.x),
       top: n(s.attrs.y) - size,
-      right: n(s.attrs.x) + (s.text || '').length * size * 0.62,
+      right: n(s.attrs.x) + em * size,
       bottom: n(s.attrs.y) + size * 0.2,
     }
   } else if (s.kind === 'group') {
@@ -171,6 +205,7 @@ function scaleGroup(g: BoardShape, sx: number, sy: number, ax: number, ay: numbe
   const agy = ay - tg.y
   const sr = Math.sqrt(sx * sy)
   for (const c of g.children || []) {
+    // 原始 translate 只解析一次并按锚点重定位（后续 scaleLocal 不得再读改它）
     const ct = parseTranslate(c.attrs.transform)
     c.attrs.transform = `translate(${round1(agx + (ct.x - agx) * sx)} ${round1(agy + (ct.y - agy) * sy)})`
     scaleLocal(c, sx, sy, sr)
@@ -204,10 +239,13 @@ function scaleLocal(c: BoardShape, sx: number, sy: number, sr: number): void {
     c.attrs.x = String(round1(n(c.attrs.x) * sx))
     c.attrs.y = String(round1(n(c.attrs.y) * sy))
   } else if (c.kind === 'group') {
-    // 导入外部 SVG 可能产生嵌套 group：translate 乘 s 后逐 child 递归
-    const t = parseTranslate(c.attrs.transform)
-    c.attrs.transform = `translate(${round1(t.x * sx)} ${round1(t.y * sy)})`
-    for (const gc of c.children || []) scaleLocal(gc, sx, sy, sr)
+    // 导入外部 SVG 可能产生嵌套 group：自身 translate 已由调用方按锚点重定位
+    // （不得再读改，否则二次缩放），子树内容整体关于本 group 局部原点乘 s
+    for (const gc of c.children || []) {
+      const t = parseTranslate(gc.attrs.transform)
+      gc.attrs.transform = `translate(${round1(t.x * sx)} ${round1(t.y * sy)})`
+      scaleLocal(gc, sx, sy, sr)
+    }
   }
 }
 

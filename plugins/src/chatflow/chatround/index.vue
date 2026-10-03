@@ -282,6 +282,8 @@ function formatContent(content: string): string {
 /* ── Agent 行：树的常驻根行，点击双向收拢/展开（§3.6 顶层布局） ── */
 .agent-row {
   display: flex;
+  /* 与上方用户问题在容器 gap 之外额外拉开 10px，问题与回应起点视觉分层 */
+  margin-top: 10px;
   margin-left: -10px;
   align-items: center;
   gap: var(--mx-space-2);

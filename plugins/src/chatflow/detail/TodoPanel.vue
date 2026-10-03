@@ -182,61 +182,92 @@ async function remove(item: TodoItem): Promise<void> {
 }
 
 watch(todoPath, load, { immediate: true })
+
+// ── 段头两种用法：独立渲染时自带折叠头；嵌在 el-collapse-item 内时由外部折叠接管 ──
+const props = defineProps({
+  /** 隐藏内部段头与折叠逻辑（ProductsPanel 的 el-collapse-item 标题插槽接管） */
+  hideHeader: { type: Boolean, default: false }
+})
+
+/** 独立用法内部折叠（hideHeader 时由外部 el-collapse 接管，内容直显） */
+const collapsed = ref(true)
+
+/** 段头徽章：未完成条数（空清单不显示）——defineExpose 供外部 el-collapse 标题使用 */
+const pendingCount = computed(() => items.value.filter((i) => !i.done).length)
+const totalCount = computed(() => items.value.length)
+
+defineExpose({ pendingCount, totalCount })
 </script>
 
 <template>
   <section :class="$style.section">
-    <h3 :class="$style.sectionTitle">待办</h3>
-    <p v-if="loading" :class="$style.empty">加载中…</p>
-    <template v-else>
-      <p v-if="!todoPath" :class="$style.empty">暂无工作目录</p>
+    <!-- 独立用法段头（hideHeader 时由外部 el-collapse-item 标题插槽接管） -->
+    <button
+      v-if="!hideHeader"
+      type="button"
+      :class="$style.collapseHead"
+      @click="collapsed = !collapsed"
+    >
+      <MxIcon
+        name="lucide:chevron-right"
+        :size="16"
+        :class="[$style.chevron, { [$style.chevronOpen]: !collapsed }]"
+      />
+      <span :class="$style.headTitle">待办</span>
+      <span v-if="totalCount > 0" :class="$style.count">{{ pendingCount }}</span>
+    </button>
+    <div v-show="hideHeader || !collapsed">
+      <p v-if="loading" :class="$style.empty">加载中…</p>
       <template v-else>
-        <p v-if="items.length === 0" :class="$style.empty">暂无待办</p>
-        <div
-          v-for="item in items"
-          :key="item.idx"
-          :class="[$style.todoRow, { [$style.done]: item.done, [$style.child]: item.level > 0 }]"
-          :style="{ '--lv': item.level }"
-        >
-          <el-checkbox
-            :model-value="item.done"
-            :class="$style.check"
-            @change="toggle(item)"
-          />
-          <span
-            v-if="editingIdx !== item.idx"
-            :class="$style.todoText"
-            title="双击编辑"
-            @dblclick="startEdit(item)"
+        <p v-if="!todoPath" :class="$style.empty">暂无工作目录</p>
+        <template v-else>
+          <p v-if="items.length === 0" :class="$style.empty">暂无待办</p>
+          <div
+            v-for="item in items"
+            :key="item.idx"
+            :class="[$style.todoRow, { [$style.done]: item.done, [$style.child]: item.level > 0 }]"
+            :style="{ '--lv': item.level }"
           >
-            <span :class="$style.todoLabel">{{ item.text }}</span>
+            <el-checkbox
+              :model-value="item.done"
+              :class="$style.check"
+              @change="toggle(item)"
+            />
             <span
-              v-for="(mk, i) in item.marks"
-              :key="i"
-              :class="[$style.mark, $style[mk.tone]]"
-            >{{ mk.label }}</span>
-          </span>
+              v-if="editingIdx !== item.idx"
+              :class="$style.todoText"
+              title="双击编辑"
+              @dblclick="startEdit(item)"
+            >
+              <span :class="$style.todoLabel">{{ item.text }}</span>
+              <span
+                v-for="(mk, i) in item.marks"
+                :key="i"
+                :class="[$style.mark, $style[mk.tone]]"
+              >{{ mk.label }}</span>
+            </span>
+            <el-input
+              v-else
+              ref="editInputRef"
+              v-model="editText"
+              :class="$style.editInput"
+              @keyup.enter="commitEdit(item)"
+              @blur="commitEdit(item)"
+              @keydown.esc.prevent="cancelEdit"
+            />
+            <button type="button" :class="$style.todoDel" title="删除" @click="remove(item)">
+              <MxIcon name="lucide:x" :size="16" />
+            </button>
+          </div>
           <el-input
-            v-else
-            ref="editInputRef"
-            v-model="editText"
-            :class="$style.editInput"
-            @keyup.enter="commitEdit(item)"
-            @blur="commitEdit(item)"
-            @keydown.esc.prevent="cancelEdit"
+            v-model="draft"
+            :class="$style.addRow"
+            placeholder="添加待办，回车确认"
+            @keyup.enter="addTodo"
           />
-          <button type="button" :class="$style.todoDel" title="删除" @click="remove(item)">
-            <MxIcon name="lucide:x" :size="16" />
-          </button>
-        </div>
-        <el-input
-          v-model="draft"
-          :class="$style.addRow"
-          placeholder="添加待办，回车确认"
-          @keyup.enter="addTodo"
-        />
+        </template>
       </template>
-    </template>
+    </div>
   </section>
 </template>
 
@@ -247,10 +278,45 @@ watch(todoPath, load, { immediate: true })
   padding-top: var(--mx-space-3);
 }
 
-.sectionTitle {
-  margin: 0 0 var(--mx-space-2);
+/* 手风琴段头：与 ProductsPanel 同视觉（module 作用域不跨组件，此处重写） */
+.collapseHead {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-2);
+  width: 100%;
+  padding: var(--mx-space-1) var(--mx-space-2);
+  border: none;
+  border-radius: var(--mx-radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.collapseHead:hover {
+  background: var(--mx-hover);
+}
+.collapseHead:focus-visible {
+  outline: 2px solid var(--mx-text);
+  outline-offset: -2px;
+}
+.chevron {
+  color: var(--mx-text-tertiary);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.chevronOpen {
+  transform: rotate(90deg);
+}
+.headTitle {
   font: var(--mx-font-caption);
   color: var(--mx-text-secondary);
+}
+.count {
+  margin-left: auto;
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
 }
 
 .empty {

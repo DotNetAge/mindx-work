@@ -6,6 +6,9 @@
  * 生成、无任何用户输入，v-html 安全。
  */
 
+// r1/escAttr 与 shapes-geometry 共用一处定义（escapeXml 为全量转义版本）
+import { escapeXml as escAttr, round1 as r1 } from './shapes-geometry'
+
 export interface PresetElement {
   kind: 'rect' | 'ellipse' | 'line' | 'path' | 'polygon'
   attrs: Record<string, string>
@@ -41,8 +44,6 @@ export interface PresetCategory {
 }
 
 // ── 几何辅助 ─────────────────────────────────────────────────────────────────
-
-const r1 = (n: number): number => Math.round(n * 10) / 10
 
 type Pt = [number, number]
 
@@ -623,8 +624,6 @@ const PREVIEW_STYLE: Record<string, string> = {
   'stroke-linejoin': 'round',
   fill: 'none',
 }
-
-const escAttr = (v: string): string => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 
 function markupOf(els: PresetElement[]): string {
   return els

@@ -16,10 +16,71 @@ const store = useMarkdownStore()
 /** 文件名（basename） */
 const fileName = computed(() => store.currentFile.split('/').pop() || store.currentFile)
 
-/** markdown → 安全 HTML（gfm + 换行转义，与对话流同参数） */
+// ── frontmatter：剥离 + 解析 + 表格化渲染 ────────────────────────────────────
+interface FmField {
+  key: string
+  value: string
+}
+
+/** HTML 转义（键值均为不可信文本，先转义再过 DOMPurify 双保险） */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * 提取并解析文档顶部的 frontmatter 块（仅首行 --- 起始的块，正文中的 --- 不受影响）。
+ * 支持单层键值与 `- ` 列表值（拼顿号串）；嵌套 YAML 不引解析器依赖，行原样拼接。
+ * 无 frontmatter 时 body 即原文。
+ */
+function parseFrontmatter(text: string): { fields: FmField[]; body: string } {
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
+  if (!m) return { fields: [], body: text }
+
+  const fields: FmField[] = []
+  let curKey = ''
+  const lines = (m[1] ?? '').split(/\r?\n/)
+  for (const line of lines) {
+    // 列表项行：归并到当前键，顿号串接
+    const item = line.match(/^\s*-\s+(.*)$/)
+    if (item && curKey) {
+      const f = fields[fields.length - 1]
+      const itemText = item[1]?.trim() ?? ''
+      if (f) f.value = f.value ? `${f.value}、${itemText}` : itemText
+      continue
+    }
+    const kv = line.match(/^([^\s:][^:]*):\s*(.*)$/)
+    if (kv) {
+      curKey = kv[1]?.trim() ?? ''
+      fields.push({ key: curKey, value: kv[2]?.trim() ?? '' })
+    } else if (curKey && line.trim()) {
+      // 折行续体：追加到当前键值（嵌套 YAML 的降级处理）
+      const f = fields[fields.length - 1]
+      if (f) f.value += (f.value ? ' ' : '') + line.trim()
+    }
+  }
+  return { fields: fields.filter((f) => f.key), body: text.slice(m[0].length) }
+}
+
+/** frontmatter → 键值表 HTML（空值显示占位符，与价格「￥0」同语义） */
+function fmTableHtml(fields: FmField[]): string {
+  const rows = fields
+    .map(
+      (f) =>
+        `<tr><th>${escapeHtml(f.key)}</th><td>${escapeHtml(f.value) || '<span class="fm-empty">—</span>'}</td></tr>`,
+    )
+    .join('')
+  return `<table class="fm-table">${rows}</table>`
+}
+
+/** markdown → 安全 HTML（gfm + 换行转义，与对话流同参数；frontmatter 表格化置顶） */
 const renderedHtml = computed(() => {
   if (store.mode !== 'preview') return ''
-  const raw = marked.parse(store.draft, { gfm: true, breaks: true, async: false }) as string
+  const { fields, body } = parseFrontmatter(store.draft)
+  const raw = (fields.length > 0 ? fmTableHtml(fields) : '') + marked.parse(body, { gfm: true, breaks: true, async: false }) as string
   return DOMPurify.sanitize(raw)
 })
 
@@ -375,6 +436,47 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   border: none;
   border-top: 1px solid var(--mx-separator);
   margin: var(--mx-space-3) 0;
+}
+
+/* frontmatter 卡片：带边框圆角矩形，微弱底色与正文区隔；键列弱色右对齐。
+   必须 separate 模式——collapse 下 Chrome 不渲染表格自身圆角 */
+.preview :global(.md-preview .fm-table) {
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0 0 var(--mx-space-4);
+  font-size: 12px;
+  border: 1px solid var(--mx-separator);
+  border-radius: var(--mx-radius-control);
+  background: color-mix(in srgb, var(--mx-accent) 3%, transparent);
+  overflow: hidden;
+  box-shadow: 0 1px 2px color-mix(in srgb, black 4%, transparent);
+}
+.preview :global(.md-preview .fm-table) th {
+  color: var(--mx-text-tertiary);
+  font-weight: 600;
+  text-align: right;
+  padding: var(--mx-space-2) var(--mx-space-3) var(--mx-space-2) 0;
+  border: none;
+  white-space: nowrap;
+  vertical-align: top;
+}
+.preview :global(.md-preview .fm-table) td {
+  color: var(--mx-text);
+  /* 值列取正文底色：与卡片微弱底色形成左右分栏对比，键值一眼区分 */
+  background: var(--mx-bg-surface);
+  padding: var(--mx-space-2) var(--mx-space-4) var(--mx-space-2) var(--mx-space-3);
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--mx-separator) 55%, transparent);
+  word-break: break-word;
+}
+.preview :global(.md-preview .fm-table) th:first-child {
+  padding-left: var(--mx-space-4);
+}
+.preview :global(.md-preview .fm-table) tr:last-child td {
+  border-bottom: none;
+}
+.preview :global(.md-preview .fm-table) .fm-empty {
+  color: var(--mx-text-tertiary);
 }
 
 .editArea {

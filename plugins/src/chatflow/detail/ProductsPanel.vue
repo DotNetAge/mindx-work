@@ -172,82 +172,107 @@ function openFile(path: string): void {
 function basename(path: string): string {
   return path.split(/[\\/]/).pop() || path
 }
+
+// ── el-collapse 手风琴：accordion 模式保证同时只展开一项；默认展开待办段 ──
+const openSection = ref('todos')
+
+/** TodoPanel 暴露的待办计数（expose 的 ref 自动解包） */
+const todoPanelRef = ref<InstanceType<typeof TodoPanel> | null>(null)
+const todoTotal = computed(() => todoPanelRef.value?.totalCount ?? 0)
+const todoPending = computed(() => todoPanelRef.value?.pendingCount ?? 0)
 </script>
 
 <template>
   <div :class="$style.panel">
-    <!-- 对话产物段 -->
-    <section :class="$style.section">
-      <h3 :class="$style.sectionTitle">对话产物</h3>
-      <p v-if="products.length === 0" :class="$style.empty">暂无内容</p>
-      <button
-        v-for="row in products"
-        :key="`p-${row.path}`"
-        type="button"
-        :class="$style.row"
-        :title="row.path"
-        @click="openFile(row.path)"
-      >
-        <MxIcon name="lucide:file-text" :size="16" />
-        <span :class="$style.rowName">{{ basename(row.path) }}</span>
-        <span v-if="row.additions" :class="$style.add">+{{ row.additions }}</span>
-        <span v-if="row.deletions" :class="$style.del">-{{ row.deletions }}</span>
-      </button>
-    </section>
-
-    <!-- 技能段：项目级发现式清单（点击开正文，行尾菜单晋升/删除） -->
-    <section :class="$style.section">
-      <h3 :class="$style.sectionTitle">技能</h3>
-      <p v-if="skillsLoading" :class="$style.empty">加载中…</p>
-      <p v-else-if="skills.length === 0" :class="$style.empty">暂无内容</p>
-      <div
-        v-for="sk in skills"
-        :key="sk.name"
-        :class="[$style.row, $style.skillRow]"
-        :title="sk.description || sk.name"
-        @click="openSkill(sk)"
-      >
-        <MxIcon name="lucide:sparkles" :size="16" />
-        <span :class="$style.rowName">{{ sk.name }}</span>
-        <el-dropdown
-          trigger="click"
-          popper-class="products-skill-menu"
-          @command="(c: string) => onSkillMenu(sk, c)"
+    <el-collapse v-model="openSection" accordion :class="$style.collapse">
+      <!-- 对话产物段 -->
+      <el-collapse-item name="products">
+        <template #title>
+          <span :class="$style.headTitle">对话产物</span>
+          <span v-if="products.length > 0" :class="$style.count">{{ products.length }}</span>
+        </template>
+        <p v-if="products.length === 0" :class="$style.empty">暂无内容</p>
+        <button
+          v-for="row in products"
+          :key="`p-${row.path}`"
+          type="button"
+          :class="$style.row"
+          :title="row.path"
+          @click="openFile(row.path)"
         >
-          <button type="button" :class="$style.rowMenu" title="更多操作" @click.stop>
-            <MxIcon name="lucide:ellipsis" :size="16" />
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="promote">安装至技能库</el-dropdown-item>
-              <el-dropdown-item command="remove" divided>删除</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </div>
-    </section>
+          <MxIcon name="lucide:file-text" :size="16" />
+          <span :class="$style.rowName">{{ basename(row.path) }}</span>
+          <span v-if="row.additions" :class="$style.add">+{{ row.additions }}</span>
+          <span v-if="row.deletions" :class="$style.del">-{{ row.deletions }}</span>
+        </button>
+      </el-collapse-item>
 
-    <!-- 最近文件段 -->
-    <section :class="$style.section">
-      <h3 :class="$style.sectionTitle">最近文件</h3>
-      <p v-if="fileRows.length === 0" :class="$style.empty">暂无内容</p>
-      <button
-        v-for="row in fileRows"
-        :key="`f-${row.path}`"
-        type="button"
-        :class="$style.row"
-        :title="row.path"
-        @click="openFile(row.path)"
-      >
-        <MxIcon :name="row.isNew ? 'lucide:file-plus-2' : 'lucide:file-pen'" :size="16" />
-        <span :class="$style.rowName">{{ basename(row.path) }}</span>
-        <span v-if="row.additions" :class="$style.add">+{{ row.additions }}</span>
-        <span v-if="row.deletions" :class="$style.del">-{{ row.deletions }}</span>
-      </button>
-    </section>
+      <!-- 技能段：项目级发现式清单（点击开正文，行尾菜单晋升/删除） -->
+      <el-collapse-item name="skills">
+        <template #title>
+          <span :class="$style.headTitle">技能</span>
+          <span v-if="skills.length > 0" :class="$style.count">{{ skills.length }}</span>
+        </template>
+        <p v-if="skillsLoading" :class="$style.empty">加载中…</p>
+        <p v-else-if="skills.length === 0" :class="$style.empty">暂无内容</p>
+        <div
+          v-for="sk in skills"
+          :key="sk.name"
+          :class="[$style.row, $style.skillRow]"
+          :title="sk.description || sk.name"
+          @click="openSkill(sk)"
+        >
+          <MxIcon name="lucide:sparkles" :size="16" />
+          <span :class="$style.rowName">{{ sk.name }}</span>
+          <el-dropdown
+            trigger="click"
+            popper-class="products-skill-menu"
+            @command="(c: string) => onSkillMenu(sk, c)"
+          >
+            <button type="button" :class="$style.rowMenu" title="更多操作" @click.stop>
+              <MxIcon name="lucide:ellipsis" :size="16" />
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="promote">安装至技能库</el-dropdown-item>
+                <el-dropdown-item command="remove" divided>删除</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </el-collapse-item>
 
-    <!-- 待办段：工作目录 TODO.md（增删改，组件内自带分隔线与标题） -->
-    <TodoPanel />
+      <!-- 最近文件段 -->
+      <el-collapse-item name="files">
+        <template #title>
+          <span :class="$style.headTitle">最近文件</span>
+          <span v-if="fileRows.length > 0" :class="$style.count">{{ fileRows.length }}</span>
+        </template>
+        <p v-if="fileRows.length === 0" :class="$style.empty">暂无内容</p>
+        <button
+          v-for="row in fileRows"
+          :key="`f-${row.path}`"
+          type="button"
+          :class="$style.row"
+          :title="row.path"
+          @click="openFile(row.path)"
+        >
+          <MxIcon :name="row.isNew ? 'lucide:file-plus-2' : 'lucide:file-pen'" :size="16" />
+          <span :class="$style.rowName">{{ basename(row.path) }}</span>
+          <span v-if="row.additions" :class="$style.add">+{{ row.additions }}</span>
+          <span v-if="row.deletions" :class="$style.del">-{{ row.deletions }}</span>
+        </button>
+      </el-collapse-item>
+
+      <!-- 待办段：TodoPanel hide-header 模式（标题与折叠由本组件 el-collapse 接管） -->
+      <el-collapse-item name="todos">
+        <template #title>
+          <span :class="$style.headTitle">待办</span>
+          <span v-if="todoTotal > 0" :class="$style.count">{{ todoPending }}</span>
+        </template>
+        <TodoPanel ref="todoPanelRef" hide-header />
+      </el-collapse-item>
+    </el-collapse>
   </div>
 </template>
 
@@ -258,16 +283,43 @@ function basename(path: string): string {
   gap: var(--mx-space-2);
 }
 
-/* 分组分隔线：非首段标题上方一根软线（段间视觉分区） */
-.section + .section {
-  border-top: 1px solid var(--mx-separator-soft);
-  padding-top: var(--mx-space-3);
+/* el-collapse 手风琴：EP 变量注入对齐 mx 主题；段间软分隔线、弱色 caption 标题、右置计数 */
+.collapse {
+  --el-collapse-border-color: var(--mx-separator-soft);
+  --el-collapse-header-bg-color: transparent;
+  --el-collapse-header-text-color: var(--mx-text-secondary);
+  --el-collapse-content-bg-color: transparent;
+  --el-collapse-header-height: 30px;
+  border-top: none;
+  border-bottom: none;
 }
-
-.sectionTitle {
-  margin: 0 0 var(--mx-space-2);
+.collapse :global(.el-collapse-item__header) {
+  font: var(--mx-font-caption);
+  padding: 0 var(--mx-space-2);
+  box-sizing: border-box;
+  border-radius: var(--mx-radius-control);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.collapse :global(.el-collapse-item__header:hover) {
+  background: var(--mx-hover);
+}
+.collapse :global(.el-collapse-item__wrap) {
+  padding: 0 var(--mx-space-2);
+  box-sizing: border-box;
+}
+.collapse :global(.el-collapse-item__content) {
+  padding: var(--mx-space-2) 0 var(--mx-space-3);
+  color: var(--mx-text-secondary);
+}
+.headTitle {
   font: var(--mx-font-caption);
   color: var(--mx-text-secondary);
+}
+.count {
+  margin-left: auto;
+  margin-right: var(--mx-space-2);
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
 }
 
 .empty {

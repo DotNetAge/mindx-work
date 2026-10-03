@@ -153,11 +153,27 @@ function hasAnyAnswer(): boolean {
   return false
 }
 
-function handleSubmit() {
+/** 统一发送通路：锁存 + 按主/子会话路由 + 通知宿主收起（提交与跳过共用） */
+function submitAnswer(answerText: string) {
   // 重复点击保护：提交后立即锁存状态并禁用全部输入控件
   if (submitted.value) return
   submitted.value = true
 
+  // 子代理提问冒泡：作答写入子会话流（user 消息，宿主阻塞扫描据此判定已响应）
+  // 并以 user.message 携带子会话 ID 发送，daemon dispatchAskAnswer 精确注入挂起子会话
+  if (props.targetSessionId) {
+    store.answerSubagentAsk(props.targetSessionId, answerText)
+  } else {
+    // 主会话通路：必须走 store.sendMessage（而非直连 websocket 客户端）：
+    // 它会把回答作为 user 消息落入本地消息流，宿主阻塞扫描
+    // 碰到 user 消息即判定「已响应」，抽屉才能立即收起；
+    // 直连发送不落库，抽屉会卡死直到下一轮产出 markdown。
+    store.sendMessage(answerText)
+  }
+  emit('submitted')
+}
+
+function handleSubmit() {
   // Build formatted answer text
   const answerParts: string[] = []
   const isMultiSelectAny = questions.value.some(q => q.options.length > 0 && q.multiSelect)
@@ -200,19 +216,18 @@ function handleSubmit() {
   }
 
   const answerText = answerParts.length > 0 ? answerParts.join('\n') : ''
+  submitAnswer(answerText)
+}
 
-  // 子代理提问冒泡：作答写入子会话流（user 消息，宿主阻塞扫描据此判定已响应）
-  // 并以 user.message 携带子会话 ID 发送，daemon dispatchAskAnswer 精确注入挂起子会话
-  if (props.targetSessionId) {
-    store.answerSubagentAsk(props.targetSessionId, answerText)
-  } else {
-    // 主会话通路：必须走 store.sendMessage（而非直连 websocket 客户端）：
-    // 它会把回答作为 user 消息落入本地消息流，宿主阻塞扫描
-    // 碰到 user 消息即判定「已响应」，抽屉才能立即收起；
-    // 直连发送不落库，抽屉会卡死直到下一轮产出 markdown。
-    store.sendMessage(answerText)
-  }
-  emit('submitted')
+/**
+ * 跳过提问：AskUser 协议没有「拒绝回答」动作——pending 状态下任何 user 消息
+ * 都会结束提问并把内容作为回答交给 LLM。因此跳过 = 发送一条明确的放弃说明，
+ * agent 收到后基于已有信息继续。整组提问一次跳过（协议按提问块生效，无法逐题）。
+ */
+const SKIP_ANSWER_TEXT = '（用户跳过了这组提问。请基于已有信息自行判断并继续；除非确有必要，请勿重复追问。）'
+
+function skipQuestions() {
+  submitAnswer(SKIP_ANSWER_TEXT)
 }
 
 function toggleExpand() {
@@ -337,6 +352,15 @@ function toggleExpand() {
         </div>
 
         <div class="au-actions">
+          <!-- 跳过：不回答也能结束提问（发放弃说明，agent 自行继续），
+               防止面板锁死输入区导致会话卡死 -->
+          <el-button
+            class="au-skip-btn"
+            :disabled="submitted"
+            @click="skipQuestions"
+          >
+            {{ submitted ? '已处理' : '跳过此提问' }}
+          </el-button>
           <el-button
             type="primary"
             :disabled="submitted || !hasAnyAnswer()"
@@ -589,7 +613,16 @@ function toggleExpand() {
 
 .au-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* 跳过按钮：次级弱化（tertiary 文字色），与主提交按钮拉开视觉层级 */
+.au-skip-btn {
+  color: var(--mx-text-tertiary);
+}
+.au-skip-btn:hover {
+  color: var(--mx-text-secondary);
 }
 
 .expand-au-enter-active,

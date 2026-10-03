@@ -2,9 +2,12 @@
 /**
  * FloaterPane：可拖动浮窗（契约第 4 节 Floater 视图区）。
  * 无传统 titlebar：头部为细带——左侧模拟 macOS 交通灯（仅红灯，点击关闭）+
- * 标题小字；风格对齐主窗浮层族（elevated 底 / window 圆角 / shadow-lv3 锐利边界）。
- * 多条目并存、无遮罩不阻塞、不抢 Esc（关闭通道 = 红灯 / 注册者自行 remove）。
- * 位置归适配层本地状态（拖动实时更新，clamp 保持头部可抓；刷新重置，持久化待定）。
+ * 标题小字；右下角手柄拖拽调节尺寸（注册声明的 width/height 是初始值，
+ * 用户调整经本地状态覆盖）。风格对齐主窗浮层族（elevated 底 / window 圆角 /
+ * shadow-lv3 锐利边界）。多条目并存、无遮罩不阻塞、不抢 Esc
+ * （关闭通道 = 红灯 / 注册者自行 remove）。
+ * 位置与调整后尺寸归适配层本地状态（拖动实时更新，clamp 保持头部可抓；
+ * 刷新重置，持久化待定）。
  */
 import { computed, reactive, ref, useCssModule, watch } from 'vue'
 import { useShell, useShellData } from '../reactivity'
@@ -12,6 +15,8 @@ import { useShell, useShellData } from '../reactivity'
 /** 缺省尺寸（适配器本地常量不上抛初始值，对齐 SIDEBAR_DEFAULT 先例） */
 const WIDTH_DEFAULT = 360
 const HEIGHT_DEFAULT = 480
+/** 拖拽调节的最小尺寸（小于此值头部与内容都不可用） */
+const SIZE_MIN = 240
 /** 头部细带高度（拖动手柄 + 交通灯载体） */
 const HEADER_H = 36
 
@@ -20,6 +25,17 @@ const data = useShellData(() => shell.Floater.entries)
 
 /** 每条目浮窗位置（键为条目 id） */
 const positions = reactive(new Map<string, { x: number; y: number }>())
+/** 每条目用户调整后的尺寸（键为条目 id；缺省回落条目声明值） */
+const sizes = reactive(new Map<string, { w: number; h: number }>())
+
+/** 尺寸解析唯一入口：用户调整值 > 条目声明值 > 缺省（拖动 clamp 与样式同源） */
+function sizeOf(entry: { id: string; width?: number; height?: number }) {
+  const adjusted = sizes.get(entry.id)
+  return {
+    w: adjusted?.w ?? entry.width ?? WIDTH_DEFAULT,
+    h: adjusted?.h ?? entry.height ?? HEIGHT_DEFAULT,
+  }
+}
 /** 点击置顶：展示顺序即同层叠放次序（DOM 顺序，越靠后越上层） */
 const frontOrder = ref<string[]>([])
 
@@ -38,7 +54,10 @@ watch(
       })
     }
     for (const id of positions.keys()) {
-      if (!entries.some((entry) => entry.id === id)) positions.delete(id)
+      if (!entries.some((entry) => entry.id === id)) {
+        positions.delete(id)
+        sizes.delete(id)
+      }
     }
   },
   { immediate: true },
@@ -57,11 +76,12 @@ function bringToFront(id: string) {
 
 function styleOf(entry: (typeof data.value)[number]) {
   const pos = positions.get(entry.id)
+  const { w, h } = sizeOf(entry)
   return {
     left: `${pos?.x ?? 0}px`,
     top: `${pos?.y ?? 0}px`,
-    width: `${entry.width ?? WIDTH_DEFAULT}px`,
-    height: `${entry.height ?? HEIGHT_DEFAULT}px`,
+    width: `${w}px`,
+    height: `${h}px`,
   }
 }
 
@@ -80,7 +100,7 @@ function onHeaderMove(event: PointerEvent) {
   const pos = positions.get(drag.id)
   const entry = data.value.find((item) => item.id === drag!.id)
   if (!pos || !entry) return
-  const w = entry.width ?? WIDTH_DEFAULT
+  const { w } = sizeOf(entry)
   // clamp：头部细带始终留在窗口内可抓取（x 允许左右探出，仅保留 60px 头部）
   pos.x = Math.min(window.innerWidth - 60, Math.max(-(w - 60), event.clientX - drag.dx))
   pos.y = Math.min(window.innerHeight - HEADER_H, Math.max(0, event.clientY - drag.dy))
@@ -88,6 +108,32 @@ function onHeaderMove(event: PointerEvent) {
 
 function onHeaderUp() {
   drag = null
+}
+
+/** 调参尺寸会话：右下角手柄 pointerdown 开始，move 增量写入 sizes（min clamp） */
+let resizing: { id: string; startX: number; startY: number; startW: number; startH: number } | null =
+  null
+
+function onResizeDown(event: PointerEvent, id: string) {
+  const entry = data.value.find((item) => item.id === id)
+  if (!entry || event.button !== 0) return
+  const { w, h } = sizeOf(entry)
+  resizing = { id, startX: event.clientX, startY: event.clientY, startW: w, startH: h }
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+
+function onResizeMove(event: PointerEvent) {
+  if (!resizing) return
+  const entry = data.value.find((item) => item.id === resizing!.id)
+  if (!entry) return
+  sizes.set(resizing.id, {
+    w: Math.max(SIZE_MIN, resizing.startW + event.clientX - resizing.startX),
+    h: Math.max(SIZE_MIN, resizing.startH + event.clientY - resizing.startY),
+  })
+}
+
+function onResizeUp() {
+  resizing = null
 }
 
 /** 出现/消失动画预设分发（缺省 zoom）：入场为动态类，退场为 Transition 动态
@@ -142,6 +188,14 @@ function leaveClassOf(entry: (typeof data.value)[number]) {
       <div :class="$style.floatBody">
         <component :is="entry.component" />
       </div>
+      <!-- 壳固有调参尺寸手柄：右下角拖拽（注册声明的宽高只是初始值） -->
+      <div
+        :class="$style.resizeHandle"
+        @pointerdown="onResizeDown($event, entry.id)"
+        @pointermove="onResizeMove"
+        @pointerup="onResizeUp"
+        @pointercancel="onResizeUp"
+      />
     </div>
   </Transition>
 </template>
@@ -227,6 +281,36 @@ function leaveClassOf(entry: (typeof data.value)[number]) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* 右下角调参尺寸手柄：绝对定位盖在内容之上（默认隐形，悬停显现角线提示） */
+.resizeHandle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  z-index: 1;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.resizeHandle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--mx-text-tertiary);
+  border-bottom: 2px solid var(--mx-text-tertiary);
+  border-bottom-right-radius: 2px;
+  opacity: 0;
+  transition: opacity var(--mx-duration-fast) linear;
+}
+
+.resizeHandle:hover::after {
+  opacity: 1;
 }
 
 /* 出现/消失动画预设（缺省 zoom）：

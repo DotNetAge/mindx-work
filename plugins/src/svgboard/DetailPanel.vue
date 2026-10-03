@@ -6,13 +6,14 @@
  * 文本（点击放置 + 浮层编辑，双击已有文本再编辑）、
  * 形状库（presets.ts 预设图形，点击放置到画布视口中心）。
  * 操作：对齐六向（单选对画布、多选互对齐，视觉 bbox 由 getBoundingClientRect
- * 换算）、编组/解组（单层展平语义，group 不嵌套）、撤销快照栈（cap 50）、
+ * 换算）、编组/解组（单层展平语义，group 不嵌套）、撤销快照栈（cap 50，实体随 store）、
  * Delete 删除、⌘S 保存。拖动为帧增量 merge（多选整体位移不叠加膨胀）。
  * 文件：store.open 读回的 SVG 递归导入（g → group；非 translate 变换丢弃，
  * 首版边界）；保存由 store.save 落盘（fs.write 覆盖写 / 新画板系统对话框）。
  * 坐标换算：viewBox meet 模式居中补偿（getBoundingClientRect + 比例换算）。
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { MxIcon } from '@mindx-work/ui-shell-vue'
 import { useSvgboardStore } from './store'
@@ -20,9 +21,8 @@ import { PRESET_CATEGORIES, SHAPE_PRESETS, previewMarkup } from './presets'
 import type { ShapePreset } from './presets'
 import type { BoardShape, Tool, View } from './types'
 import { createViewport, scaleOf, unionView } from './viewport'
-import { applyResize, mergeTranslate, parseTranslate, shapeBBox } from './shapes-geometry'
+import { applyResize, escapeXml as esc, mergeTranslate, parseTranslate, round1 as round, shapeBBox } from './shapes-geometry'
 import type { BBox } from './shapes-geometry'
-import { createShapeHistory } from './history'
 import { copySelection, hasClip, paste } from './clipboard'
 import { exportPng } from './exportPng'
 import { STICKY_COLORS, createSticky, stickyRectAttrs, stickyTextAttrs } from './sticky'
@@ -33,14 +33,10 @@ import Minimap from './Minimap.vue'
 
 const store = useSvgboardStore()
 
-/** 文档逻辑边界：序列化基准（新建默认，导入取原文档，缩放平移永不改它） */
-const docBox = ref<View>({ x: 0, y: 0, w: 1000, h: 700 })
-/** 当前视口：滚轮/空格/抓手缩放平移只改它（初始 = 文档边界） */
-const view = ref<View>({ x: 0, y: 0, w: 1000, h: 700 })
-
-const shapes = ref<BoardShape[]>([])
-const selectedIds = ref<number[]>([])
-let nextId = 1
+// 画布核心状态在 store（切 tab 卸载组件不丢，重挂载自动恢复）：storeToRefs 解构保持响应式引用
+const { shapes, selectedIds, view, docBox, nextId } = storeToRefs(store)
+/** 撤销/重做快照栈（实体在 store，markRaw 防深包装） */
+const hist = store.hist
 
 // ── 工具态 ───────────────────────────────────────────────────────────────────
 const tool = ref<Tool>('select')
@@ -96,12 +92,23 @@ let erasing = false
 let eraserSnapped = false
 let eraserRemoved = false
 
-/** 文本编辑浮层（panel 相对定位的 client 坐标） */
-const editBox = ref<{ id: number; value: string; x: number; y: number; isNew: boolean } | null>(null)
+/** 拖动类手势进行中（拖动/拉伸/擦除）：帧级 attrs 变更跳过内容框重算，
+ * up 收口时一次性重算（deep watch 每帧全树遍历的节流） */
+let dragMutating = false
+
+/** 文本编辑浮层（panel 相对定位；anchor = svg 锚点供视口变化时重算跟随，off = panel 偏移） */
+const editBox = ref<{
+  id: number
+  value: string
+  x: number
+  y: number
+  anchor: { x: number; y: number }
+  off: { x: number; y: number }
+  isNew: boolean
+} | null>(null)
 const editInput = ref<HTMLInputElement | null>(null)
 
-// ── 撤销/重做（双向快照栈由 history 模块承担）───────────────────────────────
-const hist = createShapeHistory(shapes)
+// ── 撤销/重做（快照栈实体在 store，结构见 history.ts）───────────────────────
 
 /** 快照入口（调用点保持不变） */
 function snapshot(): void {
@@ -138,11 +145,6 @@ const zoomPercent = computed(() => {
   return Math.round(scaleOf(canvasEl.value.getBoundingClientRect(), view.value).scale * 100)
 })
 
-/** 坐标数值取整（落盘干净） */
-function round(n: number): number {
-  return Math.round(n * 10) / 10
-}
-
 function shapeAttrs(): Record<string, string> {
   return {
     stroke: stroke.value,
@@ -165,7 +167,7 @@ function hitShapeAt(x: number, y: number, connectableOnly = false): Element | nu
     if (!canvasEl.value.contains(el)) continue
     const hit = el.closest('[data-shape-id]')
     if (!hit) continue
-    const shape = shapes.value.find((s) => s.id === Number(hit.getAttribute('data-shape-id')))
+    const shape = shapeById(Number(hit.getAttribute('data-shape-id')))
     if (connectableOnly && !connectable(shape)) continue
     return hit
   }
@@ -178,7 +180,7 @@ function snapAnchor(e: PointerEvent, ref?: { x: number; y: number }): { id: numb
   const hit = hitShapeAt(e.clientX, e.clientY, true)
   if (!hit) return null
   const id = Number(hit.getAttribute('data-shape-id'))
-  const shape = shapes.value.find((s) => s.id === id)
+  const shape = shapeById(id)
   const b = shape ? shapeBBox(shape) : null
   if (!b) return null
   return { id, pt: nearestMid(edgeMids(b), ref ?? svgPoint(e)) }
@@ -261,12 +263,12 @@ function onPointerDown(e: PointerEvent): void {
   if (tool.value === 'text') {
     // 阻止 mousedown 默认行为抢焦点：否则编辑框刚聚焦就被 blur 空提交删除
     e.preventDefault()
-    placeText(p, { x: e.clientX, y: e.clientY })
+    placeText(p)
     return
   }
   if (tool.value === 'sticky') {
     e.preventDefault()
-    placeSticky(p, { x: e.clientX, y: e.clientY })
+    placeSticky(p)
     return
   }
   if (tool.value === 'spline') {
@@ -276,7 +278,7 @@ function onPointerDown(e: PointerEvent): void {
     const snap = snapAnchor(e)
     const start = snap?.pt || p
     draft.value = {
-      id: nextId++,
+      id: nextId.value++,
       kind: 'line',
       attrs: {
         ...shapeAttrs(),
@@ -295,13 +297,13 @@ function onPointerDown(e: PointerEvent): void {
   pencilPoints = [`${round(p.x)} ${round(p.y)}`]
   const base = shapeAttrs()
   if (tool.value === 'rect') {
-    draft.value = { id: nextId++, kind: 'rect', attrs: { ...base, x: String(round(p.x)), y: String(round(p.y)), width: '0', height: '0' } }
+    draft.value = { id: nextId.value++, kind: 'rect', attrs: { ...base, x: String(round(p.x)), y: String(round(p.y)), width: '0', height: '0' } }
   } else if (tool.value === 'ellipse') {
-    draft.value = { id: nextId++, kind: 'ellipse', attrs: { ...base, cx: String(round(p.x)), cy: String(round(p.y)), rx: '0', ry: '0' } }
+    draft.value = { id: nextId.value++, kind: 'ellipse', attrs: { ...base, cx: String(round(p.x)), cy: String(round(p.y)), rx: '0', ry: '0' } }
   } else if (tool.value === 'line') {
-    draft.value = { id: nextId++, kind: 'line', attrs: { ...base, x1: String(round(p.x)), y1: String(round(p.y)), x2: String(round(p.x)), y2: String(round(p.y)) } }
+    draft.value = { id: nextId.value++, kind: 'line', attrs: { ...base, x1: String(round(p.x)), y1: String(round(p.y)), x2: String(round(p.x)), y2: String(round(p.y)) } }
   } else {
-    draft.value = { id: nextId++, kind: 'path', attrs: { ...base, d: `M ${pencilPoints[0]}` } }
+    draft.value = { id: nextId.value++, kind: 'path', attrs: { ...base, d: `M ${pencilPoints[0]}` } }
   }
 }
 
@@ -317,7 +319,7 @@ function commitPolygon(): void {
   if (dedup.length < 3) return
   snapshot()
   const shape: BoardShape = {
-    id: nextId++,
+    id: nextId.value++,
     kind: 'polygon',
     attrs: { ...shapeAttrs(), points: dedup.map((pt) => `${round(pt.x)} ${round(pt.y)}`).join(' ') },
   }
@@ -337,15 +339,17 @@ function onPointerMove(e: PointerEvent): void {
   }
   // 橡皮擦拖擦：命中的图形持续删除
   if (erasing) {
+    dragMutating = true
     eraseAt(e)
     return
   }
   // resize 手势：端点柄直写端点；bbox 柄从起点快照还原后按新 bbox 重算
   if (resizeGesture) {
+    dragMutating = true
     const g = resizeGesture
     const p = svgPoint(e)
     if (!g.moved && (p.x !== g.startP.x || p.y !== g.startP.y)) g.moved = true
-    const shape = shapes.value.find((s) => s.id === g.id)
+    const shape = shapeById(g.id)
     if (!shape) return
     if (g.handle === 'p1' || g.handle === 'p2') {
       // 端点柄：新视觉位置 − translate 直接写端点 attrs；手拖端点脱离该端连接
@@ -393,8 +397,9 @@ function onPointerMove(e: PointerEvent): void {
       const dy = (e.clientY - lastDrag.y) / vp.currentScale()
       lastDrag = { x: e.clientX, y: e.clientY }
       if (dx || dy) {
+        dragMutating = true
         for (const id of selectedIds.value) {
-          const shape = shapes.value.find((s) => s.id === id)
+          const shape = shapeById(id)
           if (shape) mergeTranslate(shape, dx, dy)
         }
         updateConns(shapes.value, new Set(selectedIds.value))
@@ -456,6 +461,11 @@ function onPointerMove(e: PointerEvent): void {
 
 function onPointerUp(): void {
   panLast = null
+  // 拖动类手势收口：内容框一次性重算（拖动帧已跳过；up 阶段不再改 shapes）
+  if (dragMutating) {
+    dragMutating = false
+    updateContentBox()
+  }
   // resize 收口：零位移回滚本手势快照
   if (resizeGesture) {
     const moved = resizeGesture.moved
@@ -514,10 +524,10 @@ function onPointerUp(): void {
 // ── 文本 ─────────────────────────────────────────────────────────────────────
 
 /** 点击画布放置文本（默认内容，立即进入浮层编辑） */
-function placeText(p: { x: number; y: number }, client: { x: number; y: number }): void {
+function placeText(p: { x: number; y: number }): void {
   snapshot()
   const shape: BoardShape = {
-    id: nextId++,
+    id: nextId.value++,
     kind: 'text',
     attrs: {
       x: String(round(p.x)),
@@ -531,38 +541,48 @@ function placeText(p: { x: number; y: number }, client: { x: number; y: number }
   shapes.value = [...shapes.value, shape]
   selectedIds.value = [shape.id]
   store.dirty = true
-  startEdit(shape, { x: client.x, y: client.y }, true)
+  startEdit(shape, p, { x: 0, y: 0 }, true)
 }
 
 /** 便签当前色（放置用；ctxBar 换色同步，连续放置同色） */
 const stickyColor = ref(STICKY_COLORS[0]!)
 
 /** 点击画布放置便签（中心落点击点，立即进入浮层编辑） */
-function placeSticky(p: { x: number; y: number }, client: { x: number; y: number }): void {
+function placeSticky(p: { x: number; y: number }): void {
   snapshot()
-  const shape = createSticky(nextId++, p.x, p.y, stickyColor.value)
+  const shape = createSticky(nextId.value++, p.x, p.y, stickyColor.value)
   shapes.value = [...shapes.value, shape]
   selectedIds.value = [shape.id]
   store.dirty = true
   // 编辑浮层定位到便签左上角（覆盖便签上部，对齐便签文本位置）
-  const left = vp.clientFromSvg({ x: Number(shape.attrs.x), y: Number(shape.attrs.y) })
-  startEdit(shape, { x: left.x + 4, y: left.y + 10 }, true)
+  startEdit(shape, { x: Number(shape.attrs.x), y: Number(shape.attrs.y) }, { x: 4, y: 10 }, true)
 }
 
-/** 浮层定位（panel 相对坐标；已有文本用其 DOM bbox 左上角） */
-function startEdit(shape: BoardShape, client: { x: number; y: number }, isNew: boolean): void {
+/** 浮层定位：anchor 为 svg 锚点（视口变化时按此重算跟随），off 为 panel 偏移。
+ * 已有图形（非新放置）anchor 传 null，取其视觉 bbox 左上角作锚点。 */
+function startEdit(
+  shape: BoardShape,
+  anchor: { x: number; y: number } | null,
+  off: { x: number; y: number },
+  isNew: boolean
+): void {
   const panelBox = panelEl.value!.getBoundingClientRect()
-  let x = client.x - panelBox.left
-  let y = client.y - panelBox.top
+  let a = anchor
   if (!isNew) {
-    const el = canvasEl.value?.querySelector(`[data-shape-id="${shape.id}"]`)
-    if (el) {
-      const r = el.getBoundingClientRect()
-      x = r.left - panelBox.left
-      y = r.top - panelBox.top
-    }
+    const b = visualBBox(shape.id)
+    a = b ? { x: b.left, y: b.top } : null
   }
-  editBox.value = { id: shape.id, value: shape.text || '', x, y, isNew }
+  if (!a || !panelBox) return
+  const c = vp.clientFromSvg(a)
+  editBox.value = {
+    id: shape.id,
+    value: shape.text || '',
+    x: c.x - panelBox.left + off.x,
+    y: c.y - panelBox.top + off.y,
+    anchor: a,
+    off,
+    isNew,
+  }
   void nextTick(() => editInput.value?.focus())
 }
 
@@ -570,12 +590,15 @@ function confirmEdit(): void {
   const eb = editBox.value
   if (!eb) return
   editBox.value = null
-  const shape = shapes.value.find((s) => s.id === eb.id)
+  const shape = shapeById(eb.id)
   if (!shape) return
   const value = eb.value.trim()
   if (!value) {
-    // 空文本：新放置的删除，已有文本保持原内容
-    if (eb.isNew) shapes.value = shapes.value.filter((s) => s.id !== eb.id)
+    // 空文本：新放置的删除并回滚放置前快照（已有文本保持原内容，撤销栈不动）
+    if (eb.isNew) {
+      shapes.value = shapes.value.filter((s) => s.id !== eb.id)
+      hist.cancelLastSnapshot()
+    }
     return
   }
   snapshot()
@@ -587,7 +610,11 @@ function cancelEdit(): void {
   const eb = editBox.value
   if (!eb) return
   editBox.value = null
-  if (eb.isNew) shapes.value = shapes.value.filter((s) => s.id !== eb.id)
+  if (eb.isNew) {
+    shapes.value = shapes.value.filter((s) => s.id !== eb.id)
+    // 取消编辑：回滚放置前快照（栈内不留已删除图形的历史）
+    hist.cancelLastSnapshot()
+  }
 }
 
 /** 双击：多边形工具下闭合收口，其余命中文本进入编辑 */
@@ -598,8 +625,8 @@ function onDblclick(e: MouseEvent): void {
   }
   const hit = hitShapeAt(e.clientX, e.clientY)
   if (!hit) return
-  const shape = shapes.value.find((s) => s.id === Number(hit.getAttribute('data-shape-id')))
-  if (shape?.kind === 'text' || shape?.kind === 'sticky') startEdit(shape, { x: e.clientX, y: e.clientY }, false)
+  const shape = shapeById(Number(hit.getAttribute('data-shape-id')))
+  if (shape?.kind === 'text' || shape?.kind === 'sticky') startEdit(shape, null, { x: 0, y: 0 }, false)
 }
 
 // ── 对齐 / 编组 / 删除 ───────────────────────────────────────────────────────
@@ -635,7 +662,7 @@ function align(mode: AlignMode): void {
       : mode === 'vcenter' ? (base.top + base.bottom) / 2 - (b!.top + b!.bottom) / 2
       : mode === 'bottom' ? base.bottom - b!.bottom
       : 0
-    const shape = shapes.value.find((s) => s.id === id)
+    const shape = shapeById(id)
     if (shape) mergeTranslate(shape, dx, dy)
   }
   updateConns(shapes.value, new Set(ids))
@@ -649,7 +676,7 @@ function groupSelected(): void {
   const members = shapes.value.filter((s) => selectedIds.value.includes(s.id))
   const children = members.flatMap((m) => (m.kind === 'group' ? m.children || [] : [m]))
   const rest = shapes.value.filter((s) => !selectedIds.value.includes(s.id))
-  const group: BoardShape = { id: nextId++, kind: 'group', attrs: {}, children }
+  const group: BoardShape = { id: nextId.value++, kind: 'group', attrs: {}, children }
   shapes.value = [...rest, group]
   // 成员被吞入 group：引用成员的连接线悬空脱离（首版不做迁移）
   updateConns(shapes.value, new Set())
@@ -694,7 +721,7 @@ function eraseAt(e: PointerEvent): void {
   const hit = hitShapeAt(e.clientX, e.clientY)
   if (!hit) return
   const id = Number(hit.getAttribute('data-shape-id'))
-  if (!shapes.value.some((s) => s.id === id)) return
+  if (!shapeById(id)) return
   if (!eraserSnapped) {
     snapshot()
     eraserSnapped = true
@@ -741,9 +768,14 @@ function reorderSelected(mode: ReorderMode): void {
 
 // ── 剪贴板 / 方向键微移 ─────────────────────────────────────────────────────
 
-/** 粘贴：剪贴板内容 id 重分配后追加并选中（粘贴件整体偏移，连接线端点随吸附重算） */
+/** 粘贴：剪贴板内容 id 重分配后追加并选中（粘贴件整体偏移，连接线端点随吸附重算）。
+ * 来源指纹不符（跨画板）丢弃并提示。 */
 function doPaste(): void {
-  const pasted = paste(() => nextId++)
+  const pasted = paste(() => nextId.value++, store.boardKey)
+  if (pasted === null) {
+    ElMessage.warning('剪贴板内容来自其他画板，已丢弃')
+    return
+  }
   if (!pasted.length) return
   snapshot()
   shapes.value = [...shapes.value, ...pasted]
@@ -755,7 +787,7 @@ function doPaste(): void {
 /** 再制：复制当前选中并立即粘贴（偏移错位） */
 function doDuplicate(): void {
   if (!selectedIds.value.length) return
-  if (!copySelection(shapes.value, selectedIds.value)) return
+  if (!copySelection(shapes.value, selectedIds.value, store.boardKey)) return
   doPaste()
 }
 
@@ -773,7 +805,7 @@ function arrowMove(dx: number, dy: number): void {
     arrowSnapped = false
   }, 500)
   for (const id of selectedIds.value) {
-    const s = shapes.value.find((x) => x.id === id)
+    const s = shapeById(id)
     if (s) mergeTranslate(s, dx, dy)
   }
   updateConns(shapes.value, new Set(selectedIds.value))
@@ -822,7 +854,7 @@ function onKeydown(e: KeyboardEvent): void {
     selectedIds.value = shapes.value.map((s) => s.id)
   } else if (mod && key === 'c') {
     // 应用内复制（有选中才拦截，否则放行系统剪贴板）
-    if (copySelection(shapes.value, selectedIds.value)) e.preventDefault()
+    if (copySelection(shapes.value, selectedIds.value, store.boardKey)) e.preventDefault()
   } else if (mod && key === 'v') {
     if (hasClip()) {
       e.preventDefault()
@@ -873,9 +905,13 @@ function onKeyup(e: KeyboardEvent): void {
   if (e.code === 'Space') spaceDown.value = false
 }
 
-/** 滚轮缩放：以鼠标位置为锚点（触摸板 pinch 合成 ctrlKey 同路径） */
+/** 滚轮：ctrl/meta（触摸板捏合）→ 锚点缩放；普通滚动 → 平移（内容随手势方向走） */
 function onWheel(e: WheelEvent): void {
-  vp.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015))
+  if (e.ctrlKey || e.metaKey) {
+    vp.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015))
+  } else {
+    vp.panBy(e.deltaX, e.deltaY)
+  }
 }
 
 /** 适应内容：视口设为内容 ∪ 文档（外扩 10%） */
@@ -899,8 +935,23 @@ function updateContentBox(): void {
   contentBox.value = u
 }
 
-// 不读 DOM，无需 flush post；deep 跟随拖动/缩放等 attrs 变化
-watch(shapes, updateContentBox, { deep: true })
+/** id→图形索引：数组引用变化时全量重建（原地 attrs 变更不换引用，无需重建） */
+const shapeIndex = new Map<number, BoardShape>()
+
+function rebuildShapeIndex(): void {
+  shapeIndex.clear()
+  for (const s of shapes.value) shapeIndex.set(s.id, s)
+}
+
+/** 按 id 取顶层图形（替代 find 线性扫描） */
+function shapeById(id: number): BoardShape | null {
+  return shapeIndex.get(id) ?? null
+}
+
+// 不读 DOM，无需 flush post；deep 跟随 attrs 变化，拖动帧由 dragMutating 跳过、收口重算。
+// immediate：状态上移 store 后重挂载需恢复内容框
+watch(shapes, updateContentBox, { deep: true, immediate: true })
+watch(shapes, rebuildShapeIndex, { immediate: true })
 
 /** 小地图导航：视口中心移到指定 svg 坐标 */
 function onMinimapNavigate(p: { x: number; y: number }): void {
@@ -912,11 +963,15 @@ onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('keyup', onKeyup)
   store.serializer = () => serialize()
+  // 状态上移 store：重挂载后按恢复的选中态重定位属性工具栏
+  updateCtxBar()
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('keyup', onKeyup)
   store.serializer = null
+  // 方向键微移的快照合并计时器（防卸载后触发）
+  if (arrowSnapTimer) clearTimeout(arrowSnapTimer)
 })
 
 // 切换工具时收口进行中的多边形（<3 点静默丢弃）
@@ -925,10 +980,6 @@ watch(tool, () => {
 })
 
 // ── 序列化 / 导入 ────────────────────────────────────────────────────────────
-
-function esc(v: string): string {
-  return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
 
 function attrString(attrs: Record<string, string>): string {
   return Object.entries(attrs)
@@ -985,17 +1036,32 @@ function registerId(rawId: number, newId: number, idMap: Map<number, number>): v
   if (Number.isFinite(rawId) && rawId > 0) idMap.set(rawId, newId)
 }
 
+/** 收集元素属性并剥离危险项（导入外部 SVG 的注入面）：
+ * on\* 内联事件（setAttribute 后即生效的内联脚本）一律丢；srcdoc 承载任意
+ * HTML 一律丢；href/xlink:href 取 javascript: 伪协议值丢。黑名单最小化，
+ * 不做白名单以免破坏合法 SVG 特性。 */
+function collectAttrs(el: Element): Record<string, string> {
+  const attrs: Record<string, string> = {}
+  for (const name of el.getAttributeNames()) {
+    const value = el.getAttribute(name) || ''
+    if (/^on/i.test(name)) continue
+    if (/^srcdoc$/i.test(name)) continue
+    if (/^(href|xlink:href)$/i.test(name) && /^\s*javascript:/i.test(value)) continue
+    attrs[name] = value
+  }
+  return attrs
+}
+
 /** SVG 文本导入：递归解析（g → 单层 group；text 取 textContent；idMap 登记原始→新 id） */
 function importNode(el: Element, idMap: Map<number, number>): BoardShape | null {
   const kind = el.tagName
-  const base: BoardShape = { id: nextId++, kind: 'path', attrs: {}, text: undefined, children: undefined }
+  const base: BoardShape = { id: nextId.value++, kind: 'path', attrs: {}, text: undefined, children: undefined }
   if (kind === 'g') {
     // 便签语义标记：rect 承载几何，text 承载内容（标记存在但无 rect 时退化为普通 group）
     if (el.getAttribute('data-svgboard') === 'sticky') {
       const rect = el.querySelector('rect')
       if (rect) {
-        const attrs: Record<string, string> = {}
-        for (const name of rect.getAttributeNames()) attrs[name] = rect.getAttribute(name) || ''
+        const attrs = collectAttrs(rect)
         const t = translateOnly(el.getAttribute('transform'))
         if (t) attrs.transform = t
         registerId(Number(el.getAttribute('data-shape-id')), base.id, idMap)
@@ -1011,8 +1077,7 @@ function importNode(el: Element, idMap: Map<number, number>): BoardShape | null 
     registerId(Number(el.getAttribute('data-shape-id')), g.id, idMap)
     return g
   }
-  const attrs: Record<string, string> = {}
-  for (const name of el.getAttributeNames()) attrs[name] = el.getAttribute(name) || ''
+  const attrs = collectAttrs(el)
   // 自绘白底 rect（serialize 注入）不属于图形内容
   if (kind === 'rect' && attrs.id === 'svgboard-bg') return null
   // 内部标记不进图形 attrs：data-shape-id 由渲染模板注入，conn 引用走顶层字段
@@ -1079,23 +1144,27 @@ function rewriteConns(s: BoardShape, idMap: Map<number, number>): void {
   for (const c of s.children || []) rewriteConns(c, idMap)
 }
 
-function importSvg(text: string): boolean {
+/** SVG 文本导入：成功返回 null，失败返回可读错误消息。
+ * viewBox 缺失时回退 width/height 属性（非法值兜底默认），尺寸非正数拒绝导入。 */
+function importSvg(text: string): string | null {
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
-  if (doc.querySelector('parsererror')) return false
+  if (doc.querySelector('parsererror')) return 'SVG 解析失败，已打开空白画板'
   const root = doc.documentElement
   const vbAttr = root.getAttribute('viewBox')
+  let box: View
   if (vbAttr) {
     const n = vbAttr.trim().split(/[\s,]+/).map(Number)
-    if (n.length === 4 && n.every((x) => Number.isFinite(x))) {
-      docBox.value = { x: n[0]!, y: n[1]!, w: n[2]!, h: n[3]! }
-    }
+    if (n.length !== 4 || !n.every((x) => Number.isFinite(x))) return 'SVG viewBox 格式无效，已打开空白画板'
+    if (!(n[2]! > 0) || !(n[3]! > 0)) return 'SVG viewBox 尺寸无效，已打开空白画板'
+    box = { x: n[0]!, y: n[1]!, w: n[2]!, h: n[3]! }
   } else {
-    const w = Number(root.getAttribute('width')) || 1000
-    const h = Number(root.getAttribute('height')) || 700
-    docBox.value = { x: 0, y: 0, w, h }
+    const w = Number(root.getAttribute('width'))
+    const h = Number(root.getAttribute('height'))
+    box = { x: 0, y: 0, w: w > 0 ? w : 1000, h: h > 0 ? h : 700 }
   }
+  docBox.value = box
   // 导入后视口重置到文档边界（新会话从全貌开始）
-  view.value = { ...docBox.value }
+  view.value = { ...box }
   const idMap = new Map<number, number>()
   const collected: BoardShape[] = []
   for (const child of Array.from(root.children)) {
@@ -1105,22 +1174,23 @@ function importSvg(text: string): boolean {
   // 连接引用按原始 id 映射重写（悬空脱离为自由线）
   for (const s of collected) rewriteConns(s, idMap)
   shapes.value = collected
-  return true
+  return null
 }
 
 // ── store 接线：打开交接 / 保存 ──────────────────────────────────────────────
 
+// immediate：面板未挂载时 open 已写入 pendingText，挂载即消费（避免丢打开内容）
 watch(
   () => store.pendingText,
   (text) => {
     if (!text) return
     store.pendingText = ''
-    nextId = 1
-    hist.clear()
-    selectedIds.value = []
+    store.resetBoard()
     editBox.value = null
-    if (!importSvg(text)) ElMessage.warning('SVG 解析失败，已打开空白画板')
-  }
+    const err = importSvg(text)
+    if (err) ElMessage.warning(err)
+  },
+  { immediate: true }
 )
 
 async function save(): Promise<void> {
@@ -1134,6 +1204,7 @@ async function exportPngAction(): Promise<void> {
     const dataUrl = await exportPng(serialize(), docBox.value)
     const ok = await store.savePng(dataUrl)
     if (ok) ElMessage.success('已导出 PNG')
+    else if (store.error) ElMessage.error(store.error)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '导出失败')
   }
@@ -1207,10 +1278,10 @@ function placePreset(p: ShapePreset): void {
   const built = p.build(style)
   let shape: BoardShape
   if (Array.isArray(built)) {
-    const children = built.map((el) => ({ id: nextId++, kind: el.kind, attrs: { ...style, ...el.attrs } }) as BoardShape)
-    shape = { id: nextId++, kind: 'group', attrs: { transform: `translate(${tx} ${ty})` }, children }
+    const children = built.map((el) => ({ id: nextId.value++, kind: el.kind, attrs: { ...style, ...el.attrs } }) as BoardShape)
+    shape = { id: nextId.value++, kind: 'group', attrs: { transform: `translate(${tx} ${ty})` }, children }
   } else {
-    shape = { id: nextId++, kind: built.kind, attrs: { ...style, ...built.attrs, transform: `translate(${tx} ${ty})` } }
+    shape = { id: nextId.value++, kind: built.kind, attrs: { ...style, ...built.attrs, transform: `translate(${tx} ${ty})` } }
   }
   shapes.value = [...shapes.value, shape]
   selectedIds.value = [shape.id]
@@ -1237,8 +1308,9 @@ const CHANGEABLE_PRESETS = SHAPE_PRESETS.filter((p) => {
 const ctxShape = computed(() => selectedShape())
 
 function selectedShape(): BoardShape | null {
-  if (selectedIds.value.length !== 1) return null
-  return shapes.value.find((s) => s.id === selectedIds.value[0]) || null
+  const id = selectedIds.value[0]
+  if (selectedIds.value.length !== 1 || id === undefined) return null
+  return shapeById(id) || null
 }
 
 /** 选区视觉 bbox 中心 → panel 相对坐标（工具栏悬挂点）；顺带维护 selBox */
@@ -1272,6 +1344,19 @@ watch(
   (v) => {
     if (v) ctxBar.value = null
     else updateCtxBar()
+  },
+  { flush: 'post' }
+)
+// 编辑中视口变化：浮层按 svg 锚点重算位置跟随（flush post 确保读到新布局）
+watch(
+  view,
+  () => {
+    const eb = editBox.value
+    if (!eb || !panelEl.value) return
+    const c = vp.clientFromSvg(eb.anchor)
+    const panelBox = panelEl.value.getBoundingClientRect()
+    eb.x = c.x - panelBox.left + eb.off.x
+    eb.y = c.y - panelBox.top + eb.off.y
   },
   { flush: 'post' }
 )
@@ -1489,7 +1574,7 @@ function changeShape(p: ShapePreset): void {
         <button
           type="button"
           :class="$style.toolBtn"
-          :disabled="!selectedIds.some((id) => shapes.find((s) => s.id === id)?.kind === 'group')"
+          :disabled="!selectedIds.some((id) => shapeById(id)?.kind === 'group')"
           aria-label="解组"
           title="解组 (⇧⌘G)"
           @click="ungroupSelected"

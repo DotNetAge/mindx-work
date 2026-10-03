@@ -85,18 +85,45 @@ interface ContentViewApi<C> {
 tab 归属解决多插件共存，轨道解决 Content 让位。
 
 ```ts
+type DetailEntry<C> = Entry<C> & {
+  title: string
+  icon?: Glyph
+  /** 层归属：指向 Content 条目 id——该插件激活时轨道联动切换到此层；
+   * 省略 = 独立唤起层（仅经 Detail.show 唤起） */
+  owner?: string
+  /** 是否呈现壳固有默认工具组（全屏/隐藏/关闭三按钮）：缺省 true；
+   * 插件自带 DetailToolbar 按钮组时可关 */
+  defaultTools?: boolean
+  /** 声明式满宽：该条目激活拉出轨道时宽度默认取当前上限（用户仍可拖窄） */
+  openMax?: boolean
+  /** 声明式理想宽（px）：激活时轨道取此值（clamp 到拖拽边界）；
+   * 宽度仲裁优先级 openMax > preferredWidth > 壳缺省——"激活谁用谁的宽" */
+  preferredWidth?: number
+}
+
 interface DetailViewApi<C> {
-  add(entry: DetailEntry<C>): void    // DetailEntry = Entry & { title: string; icon?: Glyph }
+  add(entry: DetailEntry<C>): void
   remove(id: string): void
   has(id: string): boolean
   readonly entries: readonly DetailEntry<C>[]
   readonly shown: boolean
   readonly activeTabId: string | null
-  show(id?: string): void             // 编程开合，缺省激活首个 tab；条目不存在抛错
+  show(id?: string): void             // 编程开合，缺省激活首个 tab；激活即隐式切换（无 Tab 组件）
   hide(): void
-  setActiveTab(id: string): void      // 仅供壳的 tab 点击调用；条目不存在抛错
+  setActiveTab(id: string): void      // 编程式激活条目的唯一通道；条目不存在抛错
+  popActiveTab(): void                // 关闭当前层：退到激活历史上一不同条目，无则收起轨道
+  addToolbar(entry: DetailToolbarEntry<C>): void  // 见下
+  removeToolbar(id: string): void
+  hasToolbar(id: string): boolean
+  readonly toolbarEntries: readonly DetailToolbarEntry<C>[]
 }
+
+/** DetailToolbar 尾段按钮组：owner 必填且归属 Detail 条目——每条目一套，
+ * 仅归属条目激活时呈现（先 Detail.add 条目再 addToolbar，归属不存在启动期抛错） */
+type DetailToolbarEntry<C> = Entry<C> & { owner: string }
 ```
+
+owner 归属语义（实证：video-editor / gitgraph 的保存导出与刷新按钮组）：按钮组按条目私有，激活谁显示谁的，条目 remove 时级联移除；`defaultTools: false` 供自带按钮组的条目关掉壳固有工具组。
 
 ## 6. Overlay — 全局浮层
 
@@ -136,7 +163,7 @@ interface SheetViewApi<C> {
 
 ## 6.2 Floater — 可拖动浮窗
 
-无阻塞浮动件：风格与主窗浮层族一致（elevated 底 / window 圆角 / shadow-lv3 锐利边界），**无传统 titlebar**——头部为细带，左侧模拟 macOS 交通灯（仅红灯，点击关闭，`--mx-traffic-light-close` token）+ 注册者标题小字；按住头部拖动（pointer capture），clamp 保证头部始终可抓取。
+无阻塞浮动件：风格与主窗浮层族一致（elevated 底 / window 圆角 / shadow-lv3 锐利边界），**无传统 titlebar**——头部为细带，左侧模拟 macOS 交通灯（仅红灯，点击关闭，`--mx-traffic-light-close` token）+ 注册者标题小字；按住头部拖动（pointer capture），clamp 保证头部始终可抓取；右下角手柄可拖拽调节尺寸（最小 240×240），注册声明的 `width` / `height` 只是初始值，用户调整由壳本地持有。
 
 ```ts
 interface FloaterViewApi<C> {
@@ -149,7 +176,7 @@ interface FloaterViewApi<C> {
 
 - **允许多开**（不互斥）：每个条目独立成窗；点击任意浮窗将其置顶（同层 DOM 顺序）。
 - 无遮罩不阻塞、不抢 Esc；关闭通道 = 红灯 / 注册者自行 `remove`。
-- 条目缺 `title` 抛错（零文案壳）；`width` / `height` 可选（px，缺省 360×480 适配层本地常量）。
+- 条目缺 `title` 抛错（零文案壳）；`width` / `height` 可选（px，缺省 360×480 适配层本地常量），语义是**初始尺寸**——用户可经右下角手柄拖拽调节（min 240×240），插件不得假设浮窗尺寸恒定。
 - `animation` 出现/消失动画预设（缺省 `'zoom'` 放大出现、缩小消失，对齐对话框 Apple 动画参数 scale 0.82 + 标准曲线）；`'fade'` 纯淡入淡出；`'none'` 无动画（瞬时出现/消失）；非法值抛错。
 - 位置归适配层本地状态（刷新重置；持久化为契约开放点）。
 - 条目 component 只写本体内容排版；头部（红灯 + 标题）由壳容器提供，禁止自绘头部。
@@ -158,10 +185,17 @@ interface FloaterViewApi<C> {
 
 ```ts
 interface ToolbarViewApi<C> {
-  add(entry: Entry<C> & { slot: 'leading' | 'trailing' }): void  // slot 非法抛错
+  add(entry: ToolbarEntry<C>): void   // slot 非法抛错
   remove(id: string): void
   has(id: string): boolean
   readonly entries: readonly ToolbarEntry<C>[]
+}
+
+type ToolbarEntry<C> = Entry<C> & {
+  slot: 'leading' | 'trailing'
+  /** 层归属：指向 Content 条目 id——仅该条目激活时呈现（对齐 DetailToolbar）；
+   * 省略 = 全局层（恒显，如文件夹/浏览器/终端图标） */
+  owner?: string
 }
 ```
 
@@ -190,6 +224,25 @@ interface PreferencesApi<C> {
 - 壳自带"通用"页（id 为 `general`），承接未指定 `page` 的行；该页不可移除，齿轮图标（`lucide:settings`）为其固有视觉。
 - 行的 `page` 指向不存在的页 → 启动期校验抛错。
 
+## 8.5 文件类型接管（fileTypes）
+
+**「针对特定文件类型的查看器 / 解释器插件」的注册通道**：插件装配期声明自己接管的扩展名 → 打开服务名；路由方（explorer 文件树、chatflow file_open）按注册表分派，路由代码零改动。渲染无关，同 services 通道的插件间共享性质。
+
+```ts
+interface FileTypesContext {
+  /** 注册接管扩展名（ext 归一小写；同一 ext 重复注册 = 编程错误，抛出）；
+   * 返回摘除函数（插件停用清理时调用） */
+  register(exts: readonly string[], serviceId: string): () => void
+  /** 查扩展名对应的服务名（未接管返回 undefined） */
+  serviceOf(ext: string): string | undefined
+}
+```
+
+- **注册在插件内**（`ctx.fileTypes.register(['md', 'markdown'], 'markdown.store')`），不在壳配置——壳只提供通道；ext 不带点（`'svg'` 不是 `'.svg'`），归一小写。
+- 未接管扩展名一律 codeeditor 兜底，无需注册「文本类」扩展名。
+- market 插件装入即注册、停用即摘除（清理函数语义，军规 8）；重复注册装配期抛错。
+- 实证消费方：markdown（md/markdown）、svgboard（svg）、image-viewer / video-viewer / docpreview（按后缀集合）、video-editor（vedit）、dashboard（dash）——服务名即插件 provide 的 store 服务，路由方解引用后调其打开 action。
+
 ## 9. AppShell 总面
 
 ```ts
@@ -202,6 +255,7 @@ interface AppShell<C> {
   readonly Floater: FloaterViewApi<C>
   readonly Toolbar: ToolbarViewApi<C>
   readonly Settings: PreferencesApi<C>
+  readonly fileTypes: FileTypesContext  // 文件类型接管（§8.5）
   readonly services: ServiceContext
   readonly version: number            // 结构版本：任何条目 / 机制状态变更后递增
   subscribe(listener: () => void): Unsubscribe
@@ -235,10 +289,10 @@ interface ServiceContext {
 
 跨插件联动只有两种合法形态，按语义选型：
 
-| 形态 | 适用语义 | 实现 |
-| --- | --- | --- |
+| 形态            | 适用语义                                   | 实现                                                                                                                                        |
+| --------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A. 命令调用** | 消费方对提供方有明确意图（打开/聚焦/执行） | `useService('xx.store').store` 调 store 的 **action**（如 `open(path)`）；提供方在 action 内完成状态写入 + 壳编排（`shell.Detail.show` 等） |
-| **B. 状态订阅** | 无方向的同步/多播（状态变了大家都动） | 多方对**同一份 store** 各自 `computed` / `watch`；瞬时事件物化为状态迁移（布尔标志、append 记录、版本号） |
+| **B. 状态订阅** | 无方向的同步/多播（状态变了大家都动）      | 多方对**同一份 store** 各自 `computed` / `watch`；瞬时事件物化为状态迁移（布尔标志、append 记录、版本号）                                   |
 
 判断口诀：事件总线广播"发生了什么"（无契约）；MVVM 表达"要做什么"（形态 A 的命令）与"现在是什么"（形态 B 的状态）。**不存在第三种**——真需要多对多通知时，是形态 B（同一份事实记录，各方 watch），不是互发消息。
 
@@ -294,11 +348,11 @@ export function createMdViewerService(): MdViewerService {
 
 ### 10.4 内置壳服务（提供方 = app 装配层，类型定稿在 ui-shell/src/desktop-bridge.ts）
 
-| 注册名 | 本体 | 用途 |
-| --- | --- | --- |
-| `shell.theme` | `ThemeController` | 主题三档（light/dark/auto）：`mode` / `setMode` / `subscribe`；机制归壳，档位持久化也归壳（设置行零感知） |
-| `shell.preferences` | `PreferencesController` | **内置设置持久化**：`get(key, fallback)` / `set(key, value)` / `subscribe(key, cb)` / `ready`；落盘 `userData/preferences.json`（主进程原子写 + schemaVersion 代际 + 损坏容错），无宿主桥时降级仅内存。键用 `<owner>.<key>` 前缀防撞（如 `demo.font-size`）；键语义归消费方解释 |
-| `shell.market-runtime` | `MarketRuntime` | 在线插件启停控制 |
+| 注册名                 | 本体                    | 用途                                                                                                                                                                                                                                                                            |
+| ---------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shell.theme`          | `ThemeController`       | 主题三档（light/dark/auto）：`mode` / `setMode` / `subscribe`；机制归壳，档位持久化也归壳（设置行零感知）                                                                                                                                                                       |
+| `shell.preferences`    | `PreferencesController` | **内置设置持久化**：`get(key, fallback)` / `set(key, value)` / `subscribe(key, cb)` / `ready`；落盘 `userData/preferences.json`（主进程原子写 + schemaVersion 代际 + 损坏容错），无宿主桥时降级仅内存。键用 `<owner>.<key>` 前缀防撞（如 `demo.font-size`）；键语义归消费方解释 |
+| `shell.market-runtime` | `MarketRuntime`         | 在线插件启停控制                                                                                                                                                                                                                                                                |
 
 消费范式（插件设置行持久化）：
 
@@ -340,6 +394,8 @@ interface ChangeHub {
 | Sheet 形状与互斥   | 缺 `title` 抛错；已有 sheet 再 add 抛错             |
 | Floater 形状       | 缺 `title` 抛错；`animation` 非法值抛错；多开不互斥 |
 | Toolbar slot       | 非 `leading` / `trailing` 抛错                      |
+| 文件类型接管       | 同一 ext 重复注册抛错（§8.5）                       |
+| DetailToolbar 归属 | addToolbar 的 owner 条目不存在抛错（先 Detail.add） |
 | 服务               | 空名 / 重复 provide 抛错；use 未提供服务抛错        |
 
 同一组硬约束经 `validateShellConstraints`（createApp 导出）在**动态插件激活后复调**（§18.1 八区契约对动态插件完全适用）：插件注册完成即校验，违规视为激活失败——执行其清理函数回滚注册后抛错，进失败 banner。禁止只查启动期（动态注册会绕过）。
@@ -375,17 +431,17 @@ interface ChangeHub {
 
 浮层层级定稿（禁改禁猜，改动须同步本表；实证：modal 曾用 50 被设置面板 60 盖住，点击穿透到面板行区）：
 
-| 层 | z-index | 语义 |
-| --- | --- | --- |
-| Content | 5 | 基准内容层 |
-| 拖拽手柄 | 6 | Sidebar/Detail 边缘手柄，须高于 Content dragBand（实证：z-index 1 时顶部 48px 手柄条被 dragBand 盖住无法抓取） |
-| banner | 40 | 顶部通知，不阻塞交互 |
-| Settings 面板 | 60 | 全屏遮罩大面板 |
-| Sheet 抽层 | 62 | 全屏抽层，盖住设置面板（设置行内唤起 sheet 的常态），低于 banner（sheet 内动作触发的通知必须可见）与 modal（sheet 内确认框的常态） |
-| Floater 浮窗 | 55 | 无阻塞浮窗，任何浮层族之下（设置/抽层/通知/modal/menu 都盖得住），Content 基准层之上；同层叠放次序 = DOM 顺序（点击置顶） |
-| modal | 70 | 互斥阻塞层，必须高于设置面板与抽层（面板/抽层内确认 modal 的常态） |
-| menu | 100 | 下拉菜单，浮于一切常规层 |
-| toast | 1100 | 最高瞬时反馈 |
+| 层            | z-index | 语义                                                                                                                               |
+| ------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Content       | 5       | 基准内容层                                                                                                                         |
+| 拖拽手柄      | 6       | Sidebar/Detail 边缘手柄，须高于 Content dragBand（实证：z-index 1 时顶部 48px 手柄条被 dragBand 盖住无法抓取）                     |
+| banner        | 40      | 顶部通知，不阻塞交互                                                                                                               |
+| Settings 面板 | 60      | 全屏遮罩大面板                                                                                                                     |
+| Sheet 抽层    | 62      | 全屏抽层，盖住设置面板（设置行内唤起 sheet 的常态），低于 banner（sheet 内动作触发的通知必须可见）与 modal（sheet 内确认框的常态） |
+| Floater 浮窗  | 55      | 无阻塞浮窗，任何浮层族之下（设置/抽层/通知/modal/menu 都盖得住），Content 基准层之上；同层叠放次序 = DOM 顺序（点击置顶）          |
+| modal         | 70      | 互斥阻塞层，必须高于设置面板与抽层（面板/抽层内确认 modal 的常态）                                                                 |
+| menu          | 100     | 下拉菜单，浮于一切常规层                                                                                                           |
+| toast         | 1100    | 最高瞬时反馈                                                                                                                       |
 
 **Esc 分层**（随层级表联动）：Esc 只关最上层——modal 存在时先关 modal（OverlayPane **捕获期**监听 + `stopPropagation`，使设置面板的 Esc 冒泡监听不触发）；无 modal 时 Esc 关 sheet（SheetPane 捕获期监听，`defaultPrevented` 守卫 + modal 在场守卫双保险）；再无 sheet 时 Esc 关设置面板。禁止两层同时响应同一 Esc（实证坑：modal 在前时按 Esc 会同时关掉下层设置面板）。
 
@@ -406,12 +462,12 @@ interface ChangeHub {
 
 **校验只发生在系统边界**（数据从不可信一侧进入之处）：
 
-| 边界 | 校验什么 |
-| --- | --- |
-| 配置 / 用户输入 | 形状与取值范围；加载时校验并显式报错（§12 启动期校验即此原则的实例） |
-| 持久化（文件 / 存储） | 读回时校验版本与形状；未知版本拒绝，不猜测兼容 |
-| 跨进程 / 网络 | 结构与来源校验（preload 桥、任何 IPC/远程数据） |
-| 插件 service 边界 | `use(name)` 未提供即抛错（启动期暴露）；提供方的 TS 类型就是契约 |
+| 边界                  | 校验什么                                                             |
+| --------------------- | -------------------------------------------------------------------- |
+| 配置 / 用户输入       | 形状与取值范围；加载时校验并显式报错（§12 启动期校验即此原则的实例） |
+| 持久化（文件 / 存储） | 读回时校验版本与形状；未知版本拒绝，不猜测兼容                       |
+| 跨进程 / 网络         | 结构与来源校验（preload 桥、任何 IPC/远程数据）                      |
+| 插件 service 边界     | `use(name)` 未提供即抛错（启动期暴露）；提供方的 TS 类型就是契约     |
 
 违者的典型症状：对同一个值在两层都写 `if (!x)`；对静态接口承诺的值再跑一遍 `typeof`。
 
