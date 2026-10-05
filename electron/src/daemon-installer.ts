@@ -10,6 +10,8 @@
  * 静默安装纪律：`mindx install -s`（跳过交互向导，专为 Client 子进程设计）失败不退出，
  * 转 `mindx doctor --fix` 修复/补装一次（runInstallWithFix 固定组合）。
  *
+ * daemon 已去模型化（RAG 退役）：安装即纯二进制释放，无外部动态库/语义模型依赖。
+ *
  * 启动纪律（macOS）：经 launchd 拉起（kickstart 不带 -k 防杀活实例），绝不把 daemon
  * 变成 Electron 子进程——继承 Electron 的 TCC 身份会落「系统受控沙箱、文件无法写入」。
  * Windows(WSL2) 分支第四期实施，当前返回 unsupported。
@@ -49,11 +51,6 @@ const GATEWAY_PORT = 1314
 
 // mindx 官方 install 目标目录（全局指令位）
 export const GLOBAL_BIN = path.join(homedir(), '.mindx', 'bin', 'mindx')
-// libonnxruntime 的随包释放位：gorag/embedder 的库搜索路径以 ~/.mindx/lib 优先（免提权；
-// Apple Silicon 上 /usr/local 归 root，会触发管理员授权弹窗——mindx-desktop 实证）
-export const USER_LIB_DIR = path.join(homedir(), '.mindx', 'lib')
-// BGE 语义模型（分发包自带）的释放位；缺该文件则 daemon 端语义记忆静默禁用
-export const MODEL_DST = path.join(homedir(), '.mindx', 'data', 'models', 'model.onnx')
 // 缓存目录：仅用于存下载的 tar 临时文件（本 App 专属用户数据目录下）
 const CACHE_DIR = path.join(homedir(), '.mindx', 'data', 'studio', 'cache')
 // 首次装配（mindx install）在未初始化环境会进交互向导；给超时避免 App 永久挂起
@@ -176,72 +173,6 @@ function bundledMindxArchive(): string | null {
   } catch {
     return null
   }
-}
-
-/** 随包的 Microsoft onnxruntime 官方 macOS 包（架构经打包期裁剪保证与当前一致） */
-function bundledOrtArchive(): string | null {
-  const ortArch = process.arch === 'arm64' ? 'arm64' : 'x86_64'
-  try {
-    const hit = readdirSync(bundledMindxDir()).find(
-      (f) => f.startsWith(`onnxruntime-osx-${ortArch}-`) && f.endsWith('.tgz')
-    )
-    return hit ? path.join(bundledMindxDir(), hit) : null
-  } catch {
-    return null
-  }
-}
-
-/** 用户库目录是否已有 libonnxruntime 依赖（目录不存在或为空视为未安装，须重新释放） */
-function onnxRuntimeInstalled(): boolean {
-  try {
-    return readdirSync(USER_LIB_DIR).some((f) => f.startsWith('libonnxruntime.'))
-  } catch {
-    return false
-  }
-}
-
-/**
- * 把 libonnxruntime.* 装到 ~/.mindx/lib（免提权释放位）。dylib 来源两级，随包归档优先：
- *   1. 随包 onnxruntime 官方包（架构经打包期保证）；
- *   2. mindx 分发包解压目录里的文件（未来 release 若自带架构配对的 dylib）。
- * 不随包优先的原因：v2.5.4 的 darwin-amd64 分发包内误装 arm64 dylib（x86_64 进程 dlopen 必败），
- * staging 来源无法自证架构正确。官方包内 dylib 是符号链接链，必须 cp -P 保留链接。
- */
-async function installOnnxRuntime(staging: string): Promise<void> {
-  await fsp.mkdir(USER_LIB_DIR, { recursive: true })
-  let srcs: string[] = []
-
-  const ortArchive = bundledOrtArchive()
-  if (ortArchive != null) {
-    const ortStaging = path.join(staging, 'onnxruntime')
-    mkdirSync(ortStaging, { recursive: true })
-    await execFileAsync('tar', ['-xzf', ortArchive, '-C', ortStaging])
-    srcs = await findDylibs(ortStaging)
-  }
-  if (srcs.length === 0) {
-    srcs = (await fsp.readdir(staging))
-      .filter((f) => f.startsWith('libonnxruntime.'))
-      .map((f) => path.join(staging, f))
-  }
-  if (srcs.length === 0) {
-    throw new Error('分发包与随包资源中均未包含 libonnxruntime 依赖')
-  }
-  await execFileAsync('cp', ['-P', ...srcs, USER_LIB_DIR])
-}
-
-/** 递归查找目录下所有 libonnxruntime.* 文件（含符号链接本体） */
-async function findDylibs(dir: string): Promise<string[]> {
-  const out: string[] = []
-  const entries = await fsp.readdir(dir, { withFileTypes: true })
-  for (const e of entries) {
-    const p = path.join(dir, e.name)
-    if (e.isDirectory()) {
-      out.push(...(await findDylibs(p)))
-    } else if (e.name.startsWith('libonnxruntime.')) {
-      out.push(p)
-    }
-  }
-  return out
 }
 
 /** 在线下载（回退路径；随包产物是主路径）：fetch 流式写盘 + 进度回调。断点续传从简——
@@ -411,18 +342,11 @@ class MindxInstaller {
     }
   }
 
-  /**
-   * 返回可用的 mindx 二进制：全局指令位优先，其次系统 PATH；都没有则下载放置。
-   * 拉起前另做校验：libonnxruntime 已装到库目录——初装先落二进制后装依赖，
-   * 上次在装依赖前中断时须重新释放补齐。
-   */
+  /** 返回可用的 mindx 二进制：全局指令位优先，其次系统 PATH；都没有则下载放置。 */
   private async ensureBinary(): Promise<string> {
     const bin = await this.findBinary()
     if (bin != null) {
       await ensureGlobalBinOnPath()
-      if (!onnxRuntimeInstalled()) {
-        return this.downloadAndPlace()
-      }
       return bin
     }
     return this.downloadAndPlace()
@@ -442,9 +366,9 @@ class MindxInstaller {
     return null
   }
 
-  /** 下载 tar → 解压 → 二进制放到全局指令位 + libonnxruntime 依赖装到用户库目录。
-   * 随包产物优先（安装包内已带匹配平台的 tar.gz，完全不碰网络，规避 GitHub 下载质量
-   * 不可控风险）；缺失（开发态/漏打包）回退在线下载 */
+  /** 下载 tar → 解压 → 二进制放到全局指令位。随包产物优先（安装包内已带匹配平台的
+   * tar.gz，完全不碰网络，规避 GitHub 下载质量不可控风险）；缺失（开发态/漏打包）
+   * 回退在线下载 */
   private async downloadAndPlace(): Promise<string> {
     const bundled = bundledMindxArchive()
     let archive: string
@@ -494,18 +418,6 @@ class MindxInstaller {
       // 让终端能直接使用 mindx 命令：~/.mindx/bin 写入 ~/.zshrc 的 PATH（幂等）
       this.setState({ state: 'extracting', message: '正在配置命令行环境…' })
       await ensureGlobalBinOnPath()
-
-      // libonnxruntime 装到用户库目录（staging 无 dylib 时回退解压随包 onnxruntime 官方包）
-      this.setState({ state: 'extracting', message: '正在安装 onnxruntime 依赖…' })
-      await installOnnxRuntime(staging)
-
-      // BGE 语义模型：分发包自带 model.onnx，释放到 mindx 约定位
-      const srcModel = path.join(staging, 'model.onnx')
-      if (existsSync(srcModel) && !existsSync(MODEL_DST)) {
-        this.setState({ state: 'extracting', message: '正在安装语义模型…' })
-        await fsp.mkdir(path.dirname(MODEL_DST), { recursive: true })
-        await fsp.copyFile(srcModel, MODEL_DST)
-      }
     } finally {
       // 随包归档是安装包内的只读资产，绝不删除；只清理在线下载的临时归档与 staging
       await Promise.all([
