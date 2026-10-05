@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * DiffFooterRow —— Sidebar Footer 固定区「变更」入口行（MemoryFooterRow 同构：
- * 42 高 / radius 12 / margin 4 -2）。可用性 = 当前会话存在待确认文件变更
+ * DiffFooterRow —— Sidebar Footer 固定区「变更」入口行（42 高 / radius 12 /
+ * margin 4 -2）。可用性 = 当前会话存在待确认文件变更
  * （跟随 chatflow.store 的 pendingFileModificationsBySession[activeSessionId]），
  * 无变更置灰不可点，徽标显示文件数。点击打开 Detail「变更」tab；tab 激活态
  * 跟随壳 Detail.activeTabId 高亮。tab id 与 index.ts 的 DIFF_DETAIL_ID 同值
@@ -117,7 +117,7 @@ function openDiffPanel(): void {
   text-overflow: ellipsis;
 }
 
-/* 文件数徽标（micro 字号，弱化胶囊，MemoryFooterRow.count 同形） */
+/* 文件数徽标（micro 字号，弱化胶囊） */
 .count {
   flex-shrink: 0;
   font-size: var(--mx-font-micro);
