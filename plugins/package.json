@@ -32,7 +32,6 @@
     "./terminal": "./src/terminal/index.ts",
     "./calendar": "./src/calendar/index.ts",
     "./usage": "./src/usage/index.ts",
-    "./memory": "./src/memory/index.ts",
     "./diffview": "./src/diffview/index.ts"
   },
   "dependencies": {
