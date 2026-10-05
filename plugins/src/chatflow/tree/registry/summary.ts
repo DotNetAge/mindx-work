@@ -309,14 +309,6 @@ const PRESENTATIONS: PresentationTable = {
     badges: n => [n.hitCount != null ? `${n.hitCount} 块` : ''],
     summarize: c => `知识库检索 ${c} 次`,
   },
-  'tool.memory_search': {
-    icon: 'lucide:cpu',
-    verb: '记忆检索',
-    executing: '正在检索记忆',
-    object: n => singleLine(n.query, 60),
-    badges: n => [n.hitCount != null ? `${n.hitCount} 条` : ''],
-    summarize: c => `记忆检索 ${c} 次`,
-  },
   'tool.skill': {
     icon: 'lucide:sparkles',
     verb: '已加载技能',

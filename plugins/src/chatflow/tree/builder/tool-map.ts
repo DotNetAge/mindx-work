@@ -17,7 +17,7 @@ export interface ToolDescriptor {
   groupKey: GroupKey | null
 }
 
-/** 工具名 → 登记项（覆盖全部 27 个工具，ReadPro/LsPro 等增强版归一到同一节点类型） */
+/** 工具名 → 登记项（覆盖全部 26 个工具，ReadPro/LsPro 等增强版归一到同一节点类型） */
 export const TOOL_DESCRIPTOR_MAP: Record<string, ToolDescriptor> = {
   Read: { nodeType: 'tool.read', groupKey: 'fs.read' },
   ReadPro: { nodeType: 'tool.read', groupKey: 'fs.read' },
@@ -32,7 +32,6 @@ export const TOOL_DESCRIPTOR_MAP: Record<string, ToolDescriptor> = {
   WebFetch: { nodeType: 'tool.web_fetch', groupKey: 'web.fetch' },
   WebSearch: { nodeType: 'tool.web_search', groupKey: 'web.search' },
   QuickSearch: { nodeType: 'tool.kb_search', groupKey: 'kb.search' },
-  MemorySearch: { nodeType: 'tool.memory_search', groupKey: 'kb.search' },
   Skill: { nodeType: 'tool.skill', groupKey: null },
   Sleep: { nodeType: 'tool.sleep', groupKey: 'sys' },
   TaskList: { nodeType: 'tool.task_query', groupKey: 'task.query' },

@@ -679,11 +679,6 @@ function buildToolNode(
         query: str(params.query), targetDir: strOrUndef(params.project_dir ?? params.target_dir),
         hitCount: num(meta.hit_count),
       } satisfies ToolNode)
-    case 'tool.memory_search':
-      return reactive({
-        ...common, type: 'tool.memory_search',
-        query: str(params.query), hitCount: num(meta.hit_count),
-      } satisfies ToolNode)
     case 'tool.skill':
       return reactive({
         ...common, type: 'tool.skill',

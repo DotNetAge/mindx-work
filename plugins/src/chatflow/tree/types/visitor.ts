@@ -24,7 +24,6 @@ import type {
   GrepToolNode,
   KbSearchToolNode,
   LsToolNode,
-  MemorySearchToolNode,
   NotifyToolNode,
   ReadToolNode,
   RunScriptToolNode,
@@ -55,7 +54,7 @@ export interface NodeVisitor<T> {
   maxTurns(node: MaxTurnsNode): T
   llmRetry(node: LlmRetryNode): T
   cancelled(node: CancelledNode): T
-  // 族 4：工具（18 种）
+  // 族 4：工具（17 种）
   read(node: ReadToolNode): T
   write(node: WriteToolNode): T
   edit(node: EditToolNode): T
@@ -67,7 +66,6 @@ export interface NodeVisitor<T> {
   webFetch(node: WebFetchToolNode): T
   webSearch(node: WebSearchToolNode): T
   kbSearch(node: KbSearchToolNode): T
-  memorySearch(node: MemorySearchToolNode): T
   skill(node: SkillToolNode): T
   sleep(node: SleepToolNode): T
   taskQuery(node: TaskQueryToolNode): T
@@ -113,7 +111,6 @@ export function visitNode<T>(node: TreeNode, visitor: NodeVisitor<T>): T {
     case 'tool.web_fetch': return visitor.webFetch(node)
     case 'tool.web_search': return visitor.webSearch(node)
     case 'tool.kb_search': return visitor.kbSearch(node)
-    case 'tool.memory_search': return visitor.memorySearch(node)
     case 'tool.skill': return visitor.skill(node)
     case 'tool.sleep': return visitor.sleep(node)
     case 'tool.task_query': return visitor.taskQuery(node)

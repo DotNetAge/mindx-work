@@ -128,13 +128,6 @@ export interface KbSearchToolNode extends ToolNodeBase {
   hitCount?: number
 }
 
-/** 记忆检索（MemorySearch） */
-export interface MemorySearchToolNode extends ToolNodeBase {
-  type: 'tool.memory_search'
-  query: string
-  hitCount?: number
-}
-
 /** 技能加载（Skill）：关键动作不聚合（groupKey 为 null） */
 export interface SkillToolNode extends ToolNodeBase {
   type: 'tool.skill'
@@ -183,7 +176,7 @@ export interface NotifyToolNode extends ToolNodeBase {
   subtitle?: string
 }
 
-/** 工具节点判别联合（18 种） */
+/** 工具节点判别联合（17 种） */
 export type ToolNode =
   | ReadToolNode
   | WriteToolNode
@@ -196,7 +189,6 @@ export type ToolNode =
   | WebFetchToolNode
   | WebSearchToolNode
   | KbSearchToolNode
-  | MemorySearchToolNode
   | SkillToolNode
   | SleepToolNode
   | TaskQueryToolNode

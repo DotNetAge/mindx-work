@@ -118,7 +118,6 @@ const ACTION_TABLE: ActionTable = {
   'tool.web_fetch': [{ id: 'open-url', label: '打开链接', icon: 'lucide:arrow-up-right', when: n => !!n.url }],
   'tool.web_search': [],
   'tool.kb_search': [],
-  'tool.memory_search': [],
   'tool.skill': [{ id: 'open-skill-doc', label: '查看 SKILL.md', icon: 'lucide:file-text', when: n => !!n.rootDir }],
   'tool.sleep': [],
   'tool.task_query': [{ id: 'open-tasks', label: '打开 Tasks 视图', icon: 'lucide:list' }],
