@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Sidebar「仪表板」节：当前工作区 .agents/dashboards/ 的仪表板清单（store.boardList，
- * 随工作目录变化与 Agent 工具事件自动刷新）。行 = <board name> 仪表板名
- * （缺失回退文件名，tooltip 恒显文件名），点击打开到 Detail 轨道；
- * 当前打开的仪表板行灰底高亮（data-active，对齐壳行语义）。
+ * Sidebar「仪表板」节：当前项目内全部 .dash 的仪表板清单（store.boardList，
+ * fs.find 全项目递归发现，随工作目录变化与 Agent 工具事件自动刷新）。
+ * 行 = <board name> 仪表板名（缺失回退文件名，tooltip 显项目内相对路径），
+ * 点击打开到 Detail 轨道；当前打开的仪表板行灰底高亮（data-active，对齐壳行语义）。
  * 无仪表板时整节不渲染（标题/空态/折叠钮均隐藏）——仅在存在仪表板时出现。
  * 分组头可点击折叠/展开（内存态，chevron 右缘，对齐 Tasks 分组头形态）。
  * 折叠 rail = 36px 图标钮（点击刷新清单）。行几何对齐壳 SidebarPane 行
@@ -65,7 +65,7 @@ function refresh(): void {
         >
           <button type="button" :class="$style.rowMain" @click="store.open(b.path)">
             <MxIcon name="lucide:layout-dashboard" :size="16" :class="$style.rowIcon" />
-            <el-tooltip :content="b.name" placement="right" :show-after="500" :offset="8">
+            <el-tooltip :content="b.relPath || b.name" placement="right" :show-after="500" :offset="8">
               <span :class="$style.rowName">{{ b.title }}</span>
             </el-tooltip>
           </button>

@@ -24,13 +24,13 @@ export interface AgentMeta {
   exclude_tools?: string[]
   /** 允许的 MCP 云技能条目（"mcp:<server>"） */
   allows_tools?: string[]
-  /** 所属团队名（固定组队语义） */
+  /** @deprecated 组队已迁移到一等 Team 实体（team.* RPC），后端不再写入此字段 */
   team?: string
-  /** 团队成员名单（非空即团队负责人，is_leader 派生） */
+  /** @deprecated 组队已迁移到一等 Team 实体（team.* RPC），后端不再写入此字段 */
   members?: string[]
   /** 是否团队负责人（agent.list/get 派生返回，不落盘） */
   is_leader?: boolean
-  /** TEAM.md 正文（agent.get 才有；负责人自定义团队职责） */
+  /** @deprecated 团队职责已迁移到 Team.profile（team.* RPC），后端不再写入此字段 */
   team_duty?: string
   /** 杂项元数据（ratings/version 等） */
   meta?: Record<string, unknown>
@@ -41,7 +41,7 @@ export interface AgentDetailResp {
   introduction?: string
   soul?: string
   allows_tools?: string[]
-  /** TEAM.md 正文（负责人团队职责） */
+  /** @deprecated 团队职责已迁移到 Team.profile（team.* RPC），后端不再写入此字段 */
   team_duty?: string
 }
 
@@ -73,6 +73,48 @@ export interface HireResult {
   agent_name: string
   hired: boolean
   message?: string
+}
+
+/**
+ * 一等 Team 实体（team.list 条目 / team.get 返回，字段与冻结协议逐一对齐）：
+ * leader/members 均为 Agent 名引用；hired 标记是否已雇佣（团队会话与团队招聘区口径）。
+ */
+export interface TeamMeta {
+  /** 团队名（唯一标识，team.update 以此定位，不可改） */
+  name: string
+  /** 昵称（展示主名；统一显示规则 = 昵称 + 名小字） */
+  nick_name?: string
+  description?: string
+  /** 负责人 Agent 名（必填；团队会话 agent 必须为 leader） */
+  leader: string
+  /** 成员 Agent 名引用数组（全量覆盖） */
+  members?: string[]
+  icon?: string
+  /** 业务分类（中文原文） */
+  category?: string
+  /** 是否已雇佣（false 为缺省值） */
+  hired?: boolean
+  /** 团队职责正文（原 TEAM.md；team.get 才有完整值） */
+  profile?: string
+}
+
+/** team.get 返回（与 team.list 条目同形，独立命名表达语义） */
+export type TeamDetail = TeamMeta
+
+/** team.update 参数（指针语义：不传保持不变，传了覆盖含清空；创建与编辑共用） */
+export interface TeamUpdateParams {
+  name: string
+  nick_name?: string
+  description?: string
+  /** 负责人 Agent 名（必填） */
+  leader?: string
+  /** 成员 Agent 名引用数组（全量覆盖） */
+  members?: string[]
+  icon?: string
+  category?: string
+  profile?: string
+  /** 雇佣状态（UI 走 team.hire / team.fire，不直改） */
+  hired?: boolean
 }
 
 /** skill.list 条目（技能装备中文名/描述回退链用；仅保留本插件消费的字段） */

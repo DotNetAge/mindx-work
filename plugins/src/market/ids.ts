@@ -2,3 +2,6 @@
 
 /** 安装确认 modal 的 Overlay 条目 id（区内唯一，带插件前缀） */
 export const OVERLAY_CONFIRM = 'market-install-confirm'
+
+/** 团队安装覆盖确认 modal 的 Overlay 条目 id（区内唯一，带插件前缀） */
+export const MODAL_TEAM_CONFIRM = 'market-team-confirm'

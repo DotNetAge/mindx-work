@@ -27,6 +27,18 @@ interface ProjectSkill {
   root_dir?: string
 }
 
+/** 全局技能条目（skill.list 不带 project_dir 的精简投影；已进化判定用） */
+interface GlobalSkill {
+  name: string
+}
+
+/** fs.list 条目（daemon FSEntry 实测形状：name/path/size/is_dir/mode/mod_time） */
+interface FSEntry {
+  name: string
+  path: string
+  is_dir: boolean
+}
+
 const store = useChatflowStore()
 const daemon = useService<DaemonConnectionShape>('daemon.connection')
 
@@ -95,43 +107,104 @@ const products = computed(() => fileRows.value.filter((row) => row.isProduct))
 const skills = ref<ProjectSkill[]>([])
 const skillsLoading = ref(true)
 
+/** 已进化判定：全局库存在同名原版（经受控复制下发到项目级的即为进化副本） */
+const globalSkillNames = ref<Set<string>>(new Set())
+function isEvolved(name: string): boolean {
+  return globalSkillNames.value.has(name)
+}
+
+/** 进化历史弹层状态：列 notes/ 文件 → 点开读正文（两级视图） */
+const evolution = ref<{ skillName: string; dir: string; files: string[] } | null>(null)
+const evolutionNote = ref<{ name: string; content: string } | null>(null)
+
+// 声明顺序约束：watch immediate 回调同步执行 loadSkills，其引用的状态
+// 必须先于 watch 声明，否则挂载期 TDZ 抛 ReferenceError 导致宿主白屏。
+
 async function loadSkills(): Promise<void> {
   if (!store.currentProjectDir) {
     skills.value = []
+    globalSkillNames.value = new Set()
     skillsLoading.value = false
     return
   }
   skillsLoading.value = true
-  try {
-    const r = await daemon.call<{ skills: ProjectSkill[] }>('skill.list', {
-      project_dir: store.currentProjectDir,
-    })
-    skills.value = r.skills || []
-  } catch {
-    skills.value = []
-  } finally {
-    skillsLoading.value = false
-  }
+  // 并行拉取,各自降级:全局调用失败只丢"已进化"标签,项目级清单保留
+  const [proj, glob] = await Promise.all([
+    daemon
+      .call<{ skills: ProjectSkill[] }>('skill.list', {
+        project_dir: store.currentProjectDir,
+      })
+      .catch(() => null),
+    daemon.call<{ skills: GlobalSkill[] }>('skill.list', {}).catch(() => null),
+  ])
+  skills.value = proj?.skills || []
+  globalSkillNames.value = new Set((glob?.skills || []).map((s) => s.name))
+  skillsLoading.value = false
 }
 
 // 工作目录随会话切换 → 重拉清单（目录可能晚于挂载就绪，immediate 兜底首拉）
 watch(() => store.currentProjectDir, loadSkills, { immediate: true })
+
+/**
+ * 查看进化历史：列进化副本 notes/ 下的复盘记录。
+ * 注意不能用 fs.list 直接探测 notes 目录——daemon 对不存在的路径会创建目录，
+ * 必须先列技能根目录确认 notes 存在，再列其内容。
+ */
+async function viewEvolution(sk: ProjectSkill): Promise<void> {
+  if (!sk.root_dir) return
+  try {
+    const entries = await daemon.call<FSEntry[]>('fs.list', { path: sk.root_dir })
+    if (!entries.some((e) => e.is_dir && e.name === 'notes')) {
+      ElMessage.info(`「${sk.name}」暂无进化记录`)
+      return
+    }
+    const dir = `${sk.root_dir}/notes`
+    const files = (await daemon.call<FSEntry[]>('fs.list', { path: dir })).filter((e) => !e.is_dir)
+    evolutionNote.value = null
+    evolution.value = { skillName: sk.name, dir, files: files.map((e) => e.name) }
+  } catch (e) {
+    ElMessage.error(`读取进化历史失败：${(e as Error).message}`)
+  }
+}
+
+/** 读单条复盘记录正文 */
+async function openNote(name: string): Promise<void> {
+  if (!evolution.value) return
+  try {
+    const r = await daemon.call<{ content: string }>('fs.read', { path: `${evolution.value.dir}/${name}` })
+    evolutionNote.value = { name, content: r.content }
+  } catch (e) {
+    ElMessage.error(`读取记录失败：${(e as Error).message}`)
+  }
+}
 
 /** 点击技能行：打开 SKILL.md 正文（md 路由 Markdown 查看器） */
 function openSkill(sk: ProjectSkill): void {
   if (sk.root_dir) void store.openFile(`${sk.root_dir}/SKILL.md`)
 }
 
-/** 安装至技能库：项目级晋升全局库（纯复制搬运；同名默认拒绝，错误透传） */
-async function promoteSkill(sk: ProjectSkill): Promise<void> {
+/** 安装至技能库 / 覆盖全局：项目级晋升全局库（纯复制搬运；同名默认拒绝，覆盖需用户确认） */
+async function promoteSkill(sk: ProjectSkill, overwrite = false): Promise<void> {
+  if (overwrite) {
+    try {
+      await ElMessageBox.confirm(
+        `覆盖技能库中的「${sk.name}」？全局版本将被项目级进化副本替换，不可恢复。`,
+        '覆盖全局技能',
+        { type: 'warning', confirmButtonText: '覆盖', cancelButtonText: '取消' },
+      )
+    } catch {
+      return // 用户取消
+    }
+  }
   try {
     await daemon.call('skill.promote', {
       name: sk.name,
       from: 'project',
       to: 'global',
       project_dir: store.currentProjectDir,
+      overwrite,
     })
-    ElMessage.success(`已安装至技能库：${sk.name}`)
+    ElMessage.success(overwrite ? `已覆盖全局版本：${sk.name}` : `已安装至技能库：${sk.name}`)
   } catch (e) {
     ElMessage.error(`安装失败：${(e as Error).message}`)
   }
@@ -160,6 +233,8 @@ async function removeSkill(sk: ProjectSkill): Promise<void> {
 
 function onSkillMenu(sk: ProjectSkill, command: string): void {
   if (command === 'promote') void promoteSkill(sk)
+  else if (command === 'overwrite') void promoteSkill(sk, true)
+  else if (command === 'evolution') void viewEvolution(sk)
   else if (command === 'remove') void removeSkill(sk)
 }
 
@@ -224,6 +299,7 @@ const todoPending = computed(() => todoPanelRef.value?.pendingCount ?? 0)
         >
           <MxIcon name="lucide:sparkles" :size="16" />
           <span :class="$style.rowName">{{ sk.name }}</span>
+          <span v-if="isEvolved(sk.name)" :class="$style.evolvedBadge">已进化</span>
           <el-dropdown
             trigger="click"
             popper-class="products-skill-menu"
@@ -234,7 +310,9 @@ const todoPending = computed(() => todoPanelRef.value?.pendingCount ?? 0)
             </button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="promote">安装至技能库</el-dropdown-item>
+                <el-dropdown-item v-if="isEvolved(sk.name)" command="evolution">查看进化历史</el-dropdown-item>
+                <el-dropdown-item v-if="isEvolved(sk.name)" command="overwrite">覆盖全局</el-dropdown-item>
+                <el-dropdown-item command="promote" :divided="isEvolved(sk.name)">安装至技能库</el-dropdown-item>
                 <el-dropdown-item command="remove" divided>删除</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -273,6 +351,36 @@ const todoPending = computed(() => todoPanelRef.value?.pendingCount ?? 0)
         <TodoPanel ref="todoPanelRef" hide-header />
       </el-collapse-item>
     </el-collapse>
+
+    <!-- 进化历史弹层：复盘记录列表 → 点开读正文（两级视图） -->
+    <el-dialog
+      :model-value="evolution !== null"
+      :title="`进化历史 · ${evolution?.skillName ?? ''}`"
+      width="480px"
+      append-to-body
+      @close="evolution = null"
+    >
+      <template v-if="evolution">
+        <template v-if="evolutionNote">
+          <button type="button" :class="$style.noteBack" @click="evolutionNote = null">← 返回列表</button>
+          <pre :class="$style.noteContent">{{ evolutionNote.content }}</pre>
+        </template>
+        <template v-else>
+          <p v-if="evolution.files.length === 0" :class="$style.empty">暂无进化记录</p>
+          <button
+            v-for="f in evolution.files"
+            :key="f"
+            type="button"
+            :class="$style.row"
+            :title="f"
+            @click="openNote(f)"
+          >
+            <MxIcon name="lucide:file-text" :size="16" />
+            <span :class="$style.rowName">{{ basename(f) }}</span>
+          </button>
+        </template>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -401,6 +509,45 @@ button.row:hover {
   color: var(--mx-danger);
   font: var(--mx-font-caption);
 }
+
+/* 已进化徽标：弱 warning 底 + warning 字色，嵌在行名与菜单之间 */
+.evolvedBadge {
+  flex-shrink: 0;
+  padding: 0 var(--mx-space-2);
+  border-radius: var(--mx-radius-control);
+  background: color-mix(in srgb, var(--mx-warning) 14%, transparent);
+  color: var(--mx-warning);
+  font: var(--mx-font-caption);
+  line-height: 18px;
+}
+
+/* 进化历史弹层内的返回按钮与记录正文 */
+.noteBack {
+  border: none;
+  background: transparent;
+  padding: 0 0 var(--mx-space-2);
+  color: var(--mx-text-secondary);
+  font: var(--mx-font-caption);
+  cursor: pointer;
+}
+
+.noteBack:hover {
+  color: var(--mx-text);
+}
+
+.noteContent {
+  margin: var(--mx-space-2) 0 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--mx-space-3);
+  border-radius: var(--mx-radius-control);
+  background: var(--mx-bg-surface);
+  color: var(--mx-text);
+  font: var(--mx-font-caption);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 </style>
 
 <!-- 技能菜单 popper（渲染到 body，全局作用域；对齐 WorkspacePicker 先例，全 --mx-* token） -->

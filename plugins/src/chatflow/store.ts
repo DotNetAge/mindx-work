@@ -115,6 +115,8 @@ interface SessionDetailResp {
 interface ServerSessionInfo {
   session_id: string
   agent_name?: string
+  /** 团队会话归属团队名（空/缺省 = 个人会话） */
+  team_name?: string
   title?: string
   project_dir?: string
   session_dir?: string
@@ -189,8 +191,10 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
   const sessions = ref<Session[]>([])
   const sessionsLoading = ref(false)
   const sessionsLoaded = ref(false)
-  /** 当前 Agent（新会话归属；AgentSwitcher 切换） */
+  /** 当前 Agent（新会话归属；AgentSwitcher 切换；团队会话下为负责人名） */
   const currentAgent = ref('')
+  /** 当前团队（非空 = 新会话为团队会话；session.create team 参数；选团队条目时置位） */
+  const currentTeam = ref('')
   /** 当前工作目录（新会话落点；点击会话行即「打开该目录」，desktop currentProjectDir 同语义） */
   const currentProjectDir = ref('')
 
@@ -431,6 +435,7 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
       const mapped = (list || []).map((s) => ({
         session_id: s.session_id,
         agent_name: s.agent_name || '',
+        team_name: s.team_name || '',
         title: s.title || '',
         created_at: s.created_at,
         updated_at: s.last_activity_at,
@@ -484,6 +489,7 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     const mapped: Session = {
       session_id: info.session_id,
       agent_name: info.agent_name || '',
+      team_name: info.team_name || '',
       title: info.title || '',
       created_at: info.created_at,
       updated_at: info.last_activity_at,
@@ -544,6 +550,7 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
       // 驱动轮头「Agent 行」显示真实头像与昵称（否则回退 'A Agent' 兜底）
       sessionCurrentAgentName[sessionId] = session.agent_name
     }
+    if (session) currentTeam.value = session.team_name || ''
     if (session?.project_dir) currentProjectDir.value = session.project_dir
 
     // 重置上下文用量并拉取新会话的窗口用量（避免残留上一会话数据）
@@ -588,6 +595,24 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     isProcessing.value = false
     isQueued.value = false
     isRestoringSession.value = false
+    // 上下文用量随会话清空：残留旧值会让 hero 态的用量环显示上一会话数据
+    // （ChatFlowPage 的 contextUsage computed 优先读 store 残留值）；hero 态由
+    // 模型 context_length 零值兜底，新会话建立后由 session.context 重新填充
+    contextUsage.value = null
+  }
+
+  /**
+   * 切换当前主体（个人 Agent 或团队；Sidebar 切换器唯一入口）：
+   * 选团队 = 以负责人为新会话 Agent + currentTeam 置位（session.create 带 team）。
+   * 团队/个人互不复用：活动会话的团队归属与目标不一致时清空对话流，
+   * 会话懒建于首条消息发送（个人间切换保持原复用行为不动）。
+   */
+  function selectAgent(name: string, team = ''): void {
+    if (name === currentAgent.value && team === currentTeam.value) return
+    currentAgent.value = name
+    currentTeam.value = team
+    const active = sessions.value.find((s) => s.session_id === activeSessionId.value)
+    if (active && (active.team_name || '') !== team) clearActiveStream()
   }
 
   /**
@@ -1117,16 +1142,21 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
       return false
     }
     try {
+      // 团队会话：currentTeam 非空时 session.create 带 team（agent 必须为负责人，
+      // daemon 校验团队存在/已雇佣）；个人会话不传 team
+      const team = currentTeam.value
       const created = await daemon.call<{
         session_id: string
         agent_name?: string
+        team_name?: string
         created_at?: string
         session_dir?: string
-      }>('session.create', { agent, project_dir: dir })
+      }>('session.create', team ? { agent, project_dir: dir, team } : { agent, project_dir: dir })
       const now = new Date().toISOString()
       sessions.value.unshift({
         session_id: created.session_id,
         agent_name: agent,
+        team_name: created.team_name || team,
         title: '',
         created_at: created.created_at || now,
         updated_at: now,
@@ -2463,6 +2493,7 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     }
 
     if (info.agent_name) currentAgent.value = info.agent_name
+    currentTeam.value = info.team_name || ''
     currentProjectDir.value = info.project_dir || dir
     upsertSessionFromServer(info)
     if (info.session_id !== activeSessionId.value) {
@@ -2607,6 +2638,8 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     sessionsLoading,
     sessionsLoaded,
     currentAgent,
+    currentTeam,
+    selectAgent,
     currentProjectDir,
     workspaces,
     chooseWorkspace,

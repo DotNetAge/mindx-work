@@ -19,13 +19,15 @@ import {
   marketPkgRoleSubtitle,
   skillDisplayName,
   skillLocaleDesc,
+  teamDisplayName,
   AgentExistsError,
 } from '../store'
 import { pushNotice } from '../notice'
 import { MODAL_AGENTS_CONFIRM, MODAL_AGENTS_LICENSE } from '../ids'
 import ConfirmModal from '../overlays/ConfirmModal.vue'
 import LicenseModal from '../overlays/LicenseModal.vue'
-import type { AgentMeta, MarketAgentPackage, SkillInfo } from '../types'
+import TeamEditorModal from './TeamEditorModal.vue'
+import type { AgentMeta, MarketAgentPackage, SkillInfo, TeamMeta, TeamUpdateParams } from '../types'
 import {
   AGENT_TOOLS,
   AGENT_TOOL_GROUPS,
@@ -43,8 +45,10 @@ const $style = useCssModule()
 
 onMounted(() => {
   store.loadAgents().catch((err: unknown) => {
-    pushNotice(shell, 'error', err instanceof Error ? err.message : '智能体列表加载失败，请检查与守护进程的连接')
+    pushNotice(shell, 'error', err instanceof Error ? err.message : '智能体列表加载失败，请检查与智能主机的连接')
   })
+  // 团队清单（配置头部团队标识/成员堆叠与 TeamEditorModal 数据源；失败仅降级为无团队态）
+  store.loadTeams().catch(() => {})
   store.loadSkills().catch(() => {
     // 技能加载失败仅降级为显示原始技能名，不阻断员工管理
   })
@@ -113,6 +117,127 @@ const selectedAgent = computed<AgentMeta | null>(
   () => store.hiredAgents.find((a) => a.name === selectedName.value) || null,
 )
 
+// ── 团队选中态：与成员同 strip 混排、同配置面板骨架（页签为团队档案 / 成员） ──
+const selectedKind = ref<'agent' | 'team'>('agent')
+const selectedTeamName = ref('')
+const selectedTeam = computed<TeamMeta | null>(
+  () => store.teams.find((t) => t.name === selectedTeamName.value) || null,
+)
+
+function selectAgentCard(name: string): void {
+  selectedKind.value = 'agent'
+  selectedName.value = name
+}
+
+function selectTeamCard(name: string): void {
+  selectedKind.value = 'team'
+  selectedTeamName.value = name
+  teamEditorTab.value = 'profile'
+  cancelTeamEditing()
+}
+
+// ── 团队雇佣 / 解雇（原团队招聘区逻辑并入；通知范式同区） ──
+function onTeamHire(t: TeamMeta): void {
+  store
+    .hireTeam(t.name)
+    .then(() => pushNotice(shell, 'success', `已雇佣团队「${teamDisplayName(t)}」`))
+    .catch((err: unknown) => {
+      pushNotice(shell, 'error', err instanceof Error ? err.message : '操作失败')
+    })
+}
+
+function onTeamFire(t: TeamMeta): void {
+  store
+    .fireTeam(t.name)
+    .then(() => pushNotice(shell, 'success', `已解雇团队「${teamDisplayName(t)}」`))
+    .catch((err: unknown) => {
+      pushNotice(shell, 'error', err instanceof Error ? err.message : '操作失败')
+    })
+}
+
+/** 负责人展示名（Agent 名 → 昵称/角色回退原名） */
+function leaderLabel(name: string): string {
+  const a = store.agents.find((x) => x.name === name)
+  return a ? agentDisplayName(a) : name
+}
+
+// ── 团队配置编辑态（只读展示 ↔ 编辑表单双态，与成员配置的编辑/完成同心智） ──
+const teamEditorTab = ref<'profile' | 'members'>('profile')
+const isTeamEditing = ref(false)
+const teamSaving = ref(false)
+const teamForm = ref({
+  nick_name: '',
+  description: '',
+  category: '',
+  profile: '',
+  leader: '',
+  members: [] as string[],
+})
+
+function startTeamEditing(): void {
+  const t = selectedTeam.value
+  if (!t) return
+  teamForm.value = {
+    nick_name: t.nick_name || '',
+    description: t.description || '',
+    category: t.category || '',
+    profile: t.profile || '',
+    leader: t.leader || '',
+    members: [...(t.members || [])]
+  }
+  isTeamEditing.value = true
+}
+
+function cancelTeamEditing(): void {
+  isTeamEditing.value = false
+}
+
+/** 保存团队编辑：team.update 指针语义，仅传变化字段 */
+function saveTeamEdits(): void {
+  const t = selectedTeam.value
+  if (!t) return
+  const patch: TeamUpdateParams = { name: t.name }
+  const cur = {
+    nick_name: t.nick_name || '',
+    description: t.description || '',
+    category: t.category || '',
+    profile: t.profile || '',
+    leader: t.leader || '',
+    members: t.members || []
+  }
+  const next = {
+    ...teamForm.value,
+    nick_name: teamForm.value.nick_name.trim(),
+    category: teamForm.value.category.trim()
+  }
+  for (const key of ['nick_name', 'description', 'category', 'profile', 'leader'] as const) {
+    if (next[key] !== cur[key]) patch[key] = next[key]
+  }
+  if (JSON.stringify(next.members) !== JSON.stringify(cur.members)) patch.members = next.members
+  if (Object.keys(patch).length === 1) {
+    isTeamEditing.value = false
+    return
+  }
+  teamSaving.value = true
+  store
+    .updateTeam(patch)
+    .then(() => {
+      isTeamEditing.value = false
+      pushNotice(shell, 'success', `已保存团队「${teamDisplayName(t)}」`)
+    })
+    .catch((err: unknown) => {
+      pushNotice(shell, 'error', err instanceof Error ? err.message : '操作失败')
+    })
+    .finally(() => {
+      teamSaving.value = false
+    })
+}
+
+/** 可选负责人/成员（已注册 Agent；daemon 侧校验存在性） */
+const agentOptions = computed(() =>
+  store.agents.map((a) => ({ name: a.name, label: agentDisplayName(a) })),
+)
+
 watch(
   () => store.hiredAgents,
   (list) => {
@@ -125,7 +250,7 @@ watch(
 )
 
 // ── 配置区编辑态（技能 / 工具 / 云技能勾选的本地副本，保存时统一写回） ──
-const editorTab = ref<'instructions' | 'skills' | 'cloud' | 'tools' | 'team'>('instructions')
+const editorTab = ref<'instructions' | 'skills' | 'cloud' | 'tools'>('instructions')
 const isEditing = ref(false)
 const localSkills = ref<string[]>([])
 const localEnabledTools = ref<Set<string>>(new Set())
@@ -148,9 +273,6 @@ const identityBody = ref('')
 const soulBody = ref('')
 const identityDirty = ref(false)
 const soulDirty = ref(false)
-/** 团队职责（TEAM.md 正文，仅负责人可编辑） */
-const teamBody = ref('')
-const teamDirty = ref(false)
 const detailLoading = ref(false)
 /** 请求序号：快速切换员工时丢弃过期响应 */
 let detailReqSeq = 0
@@ -159,10 +281,8 @@ async function loadAgentBodies(name: string): Promise<void> {
   const seq = ++detailReqSeq
   identityBody.value = ''
   soulBody.value = ''
-  teamBody.value = ''
   identityDirty.value = false
   soulDirty.value = false
-  teamDirty.value = false
   if (!name) {
     allowedBaseline.value = new Set()
     localAllowedServers.value = new Set()
@@ -174,7 +294,6 @@ async function loadAgentBodies(name: string): Promise<void> {
     if (seq !== detailReqSeq || name !== selectedName.value) return
     identityBody.value = String(res?.introduction ?? '')
     soulBody.value = String(res?.soul ?? '')
-    teamBody.value = String(res?.team_duty ?? '')
     // allows_tools 条目为 "mcp:<server>"，解析出 server 名集合作为云技能勾选基线
     const allowed = new Set<string>()
     for (const raw of res?.allows_tools || []) {
@@ -201,17 +320,16 @@ watch(selectedName, (name) => {
   void nextTick(() => syncIndicator(configTabsRef.value))
 })
 
-// ── 指令保存（身份写 identity_body，行为准则写 soul，团队职责写 team_duty；独立于全局编辑态） ──
-async function saveBody(section: 'identity' | 'soul' | 'team'): Promise<void> {
+// ── 指令保存（身份写 identity_body，行为准则写 soul；独立于全局编辑态） ──
+async function saveBody(section: 'identity' | 'soul'): Promise<void> {
   const name = selectedName.value
   if (!name) return
-  const field = section === 'identity' ? 'identity_body' : section === 'soul' ? 'soul' : 'team_duty'
-  const value = section === 'identity' ? identityBody.value : section === 'soul' ? soulBody.value : teamBody.value
+  const field = section === 'identity' ? 'identity_body' : 'soul'
+  const value = section === 'identity' ? identityBody.value : soulBody.value
   try {
     await store.updateAgent({ name, [field]: value })
     if (section === 'identity') identityDirty.value = false
-    else if (section === 'soul') soulDirty.value = false
-    else teamDirty.value = false
+    else soulDirty.value = false
     pushNotice(shell, 'success', 'Agent 保存成功')
   } catch (err: unknown) {
     pushNotice(shell, 'error', err instanceof Error ? err.message : 'Agent 保存失败')
@@ -442,86 +560,27 @@ async function saveNick(): Promise<void> {
   }
 }
 
-// ── 团队（配置头部）：成员头像堆叠（Leader 取 members，成员取同 team 同伴）；
-// 非团队显示「组队」入口，弹层写 team + members（members 非空即自任负责人） ──
+// ── 团队（配置头部）：成员头像堆叠与「管理团队」入口基于一等 Team 实体
+// （team.list，leader === 当前员工的团队）；非负责人行不再提供组队入口 ──
 interface TeamStackAvatar {
   name: string
   displayName: string
   icon?: string
 }
 
+/** 当前员工负责的团队（team.list 口径；无则为 null） */
+const leaderTeam = computed(() => store.teams.find((t) => t.leader === selectedAgent.value?.name) || null)
+
 const teamMemberAvatars = computed<TeamStackAvatar[]>(() => {
-  const agent = selectedAgent.value
-  if (!agent) return []
-  let names: string[]
-  if (agent.is_leader && agent.members?.length) {
-    names = agent.members
-  } else if (agent.team) {
-    names = store.agents.filter((a) => a.team === agent.team && a.name !== agent.name).map((a) => a.name)
-  } else {
-    return []
-  }
-  return names
+  const team = leaderTeam.value
+  if (!team) return []
+  return (team.members || [])
     .map((name) => {
       const meta = store.agents.find((a) => a.name === name)
       return { name, displayName: meta ? agentDisplayName(meta) : name, icon: meta?.icon }
     })
     .filter((m) => !!m)
 })
-
-// ── 组队对话框（非团队 agent 的「组队」入口）：队名 +「+」添加成员 + 成员头像预览；
-// 全程草稿态（draftMembers），保存时一次写 team + members（含自己即自任负责人） ──
-const teamModalOpen = ref(false)
-const teamNameDraft = ref('')
-const draftMembers = ref<string[]>([])
-const memberPickerOpen = ref(false)
-const memberPicks = ref<string[]>([])
-
-const hireableMembers = computed(() => store.agents.filter((a) => a.hired && a.name !== selectedAgent.value?.name))
-
-/** 对话框内成员头像预览（草稿名单 → 清单匹配头像/展示名） */
-const draftMemberAvatars = computed(() =>
-  draftMembers.value.map((name) => {
-    const meta = store.agents.find((a) => a.name === name)
-    return { name, displayName: meta ? agentDisplayName(meta) : name, icon: meta?.icon }
-  })
-)
-
-function openTeamModal(): void {
-  teamNameDraft.value = ''
-  draftMembers.value = []
-  memberPickerOpen.value = false
-  memberPicks.value = []
-  teamModalOpen.value = true
-}
-
-/** 浮层「确定」：勾选并入草稿名单（对话框内头像即时预览） */
-function confirmPicks(): void {
-  draftMembers.value = Array.from(new Set([...draftMembers.value, ...memberPicks.value]))
-  memberPicks.value = []
-  memberPickerOpen.value = false
-}
-
-async function saveTeam(): Promise<void> {
-  const agent = selectedAgent.value
-  if (!agent) return
-  const team = teamNameDraft.value.trim()
-  if (!team) {
-    pushNotice(shell, 'error', '队名不能为空')
-    return
-  }
-  teamModalOpen.value = false
-  store.operating = agent.name
-  try {
-    await store.updateAgent({ name: agent.name, team, members: Array.from(new Set([agent.name, ...draftMembers.value])) })
-    await store.refreshAgents()
-    pushNotice(shell, 'success', `已加入团队「${team}」`)
-  } catch (err: unknown) {
-    pushNotice(shell, 'error', err instanceof Error ? err.message : '组队失败')
-  } finally {
-    store.operating = ''
-  }
-}
 
 // ── 散伙（团队卡片 / 配置头部 / 市场卡片 / 详情弹层共用） ──
 function onFire(name: string, display: string): void {
@@ -855,6 +914,19 @@ function syncIndicator(root: HTMLElement | null): void {
 
 watch(view, () => void nextTick(() => syncIndicator(viewTabsRef.value)))
 watch(editorTab, () => void nextTick(() => syncIndicator(configTabsRef.value)))
+// 团队页签切换与团队清单变化：指示器同步；选中团队被删除时回落到首个已招募成员
+watch(teamEditorTab, () => void nextTick(() => syncIndicator(configTabsRef.value)))
+watch(
+  () => store.teams,
+  (list) => {
+    if (selectedKind.value !== 'team') return
+    if (list.some((t) => t.name === selectedTeamName.value)) return
+    selectedTeamName.value = ''
+    selectedKind.value = 'agent'
+    const first = store.hiredAgents[0]
+    if (first) selectedName.value = first.name
+  },
+)
 onMounted(() => {
   void nextTick(() => {
     syncIndicator(viewTabsRef.value)
@@ -873,7 +945,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 工具栏：页签独占一行居中，搜索独占一行全宽（计数与手动刷新冗余，已删） -->
+    <!-- 工具栏：页签独占一行居中（右端"新建团队"入口），搜索独占一行全宽（计数与手动刷新冗余，已删） -->
     <div :class="$style.tabsRow">
       <div ref="viewTabsRef" class="mx-tabs" :class="$style.viewTabs">
         <span data-indicator aria-hidden="true" :class="$style.tabsIndicator" />
@@ -884,6 +956,15 @@ onMounted(() => {
           市场
         </button>
       </div>
+      <button
+        v-if="view === 'team'"
+        type="button"
+        class="mx-btn mx-btn--primary"
+        :class="$style.tabsNewTeam"
+        @click="store.openTeamEditor('create')"
+      >
+        新建团队
+      </button>
     </div>
     <input
       v-if="view === 'team'"
@@ -925,19 +1006,19 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- ── 团队视图（上：已招募员工迷你卡横排（供应商品牌卡同款）；下：选中员工配置面板） ── -->
+    <!-- ── 团队视图（上：成员与团队迷你卡横排（供应商品牌卡同款）；下：选中对象配置面板） ── -->
     <template v-if="view === 'team'">
       <p v-if="store.loading && !store.loaded" :class="[$style.hint, 'mx-text-loading']">正在加载员工清单…</p>
-      <div v-else-if="teamCards.length > 0" :class="$style.strip">
+      <div v-else-if="teamCards.length > 0 || store.teams.length > 0" :class="$style.strip">
         <div
           v-for="a in teamCards"
           :key="a.name"
           role="button"
           tabindex="0"
           :class="$style.mCard"
-          :data-active="a.name === selectedName ? 'true' : 'false'"
-          @click="selectedName = a.name"
-          @keydown.enter.prevent="selectedName = a.name"
+          :data-active="selectedKind === 'agent' && a.name === selectedName ? 'true' : 'false'"
+          @click="selectAgentCard(a.name)"
+          @keydown.enter.prevent="selectAgentCard(a.name)"
         >
           <img v-if="a.icon" :class="[$style.mAvatar, $style.avatarImg]" :src="a.icon" :alt="agentDisplayName(a)" />
           <span v-else :class="$style.mAvatar">{{ (agentDisplayName(a) || '?').charAt(0).toUpperCase() }}</span>
@@ -950,14 +1031,177 @@ onMounted(() => {
             <span v-if="(a.skills || []).length" class="mx-tag" data-tone="warning">{{ (a.skills || []).length }} 个技能</span>
           </div>
         </div>
+
+        <!-- 团队卡：与成员迷你卡同样式，「团队」徽标 + 成员数区分 -->
+        <div
+          v-for="t in store.teams"
+          :key="'team:' + t.name"
+          role="button"
+          tabindex="0"
+          :class="$style.mCard"
+          :data-active="selectedKind === 'team' && t.name === selectedTeamName ? 'true' : 'false'"
+          @click="selectTeamCard(t.name)"
+          @keydown.enter.prevent="selectTeamCard(t.name)"
+        >
+          <img v-if="t.icon" :class="[$style.mAvatar, $style.avatarImg]" :src="t.icon" :alt="teamDisplayName(t)" />
+          <span v-else :class="$style.mAvatar">{{ (teamDisplayName(t) || '?').charAt(0).toUpperCase() }}</span>
+          <span :class="$style.mName" :title="t.name">{{ teamDisplayName(t) }}</span>
+          <span :class="$style.mRole">{{ t.name }}</span>
+          <div :class="$style.mTags">
+            <span class="mx-tag" data-tone="warning">团队</span>
+            <span class="mx-tag" data-tone="neutral">{{ (t.members || []).length }} 名成员</span>
+          </div>
+        </div>
       </div>
       <div v-else :class="$style.emptyBox">
         <p :class="$style.hint">团队里还没有智能体</p>
         <button type="button" class="mx-btn mx-btn--primary" @click="view = 'market'">去招募</button>
       </div>
 
+      <!-- ── 下方配置面板（团队）：与成员配置同骨架，页签为「团队档案 / 成员」 ── -->
+      <div v-if="selectedKind === 'team' && selectedTeam" :class="$style.config">
+        <!-- 头部：头像 + 团队名 + 雇佣标签 + 描述 + 操作（雇佣/解雇/编辑） -->
+        <div :class="$style.cfgHead">
+          <img
+            v-if="selectedTeam.icon"
+            :class="[$style.cfgAvatar, $style.avatarImg]"
+            :src="selectedTeam.icon"
+            :alt="teamDisplayName(selectedTeam)"
+          />
+          <span v-else :class="$style.cfgAvatar">{{ (teamDisplayName(selectedTeam) || '?').charAt(0).toUpperCase() }}</span>
+          <div :class="$style.cfgMain">
+            <div :class="$style.cfgNameRow">
+              <h3 :class="$style.cfgName">{{ teamDisplayName(selectedTeam) }}</h3>
+              <span class="mx-tag" :data-tone="selectedTeam.hired ? 'success' : 'warning'">
+                {{ selectedTeam.hired ? '已雇佣' : '未雇佣' }}
+              </span>
+            </div>
+            <span :class="$style.cfgRole">{{ selectedTeam.name }}</span>
+            <p :class="$style.cfgDesc">{{ selectedTeam.description || '暂无描述' }}</p>
+          </div>
+          <div :class="$style.cfgActions">
+            <button
+              v-if="!selectedTeam.hired"
+              type="button"
+              class="mx-btn mx-btn--primary"
+              :disabled="store.teamOperating === selectedTeam.name"
+              @click="onTeamHire(selectedTeam)"
+            >
+              <span v-if="store.teamOperating === selectedTeam.name" class="mx-text-loading">执行中…</span>
+              <template v-else>雇佣</template>
+            </button>
+            <button
+              v-else
+              type="button"
+              class="mx-btn"
+              :disabled="store.teamOperating === selectedTeam.name"
+              @click="onTeamFire(selectedTeam)"
+            >
+              <span v-if="store.teamOperating === selectedTeam.name" class="mx-text-loading">执行中…</span>
+              <template v-else>解雇</template>
+            </button>
+            <button type="button" class="mx-btn" @click="store.openTeamEditor('edit', selectedTeam.name)">编辑</button>
+          </div>
+        </div>
+
+        <!-- 页签（分段指示器同款）：团队档案 / 成员 -->
+        <div ref="configTabsRef" class="mx-tabs" :class="$style.cfgTabs">
+          <span data-indicator aria-hidden="true" :class="$style.tabsIndicator" />
+          <button type="button" class="mx-tab" role="tab" :aria-selected="teamEditorTab === 'profile' ? 'true' : 'false'" @click="teamEditorTab = 'profile'">
+            团队档案
+          </button>
+          <button type="button" class="mx-tab" role="tab" :aria-selected="teamEditorTab === 'members' ? 'true' : 'false'" @click="teamEditorTab = 'members'">
+            成员
+          </button>
+        </div>
+
+        <!-- 团队档案（只读展示：描述 + Profile 正文预览） -->
+        <div v-if="teamEditorTab === 'profile'" :class="$style.teamReadView">
+          <div :class="$style.teamReadBlock">
+            <span :class="$style.teamReadLabel">分类</span>
+            <span :class="$style.teamReadValue">{{ selectedTeam.category || '暂无分类' }}</span>
+          </div>
+          <div :class="$style.teamReadBlock">
+            <span :class="$style.teamReadLabel">团队 Profile</span>
+            <p :class="$style.teamProfilePreview">{{ selectedTeam.profile || '暂无内容（保存后写入 TEAM.md 正文，团队会话中原样注入）' }}</p>
+          </div>
+          <div :class="$style.teamReadActions">
+            <button type="button" class="mx-btn mx-btn--primary" @click="startTeamEditing()">编辑</button>
+          </div>
+        </div>
+
+        <!-- 成员（只读展示：负责人 + 成员清单） -->
+        <div v-else :class="$style.teamReadView">
+          <div :class="$style.teamReadBlock">
+            <span :class="$style.teamReadLabel">负责人</span>
+            <span :class="$style.teamReadValue">{{ leaderLabel(selectedTeam.leader) }}</span>
+          </div>
+          <div :class="$style.teamReadBlock">
+            <span :class="$style.teamReadLabel">成员清单</span>
+            <div :class="$style.teamMemberList">
+              <span v-for="m in selectedTeam.members || []" :key="m" class="mx-tag" data-tone="neutral">{{ leaderLabel(m) }}</span>
+              <span v-if="!(selectedTeam.members || []).length" :class="$style.teamReadValue">尚未任命成员</span>
+            </div>
+          </div>
+          <div :class="$style.teamReadActions">
+            <button type="button" class="mx-btn mx-btn--primary" @click="startTeamEditing()">编辑</button>
+          </div>
+        </div>
+
+        <!-- 编辑表单（team.update 指针语义，仅传变化字段） -->
+        <template v-if="isTeamEditing">
+          <div v-if="teamEditorTab === 'profile'" :class="$style.teamEditForm">
+            <label :class="$style.teamFieldRow">
+              <span :class="$style.teamFieldLabel">昵称</span>
+              <input v-model="teamForm.nick_name" class="mx-input" placeholder="两三字外号（展示主名）" />
+            </label>
+            <label :class="$style.teamFieldRow">
+              <span :class="$style.teamFieldLabel">分类</span>
+              <input v-model="teamForm.category" class="mx-input" placeholder="中文业务分类" />
+            </label>
+            <label :class="$style.teamFieldRow">
+              <span :class="$style.teamFieldLabel">描述</span>
+              <textarea v-model="teamForm.description" class="mx-input" rows="2" placeholder="团队一句话定位" />
+            </label>
+            <label :class="$style.teamFieldRow">
+              <span :class="$style.teamFieldLabel">Profile</span>
+              <textarea v-model="teamForm.profile" class="mx-input" rows="6" placeholder="团队人设定义（保存后写入 TEAM.md 正文）" />
+            </label>
+            <div :class="$style.teamFormActions">
+              <button type="button" class="mx-btn" @click="cancelTeamEditing">取消</button>
+              <button type="button" class="mx-btn mx-btn--primary" :disabled="teamSaving" @click="saveTeamEdits">
+                <span v-if="teamSaving" class="mx-text-loading">保存中…</span>
+                <template v-else>保存</template>
+              </button>
+            </div>
+          </div>
+          <div v-else :class="$style.teamEditForm">
+            <label :class="$style.teamFieldRow">
+              <span :class="$style.teamFieldLabel">负责人</span>
+              <select v-model="teamForm.leader" class="mx-input">
+                <option value="" disabled>选择负责人（必填）</option>
+                <option v-for="a in agentOptions" :key="a.name" :value="a.name">{{ a.label }}</option>
+              </select>
+            </label>
+            <label :class="$style.teamFieldRow">
+              <span :class="$style.teamFieldLabel">成员</span>
+              <select v-model="teamForm.members" class="mx-input" multiple size="6">
+                <option v-for="a in agentOptions" :key="a.name" :value="a.name">{{ a.label }}</option>
+              </select>
+            </label>
+            <div :class="$style.teamFormActions">
+              <button type="button" class="mx-btn" @click="cancelTeamEditing">取消</button>
+              <button type="button" class="mx-btn mx-btn--primary" :disabled="teamSaving" @click="saveTeamEdits">
+                <span v-if="teamSaving" class="mx-text-loading">保存中…</span>
+                <template v-else>保存</template>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <!-- ── 下方配置面板（上下结构的"下"） ── -->
-      <div v-if="selectedAgent" :class="$style.config">
+      <div v-else-if="selectedAgent" :class="$style.config">
         <!-- 头部：头像 + 角色名 + 标识 + 描述 + 散伙 -->
         <div :class="$style.cfgHead">
           <img
@@ -988,28 +1232,38 @@ onMounted(() => {
                 @click="startNickEdit"
               >{{ agentDisplayName(selectedAgent) }}</h3>
               <span v-if="agentRoleSubtitle(selectedAgent)" :class="$style.cfgRole">{{ agentRoleSubtitle(selectedAgent) }}</span>
-              <!-- Leader 在标题旁显示团队名 -->
-              <span v-if="selectedAgent.is_leader && selectedAgent.team" class="mx-tag" data-tone="info">{{ selectedAgent.team }}</span>
+              <!-- Leader 标识其负责的团队（team.list 口径）；点击直达团队管理对话框 -->
+              <button
+                v-if="leaderTeam"
+                type="button"
+                class="mx-tag"
+                data-tone="info"
+                :title="`管理团队「${teamDisplayName(leaderTeam)}」`"
+                @click="store.openTeamEditor('edit', leaderTeam.name)"
+              >
+                {{ teamDisplayName(leaderTeam) }}
+              </button>
             </div>
             <p :class="$style.cfgDesc">{{ selectedAgent.description || '暂无描述' }}</p>
           </div>
-          <!-- 团队区：有团队显示成员头像堆叠（紧密排列，前一个覆盖后一个左边一半）；
-               非团队显示「组队」入口，点击弹组队对话框（队名 + 添加成员 + 成员头像） -->
-          <div v-if="teamMemberAvatars.length" :class="$style.teamStack" title="团队成员">
-            <template v-for="m in teamMemberAvatars" :key="m.name">
-              <img v-if="m.icon" :class="$style.teamStackAvatar" :src="m.icon" :alt="m.displayName" :title="m.displayName" />
-              <span v-else :class="$style.teamStackAvatar" :title="m.displayName">{{ m.displayName.charAt(0).toUpperCase() }}</span>
-            </template>
-          </div>
-          <button
-            v-else
-            type="button"
-            class="mx-btn"
-            :disabled="store.operating === selectedAgent.name"
-            @click="openTeamModal"
-          >
-            组队
-          </button>
+          <!-- 团队区（负责人行专属）：成员头像堆叠（紧密排列，前一个覆盖后一个左边一半）
+               +「管理团队」入口（TeamEditorModal，team.update 实体编辑）；非负责人行不再提供组队入口 -->
+          <template v-if="leaderTeam">
+            <div v-if="teamMemberAvatars.length" :class="$style.teamStack" title="团队成员">
+              <template v-for="m in teamMemberAvatars" :key="m.name">
+                <img v-if="m.icon" :class="$style.teamStackAvatar" :src="m.icon" :alt="m.displayName" :title="m.displayName" />
+                <span v-else :class="$style.teamStackAvatar" :title="m.displayName">{{ m.displayName.charAt(0).toUpperCase() }}</span>
+              </template>
+            </div>
+            <button
+              type="button"
+              class="mx-btn"
+              :disabled="store.teamOperating === leaderTeam.name"
+              @click="store.openTeamEditor('edit', leaderTeam.name)"
+            >
+              管理团队
+            </button>
+          </template>
           <button
             type="button"
             class="mx-btn"
@@ -1037,17 +1291,6 @@ onMounted(() => {
             </button>
             <button type="button" class="mx-tab" role="tab" :aria-selected="editorTab === 'tools' ? 'true' : 'false'" @click="editorTab = 'tools'">
               工具<template v-if="isEditing">&nbsp;({{ localEnabledTools.size }}/{{ AGENT_TOOLS.length }})</template>
-            </button>
-            <!-- 团队职责：仅负责人可见（agent.Team 不为空且 is_leader） -->
-            <button
-              v-if="selectedAgent.is_leader && selectedAgent.team"
-              type="button"
-              class="mx-tab"
-              role="tab"
-              :aria-selected="editorTab === 'team' ? 'true' : 'false'"
-              @click="editorTab = 'team'"
-            >
-              团队
             </button>
           </div>
           <div v-if="editorTab !== 'instructions'" :class="$style.cfgActions">
@@ -1110,24 +1353,6 @@ onMounted(() => {
               </div>
             </div>
           </template>
-        </div>
-
-        <!-- 区：团队职责（TEAM.md，仅负责人可见的页签内容） -->
-        <div v-show="editorTab === 'team'" :class="$style.tabPanel">
-          <p v-if="detailLoading" :class="[$style.hint, 'mx-text-loading']">正在加载团队职责…</p>
-          <div v-else :class="$style.instructionBlock">
-            <textarea
-              v-model="teamBody"
-              :class="$style.area"
-              rows="8"
-              placeholder="团队职责（TEAM.md 正文），暂无内容"
-              @input="teamDirty = true"
-            ></textarea>
-            <div :class="$style.instructionFoot">
-              <span :class="$style.hint">保存后写入 TEAM.md 正文</span>
-              <button type="button" class="mx-btn mx-btn--primary" :disabled="!teamDirty" @click="saveBody('team')">保存</button>
-            </div>
-          </div>
         </div>
 
         <!-- 区：技能（查看态摘要 / 编辑态多选） -->
@@ -1457,56 +1682,9 @@ onMounted(() => {
       </div>
     </Teleport>
 
-    <!-- 组队对话框（Teleport 到 body）：队名输入框 +「+」添加成员 + 成员头像堆叠预览 -->
-    <Teleport to="body">
-      <div v-if="teamModalOpen" :class="$style.teamModalMask" @click.self="teamModalOpen = false">
-        <div :class="$style.teamModal">
-          <h3 :class="$style.teamModalTitle">组队</h3>
-          <input
-            v-model="teamNameDraft"
-            :class="$style.teamModalName"
-            placeholder="队名"
-            @keydown.enter.prevent="saveTeam"
-          />
-          <div :class="$style.teamModalRow">
-            <div :class="$style.teamModalPickerWrap">
-              <button
-                type="button"
-                :class="$style.teamModalAdd"
-                title="添加成员"
-                @click="memberPickerOpen = !memberPickerOpen"
-              >
-                +
-              </button>
-              <!-- 成员选择浮层（多选，确定并入草稿名单） -->
-              <div v-if="memberPickerOpen" :class="$style.memberPicker">
-                <label v-for="m in hireableMembers" :key="m.name" :class="$style.memberItem">
-                  <input v-model="memberPicks" type="checkbox" :value="m.name" />
-                  <img v-if="m.icon" :class="$style.teamStackAvatar" :src="m.icon" :alt="agentDisplayName(m)" />
-                  <span>{{ agentDisplayName(m) }}</span>
-                </label>
-                <p v-if="hireableMembers.length === 0" :class="$style.hint">暂无其他已招募成员</p>
-                <div :class="$style.memberPickerFoot">
-                  <button type="button" class="mx-btn" @click="memberPickerOpen = false">取消</button>
-                  <button type="button" class="mx-btn mx-btn--primary" @click="confirmPicks">确定</button>
-                </div>
-              </div>
-            </div>
-            <!-- 成员头像堆叠（草稿预览：前一个覆盖后一个左边一半） -->
-            <div v-if="draftMemberAvatars.length" :class="$style.teamStack" title="团队成员">
-              <template v-for="m in draftMemberAvatars" :key="m.name">
-                <img v-if="m.icon" :class="$style.teamStackAvatar" :src="m.icon" :alt="m.displayName" :title="m.displayName" />
-                <span v-else :class="$style.teamStackAvatar" :title="m.displayName">{{ m.displayName.charAt(0).toUpperCase() }}</span>
-              </template>
-            </div>
-          </div>
-          <div :class="$style.teamModalFoot">
-            <button type="button" class="mx-btn" @click="teamModalOpen = false">取消</button>
-            <button type="button" class="mx-btn mx-btn--primary" @click="saveTeam">保存</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- 团队编辑对话框：本组件是 agents 设置页常驻行，作为 TeamEditorModal 唯一挂载点
+         （TeamsRecruitRow / 本行经 store.openTeamEditor 打开，同状态驱动避免双浮层） -->
+    <TeamEditorModal />
   </div>
 </template>
 
@@ -1541,10 +1719,80 @@ onMounted(() => {
   color: var(--mx-text-tertiary);
 }
 
-/* 页签行：页签组独占一行且水平居中 */
+/* 页签行：页签组独占一行且水平居中；右端"新建团队"入口绝对定位（页签居中不受影响） */
 .tabsRow {
   display: flex;
   justify-content: center;
+  position: relative;
+}
+.tabsNewTeam {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* ── 团队配置面板（只读展示 + 编辑表单；mx-* 全局类管观感，布局一律 $style 模块类） ── */
+.teamReadView {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-3);
+}
+.teamReadBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-1);
+}
+.teamReadLabel {
+  font: var(--mx-font-caption);
+  font-weight: 600;
+  color: var(--mx-text-secondary);
+}
+.teamReadValue {
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+}
+.teamProfilePreview {
+  margin: 0;
+  font: var(--mx-font-body);
+  color: var(--mx-text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--mx-bg-surface);
+  border: 0.5px solid var(--mx-separator-soft);
+  border-radius: var(--mx-radius-card);
+  padding: var(--mx-space-3);
+}
+.teamReadActions {
+  display: flex;
+  justify-content: flex-end;
+}
+.teamMemberList {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-1);
+  flex-wrap: wrap;
+}
+.teamEditForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-3);
+}
+.teamFieldRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-1);
+}
+.teamFieldLabel {
+  font: var(--mx-font-caption);
+  font-weight: 600;
+  color: var(--mx-text-secondary);
+}
+.teamFormActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--mx-space-2);
 }
 
 /* 分段页签指示器：与 skills 管理行同款（此前裸 span 无样式，选中态不可见） */
@@ -1922,32 +2170,6 @@ onMounted(() => {
   color: var(--mx-text);
 }
 
-/* 成员选择浮层（组队对话框内下拉） */
-.memberPicker {
-  position: absolute;
-  top: calc(100% + var(--mx-space-1));
-  left: 0;
-  z-index: 30;
-  width: 240px;
-  max-height: 240px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--mx-space-1);
-  padding: var(--mx-space-2);
-  border-radius: var(--mx-radius-control);
-  background: var(--mx-menu-bg);
-  border: 1px solid var(--mx-separator);
-  box-shadow: var(--mx-shadow-prominent);
-}
-
-.memberPickerFoot {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--mx-space-2);
-  margin-top: var(--mx-space-1);
-}
-
 /* 团队成员头像堆叠：紧密排列，前一个覆盖后一个左边一半（负 margin 叠加） */
 .teamStack {
   display: flex;
@@ -1972,99 +2194,6 @@ onMounted(() => {
 
 .teamStack > * + * {
   margin-left: -12px;
-}
-
-/* 组队对话框（Teleport 到 body）：队名 + 添加成员 + 头像预览 */
-.teamModalMask {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--mx-mask);
-}
-
-.teamModal {
-  width: 420px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--mx-space-3);
-  padding: var(--mx-space-4);
-  border-radius: var(--mx-radius-window);
-  background: var(--mx-bg-elevated);
-  border: 1px solid var(--mx-separator);
-  box-shadow: var(--mx-shadow-panel);
-}
-
-.teamModalTitle {
-  margin: 0;
-  font: var(--mx-font-heading);
-  font-weight: 600;
-  color: var(--mx-text);
-}
-
-.teamModalName {
-  width: 100%;
-  padding: var(--mx-space-2);
-  border: 1px solid var(--mx-border-strong);
-  border-radius: var(--mx-radius-control);
-  background: var(--mx-bg-surface);
-  font: var(--mx-font-body);
-  color: var(--mx-text);
-  outline: none;
-}
-
-.teamModalName:focus {
-  border-color: var(--mx-accent);
-}
-
-.teamModalRow {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-3);
-  min-height: 32px;
-}
-
-.teamModalPickerWrap {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.teamModalAdd {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px dashed var(--mx-border-strong);
-  background: var(--mx-bg-surface);
-  color: var(--mx-text-secondary);
-  font: var(--mx-font-body);
-  line-height: 1;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.teamModalAdd:hover {
-  color: var(--mx-accent);
-  border-color: var(--mx-accent);
-}
-
-.teamModalFoot {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--mx-space-2);
-}
-
-/* 成员选择浮层内的成员行 */
-.memberItem {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-2);
-  font: var(--mx-font-body);
-  color: var(--mx-text);
-  cursor: pointer;
 }
 
 .cfgDesc {

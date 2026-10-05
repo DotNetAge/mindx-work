@@ -18,6 +18,9 @@ import type {
   MarketAgentPackage,
   MarketListResult,
   SkillInfo,
+  TeamDetail,
+  TeamMeta,
+  TeamUpdateParams,
 } from './types'
 import { FIXED_DOMAINS } from './types'
 
@@ -27,6 +30,7 @@ const DAEMON_CONNECTION = 'daemon.connection'
 /** daemon 连接服务结构契约（消费侧仅声明所需形状） */
 interface DaemonConnection {
   call<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
+  onNotification(method: string, cb: (params: unknown) => void): () => void
 }
 
 /** 同名智能体冲突（后端默认拒绝已存在目标；调用方捕获后走覆盖确认重试） */
@@ -79,6 +83,11 @@ export function skillDisplayName(s: SkillInfo): string {
 export function skillLocaleDesc(s: SkillInfo): string {
   const zh = s.metadata?.description_zh
   return (typeof zh === 'string' && zh.trim()) || s.description || ''
+}
+
+/** 团队展示名（统一显示规则同员工）：昵称优先，回退团队名 */
+export function teamDisplayName(t: TeamMeta): string {
+  return (typeof t.nick_name === 'string' && t.nick_name.trim()) || t.name
 }
 
 export const useAgentsStore = defineStore('agents-store', () => {
@@ -143,6 +152,97 @@ export const useAgentsStore = defineStore('agents-store', () => {
     const res = await daemon.call<HireResult>('agent.fire', { name })
     const target = agents.value.find((a) => a.name === name)
     if (target) target.hired = res.hired
+  }
+
+  // ---------- 团队（一等 Team 实体，team.* RPC） ----------
+  const teams = ref<TeamMeta[]>([])
+  const teamsLoading = ref(false)
+  const teamsLoaded = ref(false)
+  /** 正在执行团队雇佣/解雇/删除的团队名（按钮 loading，防连点） */
+  const teamOperating = ref('')
+
+  async function refreshTeams(): Promise<void> {
+    teams.value = await daemon.call<TeamMeta[]>('team.list', {})
+    teamsLoaded.value = true
+  }
+
+  /** 带加载态拉取团队清单（团队招聘区首开与动作后刷新） */
+  async function loadTeams(): Promise<void> {
+    teamsLoading.value = true
+    try {
+      await refreshTeams()
+    } finally {
+      teamsLoading.value = false
+    }
+  }
+
+  /** 已雇佣团队（切换器去重与团队会话口径） */
+  const hiredTeams = computed<TeamMeta[]>(() => teams.value.filter((t) => t.hired))
+
+  /** 拉取团队详情（profile 正文以 team.get 为准） */
+  async function loadTeamDetail(name: string): Promise<TeamDetail> {
+    return daemon.call<TeamDetail>('team.get', { name })
+  }
+
+  /** 保存团队（team.update，创建与编辑共用；指针语义见 TeamUpdateParams） */
+  async function updateTeam(params: TeamUpdateParams): Promise<void> {
+    await daemon.call('team.update', params)
+  }
+
+  /** 删除团队（team.delete；成功后局部移出清单） */
+  async function deleteTeam(name: string): Promise<void> {
+    await daemon.call('team.delete', { name })
+    teams.value = teams.value.filter((t) => t.name !== name)
+  }
+
+  /** 雇佣团队（team.hire）；返回结构未冻结，成功后重拉清单对齐 hired 态 */
+  async function hireTeam(name: string): Promise<void> {
+    teamOperating.value = name
+    try {
+      await daemon.call('team.hire', { name })
+      await refreshTeams()
+    } finally {
+      teamOperating.value = ''
+    }
+  }
+
+  /** 解雇团队（team.fire）；同 hireTeam 重拉清单 */
+  async function fireTeam(name: string): Promise<void> {
+    teamOperating.value = name
+    try {
+      await daemon.call('team.fire', { name })
+      await refreshTeams()
+    } finally {
+      teamOperating.value = ''
+    }
+  }
+
+  // 团队/员工热重载广播：团队整包安装（market.install kind=team）等外部变更落盘后
+  // daemon 广播到达即静默重拉清单（已加载过才拉，避免后台空转；失败不打扰，下次
+  // 广播或手动刷新自愈。范式同 skills store 的 skills_changed 订阅）
+  daemon.onNotification('teams_changed', () => {
+    if (!teamsLoaded.value) return
+    void refreshTeams().catch(() => {
+      // 后台保新失败不打扰（下次广播自愈）
+    })
+  })
+  daemon.onNotification('agents_changed', () => {
+    if (!loaded.value) return
+    void refreshAgents().catch(() => {
+      // 后台保新失败不打扰（下次广播自愈）
+    })
+  })
+
+  // ---------- 团队编辑器（TeamsRecruitRow / AgentsManagerRow 共用对话框的数据源） ----------
+  /** null = 关闭；mode=create 新建，mode=edit 以 name 预填（profile 经 team.get 回填） */
+  const teamEditor = ref<{ mode: 'create' | 'edit'; name?: string } | null>(null)
+
+  function openTeamEditor(mode: 'create' | 'edit', name?: string): void {
+    teamEditor.value = { mode, name }
+  }
+
+  function closeTeamEditor(): void {
+    teamEditor.value = null
   }
 
   // ---------- 在线市场（agent 类型分发包；懒加载：首次切到市场视图才拉清单） ----------
@@ -300,6 +400,22 @@ export const useAgentsStore = defineStore('agents-store', () => {
     operating,
     hire,
     fire,
+    // 团队（一等 Team 实体）
+    teams,
+    teamsLoading,
+    teamsLoaded,
+    teamOperating,
+    loadTeams,
+    refreshTeams,
+    hiredTeams,
+    loadTeamDetail,
+    updateTeam,
+    deleteTeam,
+    hireTeam,
+    fireTeam,
+    teamEditor,
+    openTeamEditor,
+    closeTeamEditor,
     // 市场
     marketPackages,
     marketWarning,

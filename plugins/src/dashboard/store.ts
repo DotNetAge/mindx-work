@@ -5,10 +5,13 @@
  * HTML/CSS/JS 即 Widget 本体——Agent 写静态网页 = 构建界面，无预置类型、
  * 无外部数据文件（此前八类注册表 + dataRef 方案已废弃，与「Skill 供给
  * 千变万化」的心智冲突）。
- * 命名：对外语义统一「仪表板」（.dash / .agents/dashboards/）；目录与代码
+ * 命名：对外语义统一「仪表板」（.dash）；目录与代码
  * 标识符 2026-10-02 起统一 dashboard 词根（此前「保留 kanban 词根」的旧决定
  * 已废止，Kanban 词根让位给将来的任务流看板语义）。
- * 数据通道：daemon fs.list（清单）+ fs.read_base64（base64 经 UTF-8 解码，
+ * 清单来源（2026-10-04）：fs.find 全项目递归取 *.dash（daemon 侧剪枝依赖
+ * 目录 + 结果上限）——项目内任意目录的 .dash 都进 sidebar，不再限定
+ * .agents/dashboards/ 约定位置。
+ * 数据通道：daemon fs.find（清单）+ fs.read_base64（base64 经 UTF-8 解码，
  * atob 直转会中文乱码）。
  * 刷新通道：订阅 daemon tool_exec_end / loop_end，400ms trailing 合并静默
  * 重读（file_modified 仅工具执行前且仅首次入表发出，覆盖不了「写完即生效」）。
@@ -85,6 +88,8 @@ export interface BoardListItem {
   name: string
   /** <board name> 属性解析值（缺失/解析失败回退文件名） */
   title: string
+  /** 相对项目目录的路径（tooltip 标识来源，区分不同子目录的同名仪表板） */
+  relPath: string
 }
 
 /** fs.list 条目（消费侧本地形状） */
@@ -192,10 +197,9 @@ export const useDashboardStore = defineStore('dashboard-store', () => {
   /** 当前工作区仪表板清单（Sidebar 节数据源） */
   const boardList = ref<BoardListItem[]>([])
 
-  /** 工作区仪表板目录（跟随当前会话工作目录；无对话插件 / 未开目录 = 空） */
-  const dashboardsDir = computed(() => {
-    const dir = (chatflow?.store.currentProjectDir || '').replace(/\/+$/, '')
-    return dir ? dir + '/.agents/dashboards' : ''
+  /** 当前项目目录（跟随当前会话工作目录；无对话插件 / 未开目录 = 空） */
+  const projectDir = computed(() => {
+    return (chatflow?.store.currentProjectDir || '').replace(/\/+$/, '')
   })
 
   /** 读仪表板文件并解析 */
@@ -240,22 +244,24 @@ export const useDashboardStore = defineStore('dashboard-store', () => {
   /** 清单标题缓存：path → { modTime, title }（mod_time 未变直接复用，避免高频事件全量重读文件） */
   const titleCache = new Map<string, { modTime: string; title: string }>()
 
-  /** 刷新当前工作区仪表板清单（目录不存在等一律静默置空；标题取 <board name>，回退文件名） */
+  /** 刷新当前项目内仪表板清单：fs.find 全项目递归取 *.dash（daemon 剪枝依赖
+   * 目录并限结果数），标题取 <board name> 回退文件名；目录不存在等一律静默置空 */
   async function refreshList(): Promise<void> {
-    const dir = dashboardsDir.value
+    const dir = projectDir.value
     if (!dir) {
       boardList.value = []
       return
     }
     try {
-      const entries = await daemon.call<FsEntry[]>('fs.list', { path: dir })
+      const entries = await daemon.call<FsEntry[]>('fs.find', { path: dir, pattern: '*.dash' })
       const files = entries.filter((e) => !e.is_dir && e.name.toLowerCase().endsWith('.dash'))
       boardList.value = await Promise.all(
         files.map(async (e) => {
           const fallback = e.name.replace(/\.dash$/i, '')
+          const relPath = e.path.startsWith(dir + '/') ? e.path.slice(dir.length + 1) : e.path
           const cached = titleCache.get(e.path)
           if (cached && cached.modTime === e.mod_time) {
-            return { path: e.path, name: fallback, title: cached.title }
+            return { path: e.path, name: fallback, title: cached.title, relPath }
           }
           let title = fallback
           try {
@@ -265,7 +271,7 @@ export const useDashboardStore = defineStore('dashboard-store', () => {
             // 读失败回退文件名（Agent 可能正在写盘中）
           }
           titleCache.set(e.path, { modTime: e.mod_time, title })
-          return { path: e.path, name: fallback, title }
+          return { path: e.path, name: fallback, title, relPath }
         }),
       )
     } catch {
@@ -292,7 +298,7 @@ export const useDashboardStore = defineStore('dashboard-store', () => {
 
   // 工作目录变化 / daemon 重连 → 重拉清单（isConnected 复用 chatflow 连接态）
   watch(
-    [dashboardsDir, () => chatflow?.store.isConnected ?? false],
+    [projectDir, () => chatflow?.store.isConnected ?? false],
     () => {
       void refreshList()
     },

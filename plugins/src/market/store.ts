@@ -1,6 +1,7 @@
 /**
- * market 插件内部状态（Model）：已安装清单 + 市场索引 + 安装/启停/切版/卸载动作。
- * 壳编排归组件（Overlay.add/remove），本 store 只持数据与宿主桥调用。
+ * market 插件内部状态（Model）：已安装清单 + 市场索引 + 安装/启停/切版/卸载动作 +
+ * mindx 市场团队货架（kind=team 团队整包招聘，经 daemon.connection 服务）。
+ * 壳编排归组件（Overlay.add/remove），本 store 只持数据与宿主桥/daemon 调用。
  * 环境边界（契约 §17）：市场索引是网络数据，渲染侧消费处做结构校验（schemaVersion 未知拒绝）；
  * 宿主桥缺失（纯 Web）时全部动作显式报错，不做静默降级。
  */
@@ -17,6 +18,69 @@ import {
   type MarketVersionView,
 } from '@mindx-work/ui-shell'
 import { useService } from '@mindx-work/ui-shell-vue'
+
+// 服务以纯字符串名消费（插件间禁止 import；契约 §10.2）
+const DAEMON_CONNECTION = 'daemon.connection'
+
+/** daemon 连接服务结构契约（消费侧仅声明所需形状） */
+interface DaemonConnection {
+  call<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
+}
+
+/** 同名冲突（团队或任一成员 Agent 已存在，后端默认拒绝；调用方捕获后走覆盖确认重试） */
+export class TeamExistsError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TeamExistsError'
+  }
+}
+
+/**
+ * mindx 市场分发包条目（market.list 货架项）。本插件仅消费 kind=team 的团队整包
+ * （安装 = 团队 + 全部成员 Agent 一次落位，成员默认未雇佣），字段与冻结协议对齐。
+ */
+export interface MarketTeamPackage {
+  kind: 'agent' | 'skill' | 'team'
+  name: string
+  description?: string
+  icon?: string
+  /** 昵称（展示主名；缺失回退 name） */
+  nick_name?: string
+  /** 业务分类（中文原文） */
+  category?: string
+  /** 负责人 Agent 名（kind=team） */
+  leader?: string
+  /** 包内成员 Agent 名（kind=team，含负责人；卡片显示成员数） */
+  members?: string[]
+  /** 包版本 */
+  version?: string
+  file: string
+  sha256: string
+  size?: number
+}
+
+/** market.list 结果（仅保留本插件消费字段） */
+interface MarketTeamListResult {
+  packages: MarketTeamPackage[]
+  source: 'remote' | 'cache'
+  /** 降级原因（source=cache 时非空） */
+  warning?: string
+}
+
+/** market.install 结果（kind=team 时 members 报告落位的成员 Agent 名，含负责人） */
+export interface TeamInstallResult {
+  kind: 'agent' | 'skill' | 'team'
+  name: string
+  skills_global?: string[]
+  skills_agent?: string[]
+  members?: string[]
+  overwritten?: boolean
+}
+
+/** 团队包展示名（统一显示规则：昵称优先，回退包名） */
+export function teamPkgDisplayName(pkg: MarketTeamPackage): string {
+  return (typeof pkg.nick_name === 'string' && pkg.nick_name.trim()) || pkg.name
+}
 
 function bridge(): NonNullable<Window['mxDesktop']>['plugins'] {
   const plugins = window.mxDesktop?.plugins
@@ -72,6 +136,14 @@ export const useMarketStore = defineStore('market', () => {
   const runtime = useService<MarketRuntime>(MARKET_RUNTIME_SERVICE)
   // 预置插件目录（app 装配层 provide）：全量视图的「内置」段数据源
   const coreCatalog = useService<CorePluginInfo[]>(PLUGIN_CATALOG_SERVICE)
+  // daemon 连接为可选依赖：团队货架是智能主机能力，服务缺失时货架区块隐藏而非崩溃
+  const daemon = (() => {
+    try {
+      return useService<DaemonConnection>(DAEMON_CONNECTION)
+    } catch {
+      return null
+    }
+  })()
 
   const installed = ref<InstalledPluginView[]>([])
   /** 预置插件快照（拷贝防外部改写 provide 的原数组） */
@@ -324,6 +396,94 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
+  // ---------- 团队货架（mindx 市场 kind=team 包，团队整包招聘；daemon RPC） ----------
+  const teamPackages = ref<MarketTeamPackage[]>([])
+  const teamMarketWarning = ref('')
+  const teamMarketLoaded = ref(false)
+  const teamMarketLoading = ref(false)
+  const teamMarketError = ref<string | null>(null)
+  /** 正在安装的团队包名（按钮 loading） */
+  const installingTeam = ref('')
+
+  /** 团队货架可用性（daemon 连接存在才展示区块） */
+  const teamAvailable = computed(() => daemon !== null)
+
+  /** 拉取团队货架（仅展示 team 类型包；在线优先，失败降级本地缓存并附 warning） */
+  async function loadTeamMarket(): Promise<void> {
+    if (!daemon) return
+    teamMarketLoading.value = true
+    teamMarketError.value = null
+    try {
+      const res = await daemon.call<MarketTeamListResult>('market.list', {})
+      teamPackages.value = (res.packages || []).filter((p) => p.kind === 'team')
+      teamMarketWarning.value = res.warning || ''
+      teamMarketLoaded.value = true
+    } catch (error) {
+      teamMarketError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      teamMarketLoading.value = false
+    }
+  }
+
+  /** 安装团队整包（market.install kind=team）：团队 + 全部成员 Agent 一次落位，
+   * 成员默认未雇佣。同名冲突（团队/任一成员）默认拒绝——错误消息含"已存在同名"
+   * 时抛 TeamExistsError 供覆盖确认后 overwrite 重试 */
+  async function installTeamPackage(pkg: MarketTeamPackage, overwrite = false): Promise<TeamInstallResult> {
+    if (!daemon) throw new Error('团队安装需要连接智能主机')
+    try {
+      return await daemon.call<TeamInstallResult>('market.install', {
+        kind: 'team',
+        name: pkg.name,
+        ...(overwrite ? { overwrite: true } : {}),
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('已存在同名')) throw new TeamExistsError(msg)
+      throw err
+    }
+  }
+
+  /** 团队整包安装入口（组件调用）：installing loading 包裹，结果与异常原样上抛
+   * （编排归组件：成功通知与覆盖确认 modal 由组件处理，范式同 agents 插件） */
+  async function installTeam(pkg: MarketTeamPackage): Promise<TeamInstallResult> {
+    installingTeam.value = pkg.name
+    try {
+      return await installTeamPackage(pkg)
+    } finally {
+      installingTeam.value = ''
+    }
+  }
+
+  // ---------- 团队安装确认范式（modal 组件消费；覆盖重试用，形状对齐 agents 插件） ----------
+  const teamPendingConfirm = ref<{ title: string; message: string; confirmText: string; successText: string } | null>(null)
+  let teamConfirmAction: (() => Promise<unknown>) | null = null
+
+  function requestTeamConfirm(
+    title: string,
+    message: string,
+    confirmText: string,
+    successText: string,
+    action: () => Promise<unknown>,
+  ): void {
+    teamPendingConfirm.value = { title, message, confirmText, successText }
+    teamConfirmAction = action
+  }
+
+  /** 确认执行：清空状态后执行动作，返回成功文案供调用方推送通知 */
+  async function runTeamConfirm(): Promise<string | undefined> {
+    const action = teamConfirmAction
+    const successText = teamPendingConfirm.value?.successText
+    teamConfirmAction = null
+    teamPendingConfirm.value = null
+    await action?.()
+    return successText
+  }
+
+  function cancelTeamConfirm(): void {
+    teamConfirmAction = null
+    teamPendingConfirm.value = null
+  }
+
   return {
     installed,
     corePlugins,
@@ -345,5 +505,20 @@ export const useMarketStore = defineStore('market', () => {
     uninstall,
     exportPlugin,
     importFromFile,
+    // 团队货架（mindx 市场 kind=team 包）
+    teamPackages,
+    teamMarketWarning,
+    teamMarketLoaded,
+    teamMarketLoading,
+    teamMarketError,
+    installingTeam,
+    teamAvailable,
+    loadTeamMarket,
+    installTeam,
+    installTeamPackage,
+    teamPendingConfirm,
+    requestTeamConfirm,
+    runTeamConfirm,
+    cancelTeamConfirm,
   }
 })

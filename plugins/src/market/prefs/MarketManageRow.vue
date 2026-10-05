@@ -8,9 +8,12 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import type { InstalledPluginView } from '@mindx-work/ui-shell'
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
-import { useMarketStore } from '../store'
-import { OVERLAY_CONFIRM } from '../ids'
+import { useMarketStore, teamPkgDisplayName, TeamExistsError } from '../store'
+import type { MarketTeamPackage } from '../store'
+import { OVERLAY_CONFIRM, MODAL_TEAM_CONFIRM } from '../ids'
 import InstallConfirmModal from '../overlays/InstallConfirmModal.vue'
+import TeamConfirmModal from '../overlays/TeamConfirmModal.vue'
+import { pushNotice } from '../notice'
 
 const store = useMarketStore()
 const shell = useShell()
@@ -21,6 +24,7 @@ const verMenuFor = ref<string | null>(null)
 onMounted(() => {
   void store.refreshInstalled()
   void store.refreshMarket()
+  void store.loadTeamMarket()
   window.addEventListener('click', closeVerMenu)
 })
 onUnmounted(() => window.removeEventListener('click', closeVerMenu))
@@ -55,6 +59,39 @@ function onSwitchVersion(view: InstalledPluginView, version: string) {
 
 function onExport(view: InstalledPluginView) {
   void store.exportPlugin(view)
+}
+
+/** modal 互斥惯例：add 前先 remove 同 id（同 onInstall） */
+function openTeamConfirm() {
+  if (shell.Overlay.has(MODAL_TEAM_CONFIRM)) shell.Overlay.remove(MODAL_TEAM_CONFIRM)
+  shell.Overlay.add({ id: MODAL_TEAM_CONFIRM, kind: 'modal', component: TeamConfirmModal })
+}
+
+/** 团队整包安装：成功推通知（成员落位数随结果带回）；同名冲突（团队/任一成员
+ * 已存在）排队覆盖确认后 overwrite 重试（agents 插件范式）。团队/员工清单的
+ * 刷新由 daemon 的 teams_changed / agents_changed 广播驱动（agents 插件订阅） */
+function onInstallTeam(pkg: MarketTeamPackage) {
+  void store
+    .installTeam(pkg)
+    .then((result) => {
+      const members = result.members?.length ?? 0
+      pushNotice(shell, 'success', `已安装团队「${teamPkgDisplayName(pkg)}」${members > 0 ? `及 ${members} 名成员` : ''}`)
+    })
+    .catch((err: unknown) => {
+      if (err instanceof TeamExistsError) {
+        const m = err.message.match(/已存在同名(团队|智能体)\s*"([^"]+)"/)
+        store.requestTeamConfirm(
+          '同名冲突',
+          `已存在同名${m?.[1] || '团队'}「${m?.[2] || pkg.name}」，是否覆盖？覆盖后原团队与同名成员内容将被替换，不可恢复。`,
+          '覆盖安装',
+          `已覆盖安装「${teamPkgDisplayName(pkg)}」`,
+          () => store.installTeamPackage(pkg, true),
+        )
+        openTeamConfirm()
+        return
+      }
+      pushNotice(shell, 'error', err instanceof Error ? err.message : '安装失败')
+    })
 }
 </script>
 
@@ -181,6 +218,60 @@ function onExport(view: InstalledPluginView) {
       <p v-if="!store.hasBridge" :class="$style.hint">当前环境不支持插件市场（需要应用宿主）。</p>
     </section>
 
+    <!-- 团队市场（mindx 市场 kind=team 团队整包；daemon 连接存在才展示） -->
+    <section v-if="store.teamAvailable">
+      <div :class="$style.sectionHead">
+        <span :class="$style.sectionTitle">团队市场</span>
+        <div :class="$style.headActions">
+          <button
+            type="button"
+            class="mx-icon-btn"
+            aria-label="刷新团队货架"
+            :disabled="store.teamMarketLoading"
+            @click="store.loadTeamMarket()"
+          >
+            <MxIcon name="lucide:refresh-cw" :size="16" />
+          </button>
+        </div>
+      </div>
+      <p v-if="store.teamMarketWarning" :class="$style.hint">{{ store.teamMarketWarning }}</p>
+      <p v-if="store.teamMarketLoading && !store.teamMarketLoaded" :class="[$style.hint, 'mx-text-loading']">
+        正在加载团队货架…
+      </p>
+      <p v-else-if="store.teamMarketError" :class="$style.error">{{ store.teamMarketError }}</p>
+      <div v-for="pkg in store.teamPackages" :key="pkg.name" :class="$style.marketItem">
+        <img v-if="pkg.icon" :class="$style.teamAvatar" :src="pkg.icon" :alt="teamPkgDisplayName(pkg)" />
+        <span v-else :class="$style.teamAvatar">{{ (teamPkgDisplayName(pkg) || '?').charAt(0).toUpperCase() }}</span>
+        <div :class="$style.itemText">
+          <div :class="$style.nameRow">
+            <span :class="$style.itemName">{{ teamPkgDisplayName(pkg) }}</span>
+            <span class="mx-tag" data-tone="info">团队</span>
+          </div>
+          <span :class="$style.itemVersion">{{ pkg.name }}</span>
+          <div :class="$style.tagRow">
+            <span class="mx-tag" data-tone="neutral">负责人 {{ pkg.leader || '—' }}</span>
+            <span class="mx-tag" data-tone="neutral">{{ (pkg.members || []).length }} 名成员</span>
+          </div>
+          <span :class="$style.desc">{{ pkg.description || '暂无描述' }}</span>
+        </div>
+        <button
+          type="button"
+          class="mx-btn"
+          :disabled="store.installingTeam === pkg.name"
+          @click="onInstallTeam(pkg)"
+        >
+          <span v-if="store.installingTeam === pkg.name" class="mx-text-loading">安装中…</span>
+          <template v-else>安装</template>
+        </button>
+      </div>
+      <p
+        v-if="store.teamMarketLoaded && store.teamPackages.length === 0 && !store.teamMarketError"
+        :class="$style.hint"
+      >
+        团队货架暂无可安装的团队整包。
+      </p>
+    </section>
+
     <p v-if="store.lastError" :class="$style.error">{{ store.lastError }}</p>
   </div>
 </template>
@@ -279,5 +370,34 @@ function onExport(view: InstalledPluginView) {
 
 .marketItem + .marketItem {
   margin-top: var(--mx-space-2);
+}
+
+/* 团队卡头像：圆形，首字回退（对齐团队招聘区卡片口径） */
+.teamAvatar {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--mx-module);
+  font: var(--mx-font-heading);
+  color: var(--mx-text-secondary);
+  object-fit: cover;
+}
+
+/* 展示名 + 团队标识同行 */
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-1);
+}
+
+/* 负责人 / 成员数标签行 */
+.tagRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-1);
+  flex-wrap: wrap;
 }
 </style>

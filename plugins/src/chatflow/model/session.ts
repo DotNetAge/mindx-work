@@ -6,6 +6,8 @@
 export interface Session {
   session_id: string
   agent_name?: string
+  /** 团队会话归属团队名（空 = 个人会话；团队/个人互不复用与 Sidebar 团队标识依据） */
+  team_name?: string
   title: string
   created_at: string
   updated_at: string

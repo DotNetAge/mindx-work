@@ -4,20 +4,21 @@
  * SessionDrawer 仅作参考不搬形状）。
  *
  * 列表形态（全量分组制，2026-09-26 定稿）：一次性拉取全量会话（store.loadSessions，
- * session.list 无参），本地按目录名（工作目录去路径）分组；分组跟随当前 Agent
- * （Agent 变化分组随之刷新）。「最近讨论」捷径区取 Daemon 范围内最近活跃会话
- * （跨 Agent，daemon 按 LastActivityAt 倒序返回，前端截取前 N 条）。
+ * session.list 无参），本地按目录名（工作目录去路径）分组；分组跟随当前主体
+ * （切换器换 Agent / 团队分组随之刷新，团队会话按 team_name 与个人互不混列）。
  *
  * 行四要素：任务名（title）+ 运行状态（busySessions）+ 最后活动时间 + 未读标记
- * （store.unreadBySession，后台会话终态事件计数）；无内容预览。
+ * （store.unreadBySession，后台会话终态事件计数）；无内容预览。团队会话行首
+ * 以团队头像标识（team_name 口径），tooltip 标题带团队名前缀。
  *
  * 点击语义（捷径）：点击任务行 = 直接打开该工作目录 → 加载该会话消息
  * （switchToSession 内先切 Agent 再切会话，一步直达）；「新会话」= 清空对话流
  * （保留目录与 Agent，会话懒建于首条消息发送时）+ 激活对话页。
  *
  * Agent 切换器（源 AgentSwitcher 形态移植）：数据消费 agents.registry 服务
- * （插件间禁止 import，消费侧本地声明形状），仅列已招募（hired）Agent；
- * currentAgent 为空时自动选中首个已招募 Agent（新会话归属与发送前置）。
+ * （插件间禁止 import，消费侧本地声明形状），列团队条目（已雇佣）+ 已招募个人
+ * Agent（已雇佣团队的负责人去重为团队条目）；选团队 = store.selectAgent(leader,
+ * team)（团队会话，会话懒建时 session.create 带 team 且 agent 为负责人）。
  *
  * 样式：全量 --mx-* 语义 token（军规 3），desktop token 按移植计划附录 A 映射；
  * 行几何对齐壳 SidebarPane 行（34px / radius 8），按钮卡对齐壳 rowButton（38px）。
@@ -41,6 +42,16 @@ interface AgentsRegistry {
       hired?: boolean
     }>
   >
+  /** 一等 Team 实体清单（team.list 原样返回，含 hired 标记与 leader 引用） */
+  teams(): Promise<
+    Array<{
+      name: string
+      nick_name?: string
+      leader: string
+      icon?: string
+      hired?: boolean
+    }>
+  >
 }
 
 const agentsRegistry = useService<AgentsRegistry>('agents.registry')
@@ -50,20 +61,42 @@ const store = useChatflowStore()
 // ── 折叠 rail 形态（壳传 compact）：仅渲染「新任务」36px 图标钮 ──
 const props = defineProps<{ compact?: boolean }>()
 
-// ── Agent 清单（仅已招募）──
+// ── Agent / 团队清单（仅已招募；团队条目与个人条目合成切换器选项）──
 const agents = ref<Array<{ name: string; role?: string; nick_name?: string; icon?: string }>>([])
 const agentsLoading = ref(false)
+const teams = ref<Array<{ name: string; nick_name?: string; leader: string; icon?: string; hired?: boolean }>>([])
+
+/** 已雇佣团队（切换器团队条目与负责人去重口径） */
+const hiredTeams = computed(() => teams.value.filter((t) => t.hired))
+
+/**
+ * 已雇佣团队的负责人名集合：负责人不再作为个人条目出现（只出现团队条目），
+ * 切换器个人清单据此去重。
+ */
+const hiredTeamLeaderNames = computed(() => new Set(hiredTeams.value.map((t) => t.leader)))
+
+/** 团队展示名：昵称优先回退团队名 */
+const teamNameOf = (t: { name: string; nick_name?: string }): string => t.nick_name?.trim() || t.name
 
 async function refreshAgents(): Promise<void> {
   agentsLoading.value = true
   try {
-    const list = await agentsRegistry.list()
+    const [list, teamList] = await Promise.all([agentsRegistry.list(), agentsRegistry.teams().catch(() => [])])
     agents.value = (list || [])
       .filter((a) => a.hired)
       .map((a) => ({ name: a.name, role: a.role, nick_name: a.nick_name, icon: a.icon }))
-    // 缺省选中：currentAgent 为空时取首个已招募 Agent（新会话归属与发送前置）
-    if (!store.currentAgent && agents.value[0]) {
-      store.currentAgent = agents.value[0].name
+    teams.value = teamList || []
+    // 缺省选中：currentAgent 为空时取首个已招募个人 Agent（已雇佣团队负责人已被
+    // 去重，不落个人条目）；个人清单为空时回退首个已雇佣团队
+    if (!store.currentAgent) {
+      const firstPersonal = agents.value.find((a) => !hiredTeamLeaderNames.value.has(a.name))
+      if (firstPersonal) {
+        store.selectAgent(firstPersonal.name, '')
+      } else if (hiredTeams.value[0]) {
+        store.selectAgent(hiredTeams.value[0].leader, hiredTeams.value[0].name)
+      } else if (agents.value[0]) {
+        store.selectAgent(agents.value[0].name, '')
+      }
     }
   } catch (err) {
     console.warn('[ChatFlow] Agent 清单加载失败:', err)
@@ -74,25 +107,39 @@ async function refreshAgents(): Promise<void> {
 
 /**
  * 触发器与下拉项展示（显示规则：昵称主名 + Role 小字，昵称缺失回退 role，
- * role 小字仅昵称生效时显示避免重复；头像 icon 优先、首字兜底）
+ * role 小字仅昵称生效时显示避免重复；头像 icon 优先、首字兜底）。
+ * 团队视图（currentTeam 非空）下触发器显示团队名与团队 icon。
  */
+const currentTeamInfo = computed(() => teams.value.find((t) => t.name === store.currentTeam) || null)
 const currentAgentInfo = computed(() => agents.value.find((a) => a.name === store.currentAgent) || null)
 const agentDisplayName = (a?: { name: string; role?: string; nick_name?: string } | null): string =>
   a?.nick_name || a?.role || a?.name || ''
 // 悬空引用（会话归属的 Agent 已不在已招募列表）直接显示该 Agent 名，不落「未选择」
 const triggerName = computed(() => {
   if (agentsLoading.value && !agents.value.length) return '加载中…'
+  if (currentTeamInfo.value) return teamNameOf(currentTeamInfo.value)
   return agentDisplayName(currentAgentInfo.value) || store.currentAgent || '未选择'
 })
-const triggerRole = computed(() => (currentAgentInfo.value?.nick_name && currentAgentInfo.value.role ? currentAgentInfo.value.role : ''))
+const triggerRole = computed(() => (currentTeamInfo.value ? '' : currentAgentInfo.value?.nick_name && currentAgentInfo.value.role ? currentAgentInfo.value.role : ''))
+/** 触发器头像源：团队视图用团队 icon，个人视图用 Agent icon */
+const triggerIcon = computed(() => currentTeamInfo.value?.icon || currentAgentInfo.value?.icon)
 
 function handleAgentCommand(command: string | number | object): void {
-  const name = String(command)
-  if (!name || name === store.currentAgent) return
-  store.currentAgent = name
+  const raw = String(command)
+  // 团队条目带前缀（个人 Agent 名可能含冒号，团队名同理；解析只剥一个已知前缀）
+  if (raw.startsWith('team:')) {
+    const teamName = raw.slice(5)
+    const t = teams.value.find((x) => x.name === teamName)
+    if (!t || (t.name === store.currentTeam && t.leader === store.currentAgent)) return
+    // 选团队 = 新建团队会话：agent 传负责人 + currentTeam 置位
+    store.selectAgent(t.leader, t.name)
+    return
+  }
+  if (!raw || (raw === store.currentAgent && !store.currentTeam)) return
+  store.selectAgent(raw, '')
 }
 
-// ── 全量分组制：按目录名分组，分组跟随当前 Agent（desktop 同构：无 agent 归属的会话随当前 Agent 展示）──
+// ── 全量分组制：按目录名分组，分组跟随当前主体（团队/个人互不混列）──
 const RECENT_LIMIT = 5
 
 function dirBasename(dir?: string): string {
@@ -101,7 +148,16 @@ function dirBasename(dir?: string): string {
   return d.split('/').pop() || d
 }
 
-const groupedSessions = computed(() => store.sessions.filter((s) => !s.agent_name || s.agent_name === store.currentAgent))
+const groupedSessions = computed(() =>
+  store.sessions.filter((s) => {
+    // 团队会话只入团队视图，个人会话只入个人视图（team_name 口径，非 agent 名）
+    if ((s.team_name || '') !== store.currentTeam) return false
+    return !s.agent_name || s.agent_name === store.currentAgent
+  }),
+)
+
+/** 切换器个人条目：已招募 Agent 去除已雇佣团队的负责人（负责人只以团队条目出现） */
+const personalAgents = computed(() => agents.value.filter((a) => !hiredTeamLeaderNames.value.has(a.name)))
 
 const groups = computed(() => {
   const map = new Map<string, Session[]>()
@@ -136,7 +192,23 @@ const agentTagLabel = (name?: string): string => {
 const agentIconOf = (name?: string): string | undefined =>
   agents.value.find((x) => x.name === name)?.icon
 
+/** 团队会话归属标识：按 team_name 查团队清单（昵称主名 + 头像），悬空引用回退团队名 */
+const teamTagLabel = (name?: string): string => {
+  if (!name) return ''
+  const t = teams.value.find((x) => x.name === name)
+  return t ? teamNameOf(t) : name
+}
+const teamIconOf = (name?: string): string | undefined =>
+  teams.value.find((x) => x.name === name)?.icon
+
+/** 行标题：团队会话以团队名前缀标注归属（tooltip 展示），个人会话保持原名 */
 function rowTitle(s: Session): string {
+  const title = s.title || '未命名任务'
+  return s.team_name ? `【${teamTagLabel(s.team_name)}】${title}` : title
+}
+
+/** 行内直接可见的标题（团队归属由行首图标表达，标题不重复前缀） */
+function rowTitlePlain(s: Session): string {
   return s.title || '未命名任务'
 }
 
@@ -280,11 +352,12 @@ watch(
   </button>
 
   <div v-else :class="$style.root">
-    <!-- Agent 切换器：头像 + 昵称主名 + 右侧 Role 小字（昵称缺失回退 role），下拉仅列已招募 Agent
-         （popper-class：面板样式落在 EP popper 外壳，消除外壳/内层 UL 双框） -->
+    <!-- Agent 切换器：头像 + 昵称主名 + 右侧 Role 小字（昵称缺失回退 role），下拉列团队条目与
+         已招募个人 Agent（已雇佣团队负责人去重为团队条目；popper-class：面板样式落在 EP popper
+         外壳，消除外壳/内层 UL 双框） -->
     <el-dropdown trigger="click" popper-class="chatflow-agent-menu" @command="handleAgentCommand">
       <button type="button" :class="$style.agentTrigger">
-        <img v-if="currentAgentInfo?.icon" :src="currentAgentInfo.icon" :class="$style.agentAvatar" alt="" />
+        <img v-if="triggerIcon" :src="triggerIcon" :class="$style.agentAvatar" alt="" />
         <span v-else :class="[$style.agentAvatar, $style.agentAvatarFallback]">{{ triggerName.charAt(0) }}</span>
         <span :class="$style.agentName">{{ triggerName }}</span>
         <span v-if="triggerRole" :class="$style.agentRole">{{ triggerRole }}</span>
@@ -292,18 +365,31 @@ watch(
       </button>
       <template #dropdown>
         <el-dropdown-menu class="chatflow-agent-menu">
+          <!-- 团队条目（已雇佣）：command 带 team: 前缀，选中即团队会话 -->
           <el-dropdown-item
-            v-for="a in agents"
+            v-for="t in hiredTeams"
+            :key="'team-' + t.name"
+            :command="'team:' + t.name"
+            :disabled="t.name === store.currentTeam"
+          >
+            <img v-if="t.icon" :src="t.icon" class="chatflow-agent-item-avatar" alt="" />
+            <span v-else class="chatflow-agent-item-avatar chatflow-agent-item-avatar-fb">{{ teamNameOf(t).charAt(0) }}</span>
+            <span class="chatflow-agent-item-name">{{ teamNameOf(t) }}</span>
+            <span class="chatflow-agent-item-role">团队</span>
+          </el-dropdown-item>
+          <!-- 个人条目：已雇佣团队负责人已去重（只出现团队条目） -->
+          <el-dropdown-item
+            v-for="a in personalAgents"
             :key="a.name"
             :command="a.name"
-            :disabled="a.name === store.currentAgent"
+            :disabled="a.name === store.currentAgent && !store.currentTeam"
           >
             <img v-if="a.icon" :src="a.icon" class="chatflow-agent-item-avatar" alt="" />
             <span v-else class="chatflow-agent-item-avatar chatflow-agent-item-avatar-fb">{{ agentDisplayName(a).charAt(0) }}</span>
             <span class="chatflow-agent-item-name">{{ agentDisplayName(a) }}</span>
             <span v-if="a.nick_name && a.role" class="chatflow-agent-item-role">{{ a.role }}</span>
           </el-dropdown-item>
-          <el-dropdown-item v-if="!agents.length" disabled>
+          <el-dropdown-item v-if="!hiredTeams.length && !personalAgents.length" disabled>
             <span class="chatflow-agent-item-name">{{ agentsLoading ? '加载中…' : '暂无已招募的 Agent' }}</span>
           </el-dropdown-item>
         </el-dropdown-menu>
@@ -368,14 +454,27 @@ watch(
                 :class="$style.rowMain"
                 @click="openSession(s.session_id)"
               >
-                <!-- 行首聊天图标：任务分组行无 Agent 头像，以聊天图标标识会话身份；运行中呼吸 -->
+                <!-- 行首身份图标：个人会话 = 聊天图标；团队会话 = 团队头像（icon 优先、users 图标兜底）；运行中呼吸 -->
+                <img
+                  v-if="s.team_name && teamIconOf(s.team_name)"
+                  :src="teamIconOf(s.team_name)"
+                  :class="[$style.rowChatIcon, $style.rowChatImg, { [$style.breathing]: isRunning(s.session_id) }]"
+                  alt=""
+                />
                 <MxIcon
+                  v-else-if="s.team_name"
+                  name="lucide:users"
+                  :size="16"
+                  :class="[$style.rowChatIcon, { [$style.breathing]: isRunning(s.session_id) }]"
+                />
+                <MxIcon
+                  v-else
                   name="lucide:message-circle"
                   :size="16"
                   :class="[$style.rowChatIcon, { [$style.breathing]: isRunning(s.session_id) }]"
                 />
                 <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
-                  <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
+                  <span :class="$style.rowTitle">{{ rowTitlePlain(s) }}</span>
                 </el-tooltip>
                 <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
                 <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
@@ -448,9 +547,22 @@ watch(
                 :class="$style.rowMain"
                 @click="openSession(s.session_id)"
               >
-                <!-- 行首 Agent 头像（icon 优先、昵称/英文名首字兜底）：跨 Agent 捷径区标识归属；运行中呼吸 -->
+                <!-- 行首归属头像：团队会话 = 团队头像（icon 优先、团队名首字兜底），
+                     个人会话 = Agent 头像（icon 优先、昵称/英文名首字兜底）；运行中呼吸 -->
                 <img
-                  v-if="agentIconOf(s.agent_name)"
+                  v-if="s.team_name && teamIconOf(s.team_name)"
+                  :src="teamIconOf(s.team_name)"
+                  :class="[$style.rowAvatar, { [$style.breathing]: isRunning(s.session_id) }]"
+                  alt=""
+                />
+                <span
+                  v-else-if="s.team_name"
+                  :class="[$style.rowAvatar, $style.rowAvatarFallback, { [$style.breathing]: isRunning(s.session_id) }]"
+                >
+                  {{ teamTagLabel(s.team_name).charAt(0) }}
+                </span>
+                <img
+                  v-else-if="agentIconOf(s.agent_name)"
                   :src="agentIconOf(s.agent_name)"
                   :class="[$style.rowAvatar, { [$style.breathing]: isRunning(s.session_id) }]"
                   alt=""
@@ -462,7 +574,7 @@ watch(
                   {{ agentTagLabel(s.agent_name).charAt(0) }}
                 </span>
                 <el-tooltip :content="rowTitle(s)" placement="right" :show-after="500" :offset="8">
-                  <span :class="$style.rowTitle">{{ rowTitle(s) }}</span>
+                  <span :class="$style.rowTitle">{{ rowTitlePlain(s) }}</span>
                 </el-tooltip>
                 <span v-if="isRunning(s.session_id)" :class="$style.runningDot" />
                 <span v-if="hasUnread(s.session_id)" :class="$style.unreadDot" />
@@ -604,6 +716,14 @@ watch(
 .rowChatIcon {
   flex-shrink: 0;
   color: var(--mx-text-tertiary);
+}
+
+/* 团队头像 img（行首 16px 位）：圆形裁切填充聊天图标占位 */
+.rowChatImg {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 /* ── 运行中呼吸：行首元素明暗交替（头像/聊天图标通用）；
