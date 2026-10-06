@@ -5,7 +5,7 @@
  * 动作失败一律抛错由调用方呈现（banner），同名冲突以 AgentExistsError 供调用方走覆盖确认。
  */
 
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useService } from '@mindx-work/ui-shell-vue'
 import type {
@@ -217,6 +217,29 @@ export const useAgentsStore = defineStore('agents-store', () => {
     }
   }
 
+  // ---------- 决策计量：整体评价（白皮书《决策量表》7.2 管理页辅收集） ----------
+
+  /** 已评价对象当日集合（限频的本地镜像；daemon 校验为准） */
+  const ratedToday = reactive(new Set<string>())
+
+  /**
+   * 整体评价上报（agent.rate）：限频校验在 daemon（同对象每日一次）。
+   * 返回 ok=false + already_rated_today 时调用方提示"今日已评过"。
+   */
+  async function rateSubject(subjectType: 'agent' | 'team' | 'skill', name: string, value: 'up' | 'down', text?: string): Promise<{ ok: boolean; reason?: string }> {
+    const key = `${subjectType}:${name}`
+    if (ratedToday.has(key)) return { ok: false, reason: 'already_rated_today' }
+    const res = await daemon.call<{ ok?: boolean; reason?: string } | null>('agent.rate', {
+      subject_type: subjectType,
+      name,
+      value,
+      text: text || undefined,
+    })
+    if (res && res.ok === false) return { ok: false, reason: res.reason }
+    ratedToday.add(key)
+    return { ok: true }
+  }
+
   // 团队/员工热重载广播：团队整包安装（market.install kind=team）等外部变更落盘后
   // daemon 广播到达即静默重拉清单（已加载过才拉，避免后台空转；失败不打扰，下次
   // 广播或手动刷新自愈。范式同 skills store 的 skills_changed 订阅）
@@ -413,6 +436,9 @@ export const useAgentsStore = defineStore('agents-store', () => {
     deleteTeam,
     hireTeam,
     fireTeam,
+    // 决策计量：整体评价
+    rateSubject,
+    ratedToday,
     teamEditor,
     openTeamEditor,
     closeTeamEditor,

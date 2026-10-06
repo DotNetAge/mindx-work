@@ -10,6 +10,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useCssModule, watch } 
 import type { Component } from 'vue'
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import { useSkillsStore, skillDisplayName, skillLocaleDesc, isThirdParty, SkillExistsError } from '../store'
+import MetricRateButtons from './MetricRateButtons.vue'
 import { pushNotice } from '../notice'
 import { MODAL_SKILLS_CONFIRM, MODAL_SKILL_EDIT, MODAL_SKILL_LICENSE } from '../ids'
 import { renderMarkdown } from '../markdown'
@@ -520,6 +521,8 @@ onMounted(syncIndicator)
             <span v-if="isThirdParty(skill)" class="mx-tag" data-tone="warning">第三方</span>
             <!-- 操作组右上角（@click.stop 防触发卡片详情弹层） -->
             <div :class="$style.cardActions" @click.stop>
+              <!-- 决策计量：技能整体评价双指（agent.rate subject_type=skill，每日限频） -->
+              <MetricRateButtons :name="skill.name" />
               <button type="button" class="mx-icon-btn" aria-label="导出为分发包" @click="onExport(skill)">
                 <MxIcon name="lucide:download" :size="16" />
               </button>

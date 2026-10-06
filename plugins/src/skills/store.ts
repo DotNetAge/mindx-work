@@ -6,7 +6,7 @@
  * 动作失败一律抛错由调用方呈现（banner），同名冲突以 SkillExistsError 供调用方走覆盖确认。
  */
 
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useService } from '@mindx-work/ui-shell-vue'
 import type { MxDesktopBridge } from '@mindx-work/ui-shell'
@@ -198,6 +198,29 @@ export const useSkillsStore = defineStore('skills-store', () => {
 
   /** 已安装的全局技能名集合：市场包与全局库同名即视为已安装 */
   const installedNames = computed<Set<string>>(() => new Set(skills.value.map((s) => s.name)))
+
+  // ---------- 决策计量：技能整体评价（白皮书《决策量表》7.2 管理页辅收集） ----------
+
+  /** 已评价技能当日集合（限频的本地镜像；daemon 校验为准） */
+  const ratedToday = reactive(new Set<string>())
+
+  /**
+   * 技能整体评价上报（agent.rate subject_type=skill）：限频校验在 daemon。
+   * 返回 ok=false + already_rated_today 时调用方提示"今日已评过"。
+   */
+  async function rateSkill(name: string, value: 'up' | 'down', text?: string): Promise<{ ok: boolean; reason?: string }> {
+    const key = `skill:${name}`
+    if (ratedToday.has(key)) return { ok: false, reason: 'already_rated_today' }
+    const res = await daemon.call<{ ok?: boolean; reason?: string } | null>('agent.rate', {
+      subject_type: 'skill',
+      name,
+      value,
+      text: text || undefined,
+    })
+    if (res && res.ok === false) return { ok: false, reason: res.reason }
+    ratedToday.add(key)
+    return { ok: true }
+  }
 
   /** 市场卡片展示名：包内中文名 → 本地库中文名（已安装）→ 包名 */
   function marketDisplayName(pkg: MarketPackageInfo): string {
@@ -445,6 +468,9 @@ export const useSkillsStore = defineStore('skills-store', () => {
     marketLoading,
     installing,
     loadMarket,
+    // 决策计量：技能整体评价
+    rateSkill,
+    ratedToday,
     installedNames,
     marketDisplayName,
     marketDomains,

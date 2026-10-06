@@ -24,6 +24,7 @@ import {
 } from '../store'
 import { pushNotice } from '../notice'
 import { MODAL_AGENTS_CONFIRM, MODAL_AGENTS_LICENSE } from '../ids'
+import MetricRateButtons from './MetricRateButtons.vue'
 import ConfirmModal from '../overlays/ConfirmModal.vue'
 import LicenseModal from '../overlays/LicenseModal.vue'
 import TeamEditorModal from './TeamEditorModal.vue'
@@ -1075,6 +1076,8 @@ onMounted(() => {
               <span class="mx-tag" :data-tone="selectedTeam.hired ? 'success' : 'warning'">
                 {{ selectedTeam.hired ? '已雇佣' : '未雇佣' }}
               </span>
+              <!-- 决策计量：团队整体评价双指（agent.rate subject_type=team） -->
+              <MetricRateButtons subject-type="team" :name="selectedTeam.name" />
             </div>
             <span :class="$style.cfgRole">{{ selectedTeam.name }}</span>
             <p :class="$style.cfgDesc">{{ selectedTeam.description || '暂无描述' }}</p>
@@ -1243,6 +1246,8 @@ onMounted(() => {
               >
                 {{ teamDisplayName(leaderTeam) }}
               </button>
+              <!-- 决策计量：整体评价双指（agent.rate，同对象每日一次） -->
+              <MetricRateButtons subject-type="agent" :name="selectedAgent.name" />
             </div>
             <p :class="$style.cfgDesc">{{ selectedAgent.description || '暂无描述' }}</p>
           </div>
