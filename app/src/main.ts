@@ -13,6 +13,7 @@ import { marketPlugin } from '@mindx-work/plugins'
 import { createMarketRuntime, loadMarketPlugins } from './loader'
 import { connectionPlugin } from '@mindx-work/plugins/connection'
 import { oauthPlugin } from '@mindx-work/plugins/oauth'
+import { metricPlugin } from '@mindx-work/plugins/metric'
 import { modelsPlugin } from '@mindx-work/plugins/models'
 import { connectorsPlugin } from '@mindx-work/plugins/connectors'
 import { skillsPlugin } from '@mindx-work/plugins/skills'
@@ -38,9 +39,9 @@ import { diffviewPlugin } from '@mindx-work/plugins/diffview'
 
 // 启动装配：插件冲突与依赖缺失在启动期暴露（契约第 7 节）
 // demo 插件已下线（源码保留作范式参考）：当前装配仅 market 插件
-// 清单顺序即设置导航顺序（壳自带「通用」恒居首）：插件 → 模型 → 团队 → 技能 → 连接器 → 连接 → OAuth 提供商
-// oauth 消费 daemon.connection 服务，必须排在 connection 之后（use 非惰性，缺失即抛）
-const shell = createApp([marketPlugin, modelsPlugin, agentsPlugin, skillsPlugin, connectorsPlugin, connectionPlugin, oauthPlugin, phonePairPlugin, shellChromePlugin, chatflowPlugin, explorerPlugin, markdownPlugin, codeEditorPlugin, imageViewerPlugin, docPreviewPlugin, webViewerPlugin, videoViewerPlugin, svgboardPlugin, videoEditorPlugin, gitgraphPlugin, dashboardPlugin, terminalPlugin, calendarPlugin, usagePlugin, diffviewPlugin])
+// 清单顺序即设置导航顺序（壳自带「通用」恒居首）：插件 → 模型 → 团队 → 技能 → 连接器 → 连接 → OAuth 提供商 → 数据与隐私
+// oauth / metric 消费 daemon.connection 服务，必须排在 connection 之后（use 非惰性，缺失即抛）
+const shell = createApp([marketPlugin, modelsPlugin, agentsPlugin, skillsPlugin, connectorsPlugin, connectionPlugin, oauthPlugin, metricPlugin, phonePairPlugin, shellChromePlugin, chatflowPlugin, explorerPlugin, markdownPlugin, codeEditorPlugin, imageViewerPlugin, docPreviewPlugin, webViewerPlugin, videoViewerPlugin, svgboardPlugin, videoEditorPlugin, gitgraphPlugin, dashboardPlugin, terminalPlugin, calendarPlugin, usagePlugin, diffviewPlugin])
 
 // 预置插件目录（全量视图数据源）：装配处是唯一知道插件清单的地方，经 services
 // 提供给 market 插件的「已安装」视图（运行期消费——market store 初始化晚于此 provide）
@@ -51,6 +52,7 @@ const CORE_PLUGINS: CorePluginInfo[] = [
   { id: 'skills', name: '技能', description: '技能库管理' },
   { id: 'connectors', name: '连接器', description: '连接器配置' },
   { id: 'oauth', name: 'OAuth 提供商', description: 'OAuth 授权提供商配置与授权' },
+  { id: 'metric', name: '数据与隐私', description: '市场评分共享授权管理' },
   { id: 'connection', name: '连接', description: '智能主机连接状态与诊断' },
   { id: 'phone-pair', name: '设备配对', description: '手机设备扫码配对' },
   { id: 'shell-chrome', name: '壳工具栏', description: '窗口工具栏与全局动作' },
