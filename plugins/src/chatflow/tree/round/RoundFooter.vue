@@ -10,7 +10,7 @@
 // 渲染）」已按需求前移至输入区工具栏（input/ContextUsageGauge.vue），本组件不再
 // 承载上下文用量展示。
 import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import LangBadge from '../nodes/shared/LangBadge.vue'
 import { basename, formatCompactNumber, formatDuration, tryOpenFile } from '../../toolViewUtils'
@@ -29,6 +29,12 @@ const props = defineProps<{
   usage: TurnUsage | null
   /** 轮总时长（轮内消息时间跨度，§3.5 轮层） */
   roundDurationMs?: number
+  /** 会话 ID（决策计量：轮次赞/踩上报定位；缺省不渲染评价区） */
+  sessionId?: string
+  /** 轮次 key（评价幂等键：session_id:round_key） */
+  roundKey?: string
+  /** 是否会话最新轮（评价只在最新轮渲染，历史轮不评价避免错位） */
+  isLatestRound?: boolean
 }>()
 
 // ── 文件变更卡片（取舍 16：聚合 write/edit resultMeta，不聚合 pending diff） ──
@@ -65,10 +71,48 @@ function openUsageReport(): void {
 
 /** footer 是否有可渲染内容：两段全空不渲染（避免每轮出现空工具带） */
 const hasContent = computed(() => props.fileChanges.length > 0 || hasUsage.value)
+
+// ── 决策计量：轮次赞/踩（白皮书《决策量表》7.2 轮次主收集） ────────────────
+// 只在最新轮渲染（历史轮不评价避免定位错位）；点踩弹可选原因输入（负反馈
+// 结构化——YouTube「不感兴趣 + 原因」形态）；同轮重复提交由 store 层幂等。
+
+const chatflowStore = useChatflowStore()
+
+const rateKey = computed(() => (props.sessionId && props.roundKey ? `${props.sessionId}:${props.roundKey}` : ''))
+const hasRated = computed(() => (props.sessionId ? chatflowStore.ratedRounds.has(rateKey.value) : false))
+const showRating = computed(() => !!props.sessionId && !!props.roundKey && !!props.isLatestRound && !hasRated.value)
+
+const submitting = ref(false)
+
+async function submitRating(value: 'up' | 'down'): Promise<void> {
+  if (!props.sessionId || submitting.value) return
+  submitting.value = true
+  try {
+    let text: string | undefined
+    if (value === 'down') {
+      // 点踩收集结构化原因（可选填，取消则裸踩）。
+      try {
+        const { value: reason } = await ElMessageBox.prompt(
+          '哪里不满意？可选填一句说明（格式 / 准确性 / 过度 / 不足…）',
+          '反馈本轮',
+          { confirmButtonText: '提交', cancelButtonText: '跳过', inputPlaceholder: '选填' },
+        )
+        text = reason?.trim() || undefined
+      } catch {
+        // 用户取消输入框：仍然提交裸点踩
+      }
+    }
+    const ok = await chatflowStore.rateRound(props.sessionId, props.roundKey || '', value, text)
+    if (ok) ElMessage.success(value === 'up' ? '已收到反馈，谢谢' : '反馈已记录')
+    else ElMessage.warning('本轮暂无可评价的记录')
+  } finally {
+    submitting.value = false
+  }
+}
 </script>
 
 <template>
-  <div v-if="hasContent" class="round-footer">
+  <div v-if="hasContent || showRating" class="round-footer">
     <!-- 文件变更卡片：头行（图标 + 计数 + 聚合 ± + 折叠 chevron）+ 每文件明细 -->
     <div v-if="fileChanges.length" class="change-card">
       <!-- 头行点击切换明细折叠；右侧 chevron 指示折叠态 -->
@@ -114,6 +158,20 @@ const hasContent = computed(() => props.fileChanges.length > 0 || hasUsage.value
         <span v-if="roundDurationMs" class="usage-item">{{ formatDuration(roundDurationMs) }}</span>
       </div>
     </el-tooltip>
+    <!-- 决策计量：轮次赞/踩（只在最新轮渲染；点踩弹可选原因输入） -->
+    <div v-if="showRating" class="rating-row" @click.stop>
+      <span class="rating-hint">这轮回答有帮助吗？</span>
+      <el-tooltip content="有帮助" placement="top" :hide-after="0">
+        <button type="button" class="rating-btn" :disabled="submitting" aria-label="有帮助" @click="submitRating('up')">
+          <MxIcon name="lucide:thumbs-up" :size="16" />
+        </button>
+      </el-tooltip>
+      <el-tooltip content="没帮助" placement="top" :hide-after="0">
+        <button type="button" class="rating-btn" :disabled="submitting" aria-label="没帮助" @click="submitRating('down')">
+          <MxIcon name="lucide:thumbs-down" :size="16" />
+        </button>
+      </el-tooltip>
+    </div>
   </div>
 </template>
 
@@ -241,5 +299,43 @@ const hasContent = computed(() => props.fileChanges.length > 0 || hasUsage.value
 .flex-spacer {
   flex: 1;
   min-width: 0;
+}
+
+/* ── 决策计量：轮次赞/踩 ── */
+.rating-row {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-1);
+  flex-shrink: 0;
+}
+
+.rating-hint {
+  font: var(--mx-font-micro);
+  color: var(--mx-text-tertiary);
+  margin-right: var(--mx-space-1);
+}
+
+.rating-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--mx-radius-control);
+  background: transparent;
+  color: var(--mx-text-tertiary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.rating-btn:hover:not(:disabled) {
+  background: var(--mx-hover);
+  color: var(--mx-accent);
+}
+
+.rating-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 </style>

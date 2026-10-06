@@ -40,6 +40,10 @@ const props = defineProps<{
   roundExecuting?: boolean
   /** 本轮节点树（ChatArea 全会话构建后按轮分发，builder 按轮记忆化） */
   roundTree?: RoundTree | null
+  /** 会话 ID（决策计量：轮次赞/踩上报定位；宿主注入，缺省不渲染评价区） */
+  sessionId?: string
+  /** 是否会话最新轮（评价区渲染条件） */
+  isLatestRound?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -253,7 +257,14 @@ function formatContent(content: string): string {
     />
 
     <!-- 轮 footer：文件变更摘要 | 用量统计（Context ring 已前移至输入区 ContextUsageGauge） -->
-    <RoundFooter :file-changes="fileChanges" :usage="footerUsage" :round-duration-ms="roundDurationMs" />
+    <RoundFooter
+      :file-changes="fileChanges"
+      :usage="footerUsage"
+      :round-duration-ms="roundDurationMs"
+      :session-id="sessionId"
+      :round-key="round.key"
+      :is-latest-round="isLatestRound"
+    />
 
     <!-- 残余消息：builder 无法归入节点类型的系统杂项，默认分支兜底（审计不丢内容） -->
     <template v-for="m in residualMessages" :key="m.id">

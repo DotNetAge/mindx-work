@@ -1576,6 +1576,33 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     }
   }
 
+  // ---------- 决策计量：轮次主观评价（白皮书《决策量表》7.2 轮次主收集） ----------
+
+  /** 已评价的轮次（session_id:round_key），防同轮重复提交（daemon 侧按最新轮次事件定位） */
+  const ratedRounds = reactive(new Set<string>())
+
+  /**
+   * 轮次赞/踩上报（round.rating）：daemon 定位该会话最新的轮次事件，
+   * 判定写入版本链（user_feedback 源），可选文本汇入项目 notes"偏好"类。
+   * 返回 false 表示 daemon 拒绝（如会话无轮次事件）。
+   */
+  async function rateRound(sessionId: string, roundKey: string, value: 'up' | 'down', text?: string): Promise<boolean> {
+    const rateKey = `${sessionId}:${roundKey}`
+    if (ratedRounds.has(rateKey)) return true
+    try {
+      const res = await daemon.call<{ ok?: boolean } | null>('round.rating', {
+        session_id: sessionId,
+        value,
+        text: text || undefined,
+      })
+      if (res && res.ok === false) return false
+      ratedRounds.add(rateKey)
+      return true
+    } catch {
+      return false
+    }
+  }
+
   // ---------- 上下文用量 ----------
 
   /** session.context → ContextUsageInfo（输入区 ContextUsageGauge 数据源；仅活动会话） */
@@ -2683,6 +2710,9 @@ export const useChatflowStore = defineStore('chatflow-store', () => {
     deleteRound,
     renameSession,
     deleteSession,
+    // 决策计量：轮次主观评价
+    rateRound,
+    ratedRounds,
     // 图片与输入辅助
     uploadImageToSessionTmp,
     loadImageAsDataUrl,

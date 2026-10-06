@@ -622,7 +622,7 @@ function handleOpenModelSettings() {
         >
           <transition-group name="message-list" tag="div" :class="$style.roundsList">
             <div
-              v-for="item in visibleRoundItems"
+              v-for="(item, idx) in visibleRoundItems"
               :key="item.round.key"
               :data-round-key="item.round.key"
               :class="$style.roundWrapper"
@@ -633,6 +633,8 @@ function handleOpenModelSettings() {
                 :agent-label="agentLabel"
                 :agent-identity="agentIdentity"
                 :round-executing="busy"
+                :session-id="store.activeSession?.session_id"
+                :is-latest-round="idx === visibleRoundItems.length - 1"
                 @permission-grant="(data) => handlePermissionGrant(data)"
                 @permission-deny="(reason) => handlePermissionDeny(reason)"
                 @retry="handleRetry"
