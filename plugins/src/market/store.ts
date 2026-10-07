@@ -62,18 +62,6 @@ export interface MarketTeamPackage {
   size?: number
 }
 
-/** market.list 分页/过滤参数（全部可选：空参 = 存量全量清单语义；带参 = 服务端分页 API） */
-interface MarketTeamListParams {
-  /** 页码，1 起始 */
-  page?: number
-  /** 每页条数（缺省 50，服务端上限 200） */
-  page_size?: number
-  /** 包类型过滤 */
-  kind?: 'agent' | 'skill' | 'team'
-  /** 对 name/description 的查找词 */
-  q?: string
-}
-
 /** market.list 结果（仅保留本插件消费字段） */
 interface MarketTeamListResult {
   packages: MarketTeamPackage[]
@@ -436,16 +424,22 @@ export const useMarketStore = defineStore('market', () => {
   /** 团队货架可用性（daemon 连接存在才展示区块） */
   const teamAvailable = computed(() => daemon !== null)
 
-  /** 拉取团队货架下一页并追加（带参走服务端分页；API 不可达时 daemon 回退静态清单过滤并附 warning） */
+  /** 加载序号：每次 loadTeamMarket 递增，过期响应据此丢弃（防旧请求污染新列表） */
+  let teamLoadSeq = 0
+
+  /** 拉取团队货架下一页并追加（带参走服务端分页；API 不可达时 daemon 回退静态清单过滤并附 warning）。
+   * seq 为启动时的加载序号：await 返回后序号已变（期间触发了新一轮加载）则丢弃本次响应 */
   async function fetchTeamPage(): Promise<void> {
     if (!daemon) return
+    const seq = teamLoadSeq
     const q = teamSearch.value.trim()
     const res = await daemon.call<MarketTeamListResult>('market.list', {
       page: teamMarketPage.value + 1,
       page_size: TEAM_PAGE_SIZE,
       kind: 'team',
       ...(q ? { q } : {}),
-    } satisfies MarketTeamListParams)
+    })
+    if (seq !== teamLoadSeq) return
     teamPackages.value.push(...(res.packages || []))
     if (res.warning) teamMarketWarning.value = res.warning
     teamMarketPage.value = res.page || teamMarketPage.value + 1
@@ -462,6 +456,7 @@ export const useMarketStore = defineStore('market', () => {
   /** 重新拉取团队货架：重置游标取第一页（懒加载 / 搜索防抖 / 刷新共用入口） */
   async function loadTeamMarket(): Promise<void> {
     if (!daemon) return
+    const seq = ++teamLoadSeq
     teamMarketLoading.value = true
     teamMarketError.value = null
     teamMarketWarning.value = ''
@@ -471,11 +466,11 @@ export const useMarketStore = defineStore('market', () => {
     teamMarketDone.value = false
     try {
       await fetchTeamPage()
-      teamMarketLoaded.value = true
+      if (seq === teamLoadSeq) teamMarketLoaded.value = true
     } catch (error) {
       teamMarketError.value = error instanceof Error ? error.message : String(error)
     } finally {
-      teamMarketLoading.value = false
+      if (seq === teamLoadSeq) teamMarketLoading.value = false
     }
   }
 

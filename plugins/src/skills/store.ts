@@ -190,8 +190,13 @@ export const useSkillsStore = defineStore('skills-store', () => {
   /** 正在安装的市场包名称（按钮 loading） */
   const installing = ref('')
 
-  /** 拉取市场货架下一页并追加（带参走服务端分页；API 不可达时 daemon 回退静态清单过滤并附 warning） */
+  /** 加载序号：每次 loadMarket 递增，过期响应据此丢弃（防旧请求污染新列表） */
+  let marketLoadSeq = 0
+
+  /** 拉取市场货架下一页并追加（带参走服务端分页；API 不可达时 daemon 回退静态清单过滤并附 warning）。
+   * seq 为启动时的加载序号：await 返回后序号已变（期间触发了新一轮加载）则丢弃本次响应 */
   async function fetchMarketPage(): Promise<void> {
+    const seq = marketLoadSeq
     const q = marketSearch.value.trim()
     const res = await daemon.call<MarketListResult>('market.list', {
       page: marketPage.value + 1,
@@ -199,6 +204,7 @@ export const useSkillsStore = defineStore('skills-store', () => {
       kind: 'skill',
       ...(q ? { q } : {}),
     })
+    if (seq !== marketLoadSeq) return
     marketPackages.value.push(...(res.packages || []))
     if (res.warning) marketWarning.value = res.warning
     marketPage.value = res.page || marketPage.value + 1
@@ -214,6 +220,7 @@ export const useSkillsStore = defineStore('skills-store', () => {
 
   /** 重新拉取市场货架：重置游标取第一页（懒加载 / 搜索防抖 / 刷新共用入口） */
   async function loadMarket(): Promise<void> {
+    const seq = ++marketLoadSeq
     marketLoading.value = true
     marketWarning.value = ''
     marketPackages.value = []
@@ -222,9 +229,9 @@ export const useSkillsStore = defineStore('skills-store', () => {
     marketDone.value = false
     try {
       await fetchMarketPage()
-      marketLoaded.value = true
+      if (seq === marketLoadSeq) marketLoaded.value = true
     } finally {
-      marketLoading.value = false
+      if (seq === marketLoadSeq) marketLoading.value = false
     }
   }
 
