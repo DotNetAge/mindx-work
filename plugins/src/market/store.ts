@@ -469,14 +469,18 @@ export const useMarketStore = defineStore('market', () => {
     marketSourceUrl.value = String(cfg?.market_manifest_url || '')
   }
 
-  /** 换源：写 user.config（空串恢复官方），daemon 重建客户端并广播 market_changed */
+  /** 换源：写 user.config（空串恢复官方），daemon 重建客户端并广播 market_changed。
+   * 本地立即递增 epoch 兼容旧 daemon（静默忽略未注册 key、不广播）；新 daemon 广播
+   * 会再递增一次，货架 loadXxx 为幂等重置，多拉一次可接受。 */
   async function setSource(url: string): Promise<void> {
     if (!daemon) throw new Error('更换市场源需要连接智能主机')
     const cfg = await daemon.call<Record<string, unknown>>('user.config', { market_manifest_url: url })
     marketSourceUrl.value = String(cfg?.market_manifest_url || '')
+    sourceEpoch.value++
   }
 
-  /** 订阅换源广播（市场页 onMounted 调用一次；返回退订函数）。货架刷新由本订阅驱动，本机换源不重复递增 */
+  /** 订阅换源广播（市场页 onMounted 调用一次；返回退订函数）。覆盖其他端换源场景；
+   * 本机换源已即时递增，广播到达会再递增一次，货架重拉幂等可接受 */
   function watchMarketChanged(): () => void {
     if (!daemon) return () => {}
     return daemon.onNotification('market_changed', () => {
@@ -597,7 +601,7 @@ export const useMarketStore = defineStore('market', () => {
       if (msg.includes('已存在同名智能体')) throw new AgentExistsError(msg)
       throw err
     }
-    await Promise.all([refreshLocalRefs(), refreshTeamRefs()])
+    await Promise.all([refreshLocalRefs(), refreshSkillRefs()])
   }
 
   /** 招募（一键语义）：始终先安装（市场包自包含技能装配）再雇佣 */
@@ -631,7 +635,7 @@ export const useMarketStore = defineStore('market', () => {
   /** 已安装技能名集合（本地全局库口径：skill.list） */
   const installedSkillNames = ref<Set<string>>(new Set())
 
-  async function refreshTeamRefs(): Promise<void> {
+  async function refreshSkillRefs(): Promise<void> {
     if (!daemon) return
     try {
       const list = await daemon.call<Array<{ name: string }>>('skill.list', {})
@@ -678,7 +682,7 @@ export const useMarketStore = defineStore('market', () => {
     skillTotal.value = 0
     skillDone.value = false
     try {
-      await Promise.all([fetchSkillPage(), refreshTeamRefs()])
+      await Promise.all([fetchSkillPage(), refreshSkillRefs()])
       if (seq === skillLoadSeq) skillLoaded.value = true
     } catch (error) {
       skillError.value = error instanceof Error ? error.message : String(error)
@@ -709,7 +713,7 @@ export const useMarketStore = defineStore('market', () => {
       if (msg.includes('已存在同名技能')) throw new SkillExistsError(msg)
       throw err
     }
-    await refreshTeamRefs()
+    await refreshSkillRefs()
   }
 
   // ---------- 团队货架（mindx 市场 kind=team 包，团队整包招聘；daemon RPC） ----------

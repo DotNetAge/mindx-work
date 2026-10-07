@@ -110,7 +110,7 @@ function switchShelf(key: ShelfKey): void {
   } else if (key === 'team' && (epochChanged || teamEpochMiss.value || !store.teamMarketLoaded)) {
     void store.loadTeamMarket()
     teamEpochMiss.value = false
-  } else if (key === 'plugin' && (epochChanged || pluginEpochMiss.value)) {
+  } else if (key === 'plugin' && (epochChanged || pluginEpochMiss.value || store.market.length === 0)) {
     void store.refreshMarket()
     pluginEpochMiss.value = false
   }
@@ -321,7 +321,6 @@ watch(teamSentinel, (el, _prev, onCleanup) => {
         <MxIcon name="lucide:chevron-down" :size="16" />
       </button>
     </div>
-    <p v-if="!store.teamAvailable && store.agentError" :class="$style.error">{{ store.agentError }}</p>
 
     <!-- ── 货架胶囊 ── -->
     <div :class="$style.caps">
