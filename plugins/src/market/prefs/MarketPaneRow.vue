@@ -29,31 +29,46 @@ const shelves: Array<{ key: ShelfKey; label: string }> = [
 ]
 const activeShelf = ref<ShelfKey>('agent')
 
-// ── 市场源 ──
+// ── 市场源（源列表选择；商户源需访问令牌解锁） ──
 const sourcePanelOpen = ref(false)
-const sourceInput = ref('')
 const savingSource = ref(false)
-const isOfficial = computed(() => !store.marketSourceUrl)
+/** 选中源 id（空串 = 官方 Default） */
+const selectedSourceId = ref('')
+const patInput = ref('')
+const savingPat = ref(false)
+
 const sourceLabel = computed(() => {
-  if (isOfficial.value) return '官方市场'
-  const url = store.marketSourceUrl
-  return url.length > 40 ? url.slice(0, 40) + '…' : url
+  const selected = store.sources.find((s) => s.selected)
+  if (selected) return selected.name
+  return String(store.sources.find((s) => s.id === '1')?.name || '官方市场')
 })
 
 function openSourcePanel() {
-  sourceInput.value = store.marketSourceUrl
+  selectedSourceId.value = store.sources.find((s) => s.selected)?.id ?? ''
   sourcePanelOpen.value = true
 }
 
 async function saveSource(): Promise<void> {
   savingSource.value = true
   try {
-    await store.setSource(sourceInput.value.trim())
+    await store.setSource(selectedSourceId.value)
     sourcePanelOpen.value = false
   } catch (err: unknown) {
     pushErr(err)
   } finally {
     savingSource.value = false
+  }
+}
+
+async function savePat(): Promise<void> {
+  savingPat.value = true
+  try {
+    await store.setPAT(patInput.value.trim())
+    patInput.value = ''
+  } catch (err: unknown) {
+    pushErr(err)
+  } finally {
+    savingPat.value = false
   }
 }
 
@@ -315,7 +330,7 @@ watch(teamSentinel, (el, _prev, onCleanup) => {
     <!-- ── 标题 + 市场源（右侧同行） ── -->
     <div :class="$style.head">
       <span :class="$style.title">市场</span>
-      <button type="button" class="mx-btn" :class="$style.sourceBtn" :title="store.marketSourceUrl || '官方市场'" @click="openSourcePanel">
+      <button type="button" class="mx-btn" :class="$style.sourceBtn" :title="sourceLabel" @click="openSourcePanel">
         <MxIcon name="lucide:radio-tower" :size="16" />
         <span :class="$style.sourceName">{{ sourceLabel }}</span>
         <MxIcon name="lucide:chevron-down" :size="16" />
@@ -493,20 +508,53 @@ watch(teamSentinel, (el, _prev, onCleanup) => {
       <p v-if="!store.hasBridge" :class="$style.hint">当前环境不支持插件市场（需要应用宿主）。</p>
     </div>
 
-    <!-- ── 换源面板（自绘浮层：官方 / 自定义清单地址） ── -->
+    <!-- ── 换源面板（自绘浮层：源列表单选，商户源需访问令牌解锁） ── -->
     <Teleport to="body">
       <div v-if="sourcePanelOpen" :class="$style.sourceMask" @click="sourcePanelOpen = false">
         <div :class="$style.sourcePanel" @click.stop>
           <span :class="$style.sourceTitle">更换市场源</span>
-          <label :class="$style.sourceRow">
-            <input v-model="sourceInput" type="radio" value="" hidden @change="sourceInput = ''" />
-            <span :class="{ [$style.sourceActive]: sourceInput === '' }">官方市场（mindx 官方维护）</span>
-          </label>
-          <label :class="$style.sourceRow">
-            <input v-model="sourceInput" class="mx-input" placeholder="自定义清单地址（JSON manifest URL）" spellcheck="false" />
-          </label>
+          <p v-if="store.sourcesLoading" class="mx-text-loading">正在加载可用源…</p>
+          <p v-else-if="store.sourcesError" :class="$style.error">{{ store.sourcesError }}</p>
+          <template v-else>
+            <label
+              v-for="s in store.sources"
+              :key="s.id"
+              :class="$style.sourceRow"
+            >
+              <input
+                v-model="selectedSourceId"
+                type="radio"
+                name="market-source"
+                :value="s.id"
+                :disabled="s.tier === 'merchant' && !store.patSet"
+              />
+              <span :class="{ [$style.sourceActive]: selectedSourceId === s.id }">{{ s.name }}</span>
+              <span v-if="s.tier === 'merchant'" class="mx-tag" data-tone="warning">商户</span>
+              <span v-if="s.tier === 'merchant' && !store.patSet" :class="$style.locked">需访问令牌解锁</span>
+            </label>
+          </template>
+          <div :class="$style.patField">
+            <span :class="$style.patLabel">商户源访问令牌</span>
+            <input
+              v-model="patInput"
+              type="password"
+              class="mx-input"
+              :placeholder="store.patSet ? '已配置访问令牌；粘贴新令牌可更新' : '粘贴市场网页签发的访问令牌（PAT）'"
+              spellcheck="false"
+            />
+            <span :class="$style.patHint">令牌在市场网页登录后于「访问令牌」页签发，仅商户用户可用商户源。</span>
+          </div>
           <div :class="$style.sourceActions">
             <button type="button" class="mx-btn" @click="sourcePanelOpen = false">取消</button>
+            <button
+              type="button"
+              class="mx-btn"
+              :disabled="!patInput.trim() || savingPat"
+              @click="savePat"
+            >
+              <span v-if="savingPat" class="mx-text-loading">保存中…</span>
+              <template v-else>保存令牌</template>
+            </button>
             <button type="button" class="mx-btn mx-btn--primary" :disabled="savingSource" @click="saveSource">
               <span v-if="savingSource" class="mx-text-loading">保存中…</span>
               <template v-else>保存</template>
@@ -704,13 +752,42 @@ watch(teamSentinel, (el, _prev, onCleanup) => {
 
 .sourceRow {
   display: flex;
-  flex-direction: column;
-  gap: var(--mx-space-1);
+  align-items: center;
+  gap: var(--mx-space-2);
+  cursor: pointer;
+}
+
+.sourceRow input:disabled + span {
+  color: var(--mx-text-tertiary);
 }
 
 .sourceActive {
   color: var(--mx-accent);
   font-weight: 600;
+}
+
+.locked {
+  font: var(--mx-font-body);
+  color: var(--mx-text-tertiary);
+}
+
+.patField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-1);
+  padding-top: var(--mx-space-2);
+  border-top: 1px solid color-mix(in srgb, var(--mx-text) 10%, transparent);
+}
+
+.patLabel {
+  font: var(--mx-font-body);
+  font-weight: 600;
+  color: var(--mx-text);
+}
+
+.patHint {
+  font: var(--mx-font-body);
+  color: var(--mx-text-secondary);
 }
 
 .sourceActions {

@@ -458,25 +458,57 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  // ---------- 市场源（daemon user.config market_manifest_url；空 = 官方源） ----------
-  const marketSourceUrl = ref('')
-  /** 换源序号：market_changed 广播后递增，货架据此重置重拉 */
+  // ---------- 市场源（daemon user.config market_source_id/market_pat；列表经 market.sources RPC） ----------
+  /** 可用源清单（market.sources RPC 转发服务端 /sources；商户源需令牌解锁） */
+  interface MarketSourceItem {
+    id: string
+    name: string
+    tier: 'public' | 'merchant'
+    manifest_url: string
+    selected: boolean
+  }
+  const sources = ref<MarketSourceItem[]>([])
+  const sourcesLoading = ref(false)
+  const sourcesError = ref<string | null>(null)
+  /** 商户访问令牌是否已配置（user.config market_pat_set 布尔，令牌明文不回读） */
+  const patSet = ref(false)
+  /** 换源序号：换源动作与 market_changed 广播后递增，货架据此重置重拉 */
   const sourceEpoch = ref(0)
 
+  /** 刷新源状态与清单：user.config 取 market_source_id/market_pat_set，market.sources 拉列表 */
   async function fetchSource(): Promise<void> {
     if (!daemon) return
     const cfg = await daemon.call<Record<string, unknown>>('user.config', {})
-    marketSourceUrl.value = String(cfg?.market_manifest_url || '')
+    patSet.value = cfg?.market_pat_set === true
+    sourcesLoading.value = true
+    sourcesError.value = null
+    try {
+      const res = await daemon.call<{ sources?: MarketSourceItem[] }>('market.sources', {})
+      sources.value = Array.isArray(res?.sources) ? res.sources : []
+    } catch (err) {
+      sourcesError.value = err instanceof Error ? err.message : String(err)
+    } finally {
+      sourcesLoading.value = false
+    }
   }
 
-  /** 换源：写 user.config（空串恢复官方），daemon 重建客户端并广播 market_changed。
+  /** 保存选中的源 id（空串恢复官方 Default），daemon 解析清单地址重建客户端并广播。
    * 本地立即递增 epoch 兼容旧 daemon（静默忽略未注册 key、不广播）；新 daemon 广播
    * 会再递增一次，货架 loadXxx 为幂等重置，多拉一次可接受。 */
-  async function setSource(url: string): Promise<void> {
+  async function setSource(sourceID: string): Promise<void> {
     if (!daemon) throw new Error('更换市场源需要连接智能主机')
-    const cfg = await daemon.call<Record<string, unknown>>('user.config', { market_manifest_url: url })
-    marketSourceUrl.value = String(cfg?.market_manifest_url || '')
+    await daemon.call('user.config', { market_source_id: sourceID })
     sourceEpoch.value++
+    void fetchSource()
+  }
+
+  /** 保存商户源访问令牌（写 user.config market_pat；明文不回读）。成功后重拉源清单解锁商户源 */
+  async function setPAT(pat: string): Promise<void> {
+    if (!daemon) throw new Error('配置访问令牌需要连接智能主机')
+    await daemon.call('user.config', { market_pat: pat })
+    patSet.value = true
+    sourceEpoch.value++
+    void fetchSource()
   }
 
   /** 订阅换源广播（市场页 onMounted 调用一次；返回退订函数）。覆盖其他端换源场景；
@@ -937,11 +969,15 @@ export const useMarketStore = defineStore('market', () => {
     uninstall,
     exportPlugin,
     importFromFile,
-    // 市场源（换源入口；货架刷新由 market_changed 广播驱动）
-    marketSourceUrl,
+    // 市场源（换源入口：源列表选择 + 商户访问令牌；货架刷新由广播与本地 epoch 双驱动）
+    sources,
+    sourcesLoading,
+    sourcesError,
+    patSet,
     sourceEpoch,
     fetchSource,
     setSource,
+    setPAT,
     watchMarketChanged,
     // 成员货架（market.list kind=agent；服务端分页：搜索/追加加载）
     agentPackages,
