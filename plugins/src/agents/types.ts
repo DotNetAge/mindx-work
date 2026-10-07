@@ -177,7 +177,7 @@ export interface BundleInstallResult {
 
 /** 市场固定业务分类（中文）——标签栏按数组顺序陈列，清单中出现未收录分类时
  * 排在固定分类之后按字典序陈列。（移植自 mindx-desktop marketDomains.ts） */
-export const FIXED_DOMAINS = ['办公提效', '产品研发', '智能硬件', '工业', '内容创作', '数据分析', '市场营销', '商业研究', '经营管理']
+export const FIXED_DOMAINS = ['办公提效', '产品研发', '智能硬件', '工业', '内容创作', '数据分析', '市场营销', '财务', '经营管理']
 
 /** 工具定义（name/desc 为 Go 侧工具源码原文；展示名与描述走内置中文文案） */
 export interface ToolDef {

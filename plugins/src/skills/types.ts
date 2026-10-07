@@ -99,4 +99,4 @@ export interface SkillPrepareResult {
  * 排在固定分类之后按字典序陈列。分类值源自分发包清单的 category 字段（中文原文，
  * daemon 对 slug 形态的历史数据统一归一为中文；与服务端 categories 种子同词汇表）。
  * （移植自 mindx-desktop components/settings/marketDomains.ts） */
-export const FIXED_DOMAINS = ['办公提效', '产品研发', '智能硬件', '工业', '内容创作', '数据分析', '市场营销', '商业研究', '经营管理']
+export const FIXED_DOMAINS = ['办公提效', '产品研发', '智能硬件', '工业', '内容创作', '数据分析', '市场营销', '财务', '经营管理']
