@@ -22,9 +22,9 @@ const store = useMarketStore()
 const shell = useShell()
 
 const shelves: Array<{ key: ShelfKey; label: string }> = [
-  { key: 'agent', label: '智能体' },
-  { key: 'skill', label: '技能' },
+  { key: 'agent', label: '成员' },
   { key: 'team', label: '团队' },
+  { key: 'skill', label: '技能' },
   { key: 'plugin', label: '插件' },
 ]
 const activeShelf = ref<ShelfKey>('agent')

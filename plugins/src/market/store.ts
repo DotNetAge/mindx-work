@@ -514,7 +514,7 @@ export const useMarketStore = defineStore('market', () => {
   /** 订阅换源广播（市场页 onMounted 调用一次；返回退订函数）。覆盖其他端换源场景；
    * 本机换源已即时递增，广播到达会再递增一次，货架重拉幂等可接受 */
   function watchMarketChanged(): () => void {
-    if (!daemon) return () => {}
+    if (!daemon) return () => { }
     return daemon.onNotification('market_changed', () => {
       sourceEpoch.value++
       void fetchSource()
@@ -562,6 +562,12 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
+  /** 货架条目按请求 kind 防御过滤：旧 daemon 的 market.list 忽略 kind 返回全量清单，
+   * 不过滤会让团队货架混入 agent/skill 包（实证 bug）。 */
+  function filterByKind(items: MarketPkg[] | MarketTeamPackage[], kind: MarketPkg['kind']): MarketPkg[] {
+    return (items as MarketPkg[]).filter((p) => p.kind === kind)
+  }
+
   async function fetchAgentPage(): Promise<void> {
     if (!daemon) return
     const seq = agentLoadSeq
@@ -573,7 +579,7 @@ export const useMarketStore = defineStore('market', () => {
       ...(q ? { q } : {}),
     })
     if (seq !== agentLoadSeq) return
-    agentPackages.value.push(...((res.packages || []) as MarketPkg[]))
+    agentPackages.value.push(...filterByKind(res.packages || [], 'agent'))
     if (res.warning) agentWarning.value = res.warning
     agentPage.value = res.page || agentPage.value + 1
     if (typeof res.total === 'number') {
@@ -688,7 +694,7 @@ export const useMarketStore = defineStore('market', () => {
       ...(q ? { q } : {}),
     })
     if (seq !== skillLoadSeq) return
-    skillPackages.value.push(...((res.packages || []) as MarketPkg[]))
+    skillPackages.value.push(...filterByKind(res.packages || [], 'skill'))
     if (res.warning) skillWarning.value = res.warning
     skillPage.value = res.page || skillPage.value + 1
     if (typeof res.total === 'number') {
@@ -785,7 +791,7 @@ export const useMarketStore = defineStore('market', () => {
       ...(q ? { q } : {}),
     })
     if (seq !== teamLoadSeq) return
-    teamPackages.value.push(...(res.packages || []))
+    teamPackages.value.push(...filterByKind(res.packages || [], 'team'))
     if (res.warning) teamMarketWarning.value = res.warning
     teamMarketPage.value = res.page || teamMarketPage.value + 1
     if (typeof res.total === 'number') {
