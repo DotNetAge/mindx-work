@@ -5,7 +5,7 @@
  * 动作归 store（宿主桥调用 + 运行期启停经 services）。
  * 样式严格用 mx-uikit：原语类（mx-btn/mx-switch/mx-pill/mx-menu/mx-icon-btn）+ token。
  */
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import type { InstalledPluginView } from '@mindx-work/ui-shell'
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import { useMarketStore, teamPkgDisplayName, TeamExistsError } from '../store'
@@ -66,6 +66,32 @@ function openTeamConfirm() {
   if (shell.Overlay.has(MODAL_TEAM_CONFIRM)) shell.Overlay.remove(MODAL_TEAM_CONFIRM)
   shell.Overlay.add({ id: MODAL_TEAM_CONFIRM, kind: 'modal', component: TeamConfirmModal })
 }
+
+// 团队货架搜索改服务端触发（防抖 300ms）：重置游标从第一页重新拉取
+let teamSearchTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => store.teamSearch,
+  () => {
+    clearTimeout(teamSearchTimer)
+    teamSearchTimer = setTimeout(() => {
+      void store.loadTeamMarket()
+    }, 300)
+  },
+)
+
+// ── 团队货架无限滚动哨兵：滚动到底部进入视口即触发追加（行组件在壳层滚动区内，root 取视口） ──
+const teamSentinelRef = ref<HTMLElement | null>(null)
+watch(teamSentinelRef, (el, _prev, onCleanup) => {
+  if (!el) return
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) void store.loadTeamMarketMore()
+    },
+    { rootMargin: '240px' },
+  )
+  observer.observe(el)
+  onCleanup(() => observer.disconnect())
+})
 
 /** 团队整包安装：成功推通知（成员落位数随结果带回）；同名冲突（团队/任一成员
  * 已存在）排队覆盖确认后 overwrite 重试（agents 插件范式）。团队/员工清单的
@@ -218,11 +244,18 @@ function onInstallTeam(pkg: MarketTeamPackage) {
       <p v-if="!store.hasBridge" :class="$style.hint">当前环境不支持插件市场（需要应用宿主）。</p>
     </section>
 
-    <!-- 团队市场（mindx 市场 kind=team 团队整包；daemon 连接存在才展示） -->
+    <!-- 团队市场（mindx 市场 kind=team 团队整包；daemon 连接存在才展示；服务端分页 + 搜索 + 无限滚动） -->
     <section v-if="store.teamAvailable">
       <div :class="$style.sectionHead">
         <span :class="$style.sectionTitle">团队市场</span>
         <div :class="$style.headActions">
+          <input
+            v-model="store.teamSearch"
+            class="mx-input"
+            :class="$style.teamSearch"
+            placeholder="搜索团队名称或描述"
+            spellcheck="false"
+          />
           <button
             type="button"
             class="mx-icon-btn"
@@ -264,6 +297,11 @@ function onInstallTeam(pkg: MarketTeamPackage) {
           <template v-else>安装</template>
         </button>
       </div>
+      <!-- 无限滚动哨兵：进入视口触发下一页追加（全部加载完显示终态提示） -->
+      <div ref="teamSentinelRef" :class="$style.teamSentinel">
+        <span v-if="store.teamMarketLoadingMore" class="mx-text-loading">正在加载更多…</span>
+        <span v-else-if="store.teamMarketDone && store.teamPackages.length > 0">已加载全部团队整包</span>
+      </div>
       <p
         v-if="store.teamMarketLoaded && store.teamPackages.length === 0 && !store.teamMarketError"
         :class="$style.hint"
@@ -297,6 +335,24 @@ function onInstallTeam(pkg: MarketTeamPackage) {
   display: flex;
   align-items: center;
   gap: var(--mx-space-1);
+}
+
+/* 团队货架搜索框（节头动作组内，宽度收敛） */
+.teamSearch {
+  width: 180px;
+  height: 26px;
+  font: var(--mx-font-body);
+}
+
+/* 团队货架无限滚动哨兵（加载中文字提示，到底显示终态） */
+.teamSentinel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 24px;
+  padding: var(--mx-space-1) 0;
+  font: var(--mx-font-body);
+  color: var(--mx-text-secondary);
 }
 
 .sectionTitle {

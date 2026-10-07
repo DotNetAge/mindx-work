@@ -28,12 +28,26 @@ export interface MarketPackageInfo {
   skillNames?: Record<string, string>
   /** 包版本（源为 SKILL.md frontmatter metadata.version） */
   version?: string
-  /** 包文件相对清单地址的路径 */
-  file: string
+  /** 包文件相对清单地址的路径（服务端分页 API 响应可为空，下载走 download_url 直连） */
+  file?: string
+  /** 包文件下载直连地址（服务端分页 API 下发；安装直连无需清单拼接） */
+  download_url?: string
   /** 包文件内容十六进制摘要 */
   sha256: string
   /** 包文件字节数（列表展示用） */
   size?: number
+}
+
+/** market.list 分页/过滤参数（全部可选：空参 = 存量全量清单语义；带参 = 服务端分页 API） */
+export interface MarketListParams {
+  /** 页码，1 起始 */
+  page?: number
+  /** 每页条数（缺省 50，服务端上限 200） */
+  page_size?: number
+  /** 包类型过滤 */
+  kind?: 'agent' | 'skill'
+  /** 对 name/description 的查找词 */
+  q?: string
 }
 
 /** market.list 结果：source 为 remote（在线）/ cache（降级本地缓存） */
@@ -43,6 +57,10 @@ export interface MarketListResult {
   /** 降级原因（source=cache 时非空） */
   warning?: string
   updated_at?: string
+  /** 服务端命中的总条数（带分页参数时返回；空参全量语义无此字段） */
+  total?: number
+  /** 当前页码（1 起始，带分页参数时返回） */
+  page?: number
 }
 
 /** 分发包安装结果（market.install / skill.import 共用） */

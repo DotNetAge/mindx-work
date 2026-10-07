@@ -130,19 +130,40 @@ async function onImport() {
   }
 }
 
-// ── 市场视图：搜索 + 分类筛选 ──
-const marketSearch = ref('')
+// ── 市场视图：分类筛选（搜索走服务端 q，store.marketSearch 防抖后重置加载） ──
 const marketDomain = ref('')
 
-/** 市场技能包筛选（分类 + 搜索覆盖中文名/包名/描述） */
+/** 市场技能包筛选（分类为已加载范围内的前端过滤；搜索已由服务端 q 过滤） */
 const filteredMarketPackages = computed<MarketPackageInfo[]>(() => {
-  const q = marketSearch.value.trim().toLowerCase()
-  return store.marketPackages.filter((p) => {
-    if (marketDomain.value && (p.category || '').trim() !== marketDomain.value) return false
-    if (!q) return true
-    const hay = [p.name, store.marketDisplayName(p), p.description || ''].join(' ').toLowerCase()
-    return hay.includes(q)
-  })
+  return store.marketPackages.filter(
+    (p) => !marketDomain.value || (p.category || '').trim() === marketDomain.value,
+  )
+})
+
+// 搜索改服务端触发（防抖 300ms）：重置游标从第一页重新拉取
+let marketSearchTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => store.marketSearch,
+  () => {
+    clearTimeout(marketSearchTimer)
+    marketSearchTimer = setTimeout(() => {
+      void onMarketRefresh()
+    }, 300)
+  },
+)
+
+// ── 无限滚动哨兵：滚动到底部进入视口即触发追加（行组件在壳层滚动区内，root 取视口） ──
+const marketSentinelRef = ref<HTMLElement | null>(null)
+watch(marketSentinelRef, (el, _prev, onCleanup) => {
+  if (!el) return
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) void store.loadMarketMore()
+    },
+    { rootMargin: '240px' },
+  )
+  observer.observe(el)
+  onCleanup(() => observer.disconnect())
 })
 
 /** 安装市场技能包（未安装直装；已安装或同名冲突走覆盖确认） */
@@ -472,7 +493,7 @@ onMounted(syncIndicator)
       </div>
     </div>
     <input v-if="view === 'local'" v-model="searchQuery" class="mx-input" :class="$style.search" placeholder="搜索技能名称或描述" />
-    <input v-else v-model="marketSearch" class="mx-input" :class="$style.search" placeholder="搜索技能名称或描述" />
+    <input v-else v-model="store.marketSearch" class="mx-input" :class="$style.search" placeholder="搜索技能名称或描述" />
 
     <!-- 市场降级提示（在线拉取失败降级本地缓存） -->
     <p v-if="view === 'market' && store.marketWarning" :class="$style.warning">{{ store.marketWarning }}</p>
@@ -587,6 +608,12 @@ onMounted(syncIndicator)
             <span v-else class="mx-tag" data-tone="success">已安装</span>
           </div>
           <p :class="$style.desc" :title="pkg.description">{{ pkg.description || '(无描述)' }}</p>
+        </div>
+
+        <!-- 无限滚动哨兵：进入视口触发下一页追加（全部加载完显示终态提示） -->
+        <div ref="marketSentinelRef" :class="$style.gridSentinel">
+          <span v-if="store.marketLoadingMore" class="mx-text-loading">正在加载更多…</span>
+          <span v-else-if="store.marketDone">已加载全部分发包</span>
         </div>
       </div>
       <p v-else-if="store.marketLoaded" :class="$style.hint">市场暂无可安装的技能。</p>
@@ -769,6 +796,18 @@ onMounted(syncIndicator)
   align-content: start;
   /* 卡片高度随内容自适应（不随行内最高卡片拉伸） */
   align-items: start;
+}
+
+/* 无限滚动哨兵：占满网格整行（加载中文字提示，到底显示终态） */
+.gridSentinel {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 28px;
+  padding: var(--mx-space-1) 0;
+  font: var(--mx-font-body);
+  color: var(--mx-text-secondary);
 }
 
 .card {

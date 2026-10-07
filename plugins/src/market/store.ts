@@ -54,9 +54,24 @@ export interface MarketTeamPackage {
   members?: string[]
   /** 包版本 */
   version?: string
-  file: string
+  /** 包文件相对清单地址的路径（服务端分页 API 响应可为空，下载走 download_url 直连） */
+  file?: string
+  /** 包文件下载直连地址（服务端分页 API 下发；安装直连无需清单拼接） */
+  download_url?: string
   sha256: string
   size?: number
+}
+
+/** market.list 分页/过滤参数（全部可选：空参 = 存量全量清单语义；带参 = 服务端分页 API） */
+interface MarketTeamListParams {
+  /** 页码，1 起始 */
+  page?: number
+  /** 每页条数（缺省 50，服务端上限 200） */
+  page_size?: number
+  /** 包类型过滤 */
+  kind?: 'agent' | 'skill' | 'team'
+  /** 对 name/description 的查找词 */
+  q?: string
 }
 
 /** market.list 结果（仅保留本插件消费字段） */
@@ -65,6 +80,10 @@ interface MarketTeamListResult {
   source: 'remote' | 'cache'
   /** 降级原因（source=cache 时非空） */
   warning?: string
+  /** 服务端命中的总条数（带分页参数时返回） */
+  total?: number
+  /** 当前页码（1 起始，带分页参数时返回） */
+  page?: number
 }
 
 /** market.install 结果（kind=team 时 members 报告落位的成员 Agent 名，含负责人） */
@@ -397,31 +416,79 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   // ---------- 团队货架（mindx 市场 kind=team 包，团队整包招聘；daemon RPC） ----------
+  // 服务端分页 API 为主入口（契约 §2.2）：搜索走服务端 q，滚动触底由哨兵追加；
+  // API 不可达时 daemon 回退静态清单过滤并在 warning 附原因。
+  const TEAM_PAGE_SIZE = 30
   const teamPackages = ref<MarketTeamPackage[]>([])
+  const teamMarketPage = ref(0) // 已拉取页码（1 起始，0 = 尚未拉取）
+  const teamMarketTotal = ref(0) // 服务端命中总数
+  const teamMarketDone = ref(false) // 已到服务端末页
   const teamMarketWarning = ref('')
   const teamMarketLoaded = ref(false)
   const teamMarketLoading = ref(false)
+  const teamMarketLoadingMore = ref(false)
   const teamMarketError = ref<string | null>(null)
+  /** 搜索词（组件防抖后调 loadTeamMarket，服务端 q 过滤 name/description） */
+  const teamSearch = ref('')
   /** 正在安装的团队包名（按钮 loading） */
   const installingTeam = ref('')
 
   /** 团队货架可用性（daemon 连接存在才展示区块） */
   const teamAvailable = computed(() => daemon !== null)
 
-  /** 拉取团队货架（仅展示 team 类型包；在线优先，失败降级本地缓存并附 warning） */
+  /** 拉取团队货架下一页并追加（带参走服务端分页；API 不可达时 daemon 回退静态清单过滤并附 warning） */
+  async function fetchTeamPage(): Promise<void> {
+    if (!daemon) return
+    const q = teamSearch.value.trim()
+    const res = await daemon.call<MarketTeamListResult>('market.list', {
+      page: teamMarketPage.value + 1,
+      page_size: TEAM_PAGE_SIZE,
+      kind: 'team',
+      ...(q ? { q } : {}),
+    } satisfies MarketTeamListParams)
+    teamPackages.value.push(...(res.packages || []))
+    if (res.warning) teamMarketWarning.value = res.warning
+    teamMarketPage.value = res.page || teamMarketPage.value + 1
+    if (typeof res.total === 'number') {
+      teamMarketTotal.value = res.total
+      if (teamMarketPage.value * TEAM_PAGE_SIZE >= res.total) teamMarketDone.value = true
+    } else if ((res.packages || []).length < TEAM_PAGE_SIZE) {
+      // 无 total（回退形态未带计数）：返回不足一页即到底
+      teamMarketTotal.value = teamMarketPage.value * TEAM_PAGE_SIZE
+      teamMarketDone.value = true
+    }
+  }
+
+  /** 重新拉取团队货架：重置游标取第一页（懒加载 / 搜索防抖 / 刷新共用入口） */
   async function loadTeamMarket(): Promise<void> {
     if (!daemon) return
     teamMarketLoading.value = true
     teamMarketError.value = null
+    teamMarketWarning.value = ''
+    teamPackages.value = []
+    teamMarketPage.value = 0
+    teamMarketTotal.value = 0
+    teamMarketDone.value = false
     try {
-      const res = await daemon.call<MarketTeamListResult>('market.list', {})
-      teamPackages.value = (res.packages || []).filter((p) => p.kind === 'team')
-      teamMarketWarning.value = res.warning || ''
+      await fetchTeamPage()
       teamMarketLoaded.value = true
     } catch (error) {
       teamMarketError.value = error instanceof Error ? error.message : String(error)
     } finally {
       teamMarketLoading.value = false
+    }
+  }
+
+  /** 无限滚动追加：滚动触底时取下一页（到底后不再请求） */
+  async function loadTeamMarketMore(): Promise<void> {
+    if (!daemon || teamMarketLoading.value || teamMarketLoadingMore.value || teamMarketDone.value) return
+    teamMarketLoadingMore.value = true
+    try {
+      await fetchTeamPage()
+    } catch (error) {
+      teamMarketError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      teamMarketLoadingMore.value = false
     }
   }
 
@@ -505,15 +572,21 @@ export const useMarketStore = defineStore('market', () => {
     uninstall,
     exportPlugin,
     importFromFile,
-    // 团队货架（mindx 市场 kind=team 包）
+    // 团队货架（mindx 市场 kind=team 包；服务端分页：搜索/追加加载）
     teamPackages,
     teamMarketWarning,
     teamMarketLoaded,
     teamMarketLoading,
+    teamMarketLoadingMore,
+    teamMarketPage,
+    teamMarketTotal,
+    teamMarketDone,
+    teamSearch,
     teamMarketError,
     installingTeam,
     teamAvailable,
     loadTeamMarket,
+    loadTeamMarketMore,
     installTeam,
     installTeamPackage,
     teamPendingConfirm,

@@ -175,24 +175,67 @@ export const useSkillsStore = defineStore('skills-store', () => {
     license.value = { title, content }
   }
 
-  // ---------- 在线市场 ----------
+  // ---------- 在线市场（服务端分页 API 为主入口：搜索走服务端 q，滚动触底由哨兵追加） ----------
+  const MARKET_PAGE_SIZE = 30
   const marketPackages = ref<MarketPackageInfo[]>([])
+  const marketPage = ref(0) // 已拉取页码（1 起始，0 = 尚未拉取）
+  const marketTotal = ref(0) // 服务端命中总数
+  const marketDone = ref(false) // 已到服务端末页
   const marketWarning = ref('')
   const marketLoaded = ref(false)
   const marketLoading = ref(false)
+  const marketLoadingMore = ref(false)
+  /** 搜索词（组件防抖后调 loadMarket，服务端 q 过滤 name/description） */
+  const marketSearch = ref('')
   /** 正在安装的市场包名称（按钮 loading） */
   const installing = ref('')
 
-  /** 拉取市场清单（仅展示 skill 类型包；在线优先，失败降级本地缓存并附 warning） */
+  /** 拉取市场货架下一页并追加（带参走服务端分页；API 不可达时 daemon 回退静态清单过滤并附 warning） */
+  async function fetchMarketPage(): Promise<void> {
+    const q = marketSearch.value.trim()
+    const res = await daemon.call<MarketListResult>('market.list', {
+      page: marketPage.value + 1,
+      page_size: MARKET_PAGE_SIZE,
+      kind: 'skill',
+      ...(q ? { q } : {}),
+    })
+    marketPackages.value.push(...(res.packages || []))
+    if (res.warning) marketWarning.value = res.warning
+    marketPage.value = res.page || marketPage.value + 1
+    if (typeof res.total === 'number') {
+      marketTotal.value = res.total
+      if (marketPage.value * MARKET_PAGE_SIZE >= res.total) marketDone.value = true
+    } else if ((res.packages || []).length < MARKET_PAGE_SIZE) {
+      // 无 total（回退形态未带计数）：返回不足一页即到底
+      marketTotal.value = marketPage.value * MARKET_PAGE_SIZE
+      marketDone.value = true
+    }
+  }
+
+  /** 重新拉取市场货架：重置游标取第一页（懒加载 / 搜索防抖 / 刷新共用入口） */
   async function loadMarket(): Promise<void> {
     marketLoading.value = true
+    marketWarning.value = ''
+    marketPackages.value = []
+    marketPage.value = 0
+    marketTotal.value = 0
+    marketDone.value = false
     try {
-      const res = await daemon.call<MarketListResult>('market.list', {})
-      marketPackages.value = (res.packages || []).filter((p) => p.kind === 'skill')
-      marketWarning.value = res.warning || ''
+      await fetchMarketPage()
       marketLoaded.value = true
     } finally {
       marketLoading.value = false
+    }
+  }
+
+  /** 无限滚动追加：滚动触底时取下一页（到底后不再请求） */
+  async function loadMarketMore(): Promise<void> {
+    if (marketLoading.value || marketLoadingMore.value || marketDone.value) return
+    marketLoadingMore.value = true
+    try {
+      await fetchMarketPage()
+    } finally {
+      marketLoadingMore.value = false
     }
   }
 
@@ -461,13 +504,19 @@ export const useSkillsStore = defineStore('skills-store', () => {
     // 许可证
     license,
     openLicense,
-    // 市场
+    // 市场（服务端分页：搜索/追加加载）
     marketPackages,
     marketWarning,
     marketLoaded,
     marketLoading,
+    marketLoadingMore,
+    marketPage,
+    marketTotal,
+    marketDone,
+    marketSearch,
     installing,
     loadMarket,
+    loadMarketMore,
     // 决策计量：技能整体评价
     rateSkill,
     ratedToday,
