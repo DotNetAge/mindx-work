@@ -218,11 +218,13 @@ export const useSkillsStore = defineStore('skills-store', () => {
     }
   }
 
-  /** 重新拉取市场货架：重置游标取第一页（懒加载 / 搜索防抖 / 刷新共用入口） */
+  /** 重新拉取市场货架：重置游标取第一页（懒加载 / 搜索防抖 / 刷新共用入口）。
+   * 失败时复位 marketLoaded，让组件走「加载失败」空态而非误示「暂无可安装」；异常原样上抛由调用方通知 */
   async function loadMarket(): Promise<void> {
     const seq = ++marketLoadSeq
     marketLoading.value = true
     marketWarning.value = ''
+    marketLoaded.value = false
     marketPackages.value = []
     marketPage.value = 0
     marketTotal.value = 0
@@ -230,6 +232,9 @@ export const useSkillsStore = defineStore('skills-store', () => {
     try {
       await fetchMarketPage()
       if (seq === marketLoadSeq) marketLoaded.value = true
+    } catch (err: unknown) {
+      if (seq === marketLoadSeq) marketLoaded.value = false
+      throw err
     } finally {
       if (seq === marketLoadSeq) marketLoading.value = false
     }
