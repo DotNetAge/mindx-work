@@ -1,6 +1,6 @@
 /**
  * agents 插件数据契约（移植自 mindx-desktop types/websocket.ts 与 agentTools.ts；
- * 与 daemon agent.* / market.* / mcp.server.* / skill.list RPC 返回结构逐字段对齐，
+ * 与 daemon agent.* / mcp.server.* / skill.list RPC 返回结构逐字段对齐，
  * 形状经 daemon 实测双证：agent.list/agent.get/hire/fire/update 均为顶层字段）。
  */
 
@@ -132,52 +132,6 @@ export interface CloudConnectorEntry {
   title?: string
   description?: string
 }
-
-/** 市场分发包条目（market.list 货架项；agent 包含 role/skills/skillNames/skillDescs） */
-export interface MarketAgentPackage {
-  kind: 'agent' | 'skill'
-  name: string
-  description?: string
-  icon?: string
-  /** 昵称（2-3 字外号，展示主名；统一显示规则 = 昵称 + Role 小字） */
-  nick_name?: string
-  /** 角色名（中文原文，昵称缺失时回退为展示名） */
-  role?: string
-  /** 业务分类（中文原文） */
-  category?: string
-  /** 技能名清单 */
-  skills?: string[]
-  /** 技能中文展示名映射（技能名 → metadata.name_zh） */
-  skillNames?: Record<string, string>
-  /** 技能描述映射（打包时收集的 frontmatter 原文） */
-  skillDescs?: Record<string, string>
-  /** 包版本 */
-  version?: string
-  file: string
-  sha256: string
-  size?: number
-}
-
-/** market.list 结果：source 为 remote（在线）/ cache（降级本地缓存） */
-export interface MarketListResult {
-  packages: MarketAgentPackage[]
-  source: 'remote' | 'cache'
-  /** 降级原因（source=cache 时非空） */
-  warning?: string
-}
-
-/** 分发包安装结果（market.install） */
-export interface BundleInstallResult {
-  kind: 'agent' | 'skill'
-  name: string
-  skills_global?: string[]
-  skills_agent?: string[]
-  overwritten?: boolean
-}
-
-/** 市场固定业务分类（中文）——标签栏按数组顺序陈列，清单中出现未收录分类时
- * 排在固定分类之后按字典序陈列。（移植自 mindx-desktop marketDomains.ts） */
-export const FIXED_DOMAINS = ['办公提效', '产品研发', '智能硬件', '工业', '内容创作', '数据分析', '市场营销', '财务', '经营管理']
 
 /** 工具定义（name/desc 为 Go 侧工具源码原文；展示名与描述走内置中文文案） */
 export interface ToolDef {

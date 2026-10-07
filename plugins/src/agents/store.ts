@@ -1,8 +1,8 @@
 /**
- * agents 插件内部状态（Model）：员工清单 + 招募/散伙 + 市场货架与安装 + 云技能/技能清单。
+ * agents 插件内部状态（Model）：员工清单 + 招募/散伙 + 云技能/技能清单。
  * 数据读写全部经 daemon.connection 服务（daemon 为唯一连接源）；
- * 壳编排（Overlay 开合、banner 推送、FLIP 详情）归组件，本 store 只持数据与 RPC 调用。
- * 动作失败一律抛错由调用方呈现（banner），同名冲突以 AgentExistsError 供调用方走覆盖确认。
+ * 壳编排（Overlay 开合、banner 推送）归组件，本 store 只持数据与 RPC 调用。
+ * 动作失败一律抛错由调用方呈现（banner）。
  */
 
 import { computed, reactive, ref } from 'vue'
@@ -12,17 +12,13 @@ import type {
   AgentDetailResp,
   AgentMeta,
   AgentUpdateParams,
-  BundleInstallResult,
   CloudConnectorEntry,
   HireResult,
-  MarketAgentPackage,
-  MarketListResult,
   SkillInfo,
   TeamDetail,
   TeamMeta,
   TeamUpdateParams,
 } from './types'
-import { FIXED_DOMAINS } from './types'
 
 // 服务以纯字符串名消费（插件间禁止 import；契约 §10.2）
 const DAEMON_CONNECTION = 'daemon.connection'
@@ -31,14 +27,6 @@ const DAEMON_CONNECTION = 'daemon.connection'
 interface DaemonConnection {
   call<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
   onNotification(method: string, cb: (params: unknown) => void): () => void
-}
-
-/** 同名智能体冲突（后端默认拒绝已存在目标；调用方捕获后走覆盖确认重试） */
-export class AgentExistsError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'AgentExistsError'
-  }
 }
 
 /**
@@ -55,22 +43,6 @@ export function agentRoleSubtitle(a: AgentMeta): string {
   const nick = typeof a.nick_name === 'string' ? a.nick_name.trim() : ''
   if (!nick) return ''
   return (typeof a.role === 'string' && a.role.trim()) || ''
-}
-
-/** 市场包展示名（统一显示规则同上）：昵称优先，回退 role，再回退包名 */
-export function marketPkgDisplayName(pkg: MarketAgentPackage): string {
-  return (
-    (typeof pkg.nick_name === 'string' && pkg.nick_name.trim()) ||
-    (typeof pkg.role === 'string' && pkg.role.trim()) ||
-    pkg.name
-  )
-}
-
-/** 市场包副题小字（Role）：仅在昵称生效时返回，否则空串 */
-export function marketPkgRoleSubtitle(pkg: MarketAgentPackage): string {
-  const nick = typeof pkg.nick_name === 'string' ? pkg.nick_name.trim() : ''
-  if (!nick) return ''
-  return (typeof pkg.role === 'string' && pkg.role.trim()) || ''
 }
 
 /** 技能展示名：中文名（metadata.name_zh）优先，回退原名 */
@@ -117,7 +89,7 @@ export const useAgentsStore = defineStore('agents-store', () => {
   /** 已招募员工（团队视图只陈列已招募者） */
   const hiredAgents = computed<AgentMeta[]>(() => agents.value.filter((a) => a.hired))
 
-  // ---------- 技能清单（技能装备中文名回退链 + 技能分配多选源） ----------
+  // ---------- 技能清单（技能分配多选源） ----------
   const skills = ref<SkillInfo[]>([])
   const skillsLoaded = ref(false)
 
@@ -125,16 +97,6 @@ export const useAgentsStore = defineStore('agents-store', () => {
     skills.value = await daemon.call<SkillInfo[]>('skill.list', {})
     skillsLoaded.value = true
   }
-
-  /** 技能中文名映射（技能名 → metadata.name_zh；未声明中文名的技能不收录） */
-  const skillZhMap = computed<Record<string, string>>(() => {
-    const map: Record<string, string> = {}
-    for (const s of skills.value) {
-      const zh = s.metadata?.name_zh
-      if (zh) map[s.name] = String(zh)
-    }
-    return map
-  })
 
   // ---------- 招募 / 散伙 ----------
   /** 正在执行招募/散伙的 Agent 名（按钮 loading，防连点） */
@@ -268,73 +230,6 @@ export const useAgentsStore = defineStore('agents-store', () => {
     teamEditor.value = null
   }
 
-  // ---------- 在线市场（agent 类型分发包；懒加载：首次切到市场视图才拉清单） ----------
-  const marketPackages = ref<MarketAgentPackage[]>([])
-  const marketWarning = ref('')
-  const marketLoaded = ref(false)
-  const marketLoading = ref(false)
-  /** 正在招募（安装+雇佣）的市场包名称（按钮 loading） */
-  const installing = ref('')
-
-  /** 拉取市场清单（仅展示 agent 类型包；在线优先，失败降级本地缓存并附 warning） */
-  async function loadMarket(): Promise<void> {
-    marketLoading.value = true
-    try {
-      const res = await daemon.call<MarketListResult>('market.list', {})
-      marketPackages.value = (res.packages || []).filter((p) => p.kind === 'agent')
-      marketWarning.value = res.warning || ''
-      marketLoaded.value = true
-    } finally {
-      marketLoading.value = false
-    }
-  }
-
-  /** 已安装（出现在本地注册表）的智能体名集合 */
-  const installedNames = computed<Set<string>>(() => new Set(agents.value.map((a) => a.name)))
-
-  /** 市场货架分类标签：清单 category 去重，固定分类在前、其余字典序在后 */
-  const marketDomains = computed<string[]>(() => {
-    const present = new Set<string>()
-    for (const p of marketPackages.value) {
-      const c = (p.category || '').trim()
-      if (c) present.add(c)
-    }
-    const ordered = FIXED_DOMAINS.filter((d) => present.has(d))
-    const rest = [...present].filter((d) => !FIXED_DOMAINS.includes(d)).sort()
-    return [...ordered, ...rest]
-  })
-
-  /** 安装市场智能体包（下载 → sha256 校验 → 落地注册表与技能库） */
-  async function installAgentPackage(pkg: MarketAgentPackage, overwrite = false): Promise<void> {
-    try {
-      await daemon.call<BundleInstallResult>('market.install', {
-        kind: 'agent',
-        name: pkg.name,
-        ...(overwrite ? { overwrite: true } : {}),
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('已存在同名智能体')) throw new AgentExistsError(msg)
-      throw err
-    }
-  }
-
-  /**
-   * 市场卡片招募（一键语义）：始终先安装（市场包自包含技能装配，必须落地）再雇佣。
-   * 不能因"已安装"跳过安装：本地旧版会缺失市场包内嵌的技能。
-   * 成功后重拉员工与技能清单（Agent 包可能同时扩充全局技能库）。
-   */
-  async function recruitMarketPackage(pkg: MarketAgentPackage): Promise<void> {
-    installing.value = pkg.name
-    try {
-      await installAgentPackage(pkg)
-      await Promise.all([refreshAgents(), loadSkills()])
-      await hire(pkg.name)
-    } finally {
-      installing.value = ''
-    }
-  }
-
   // ---------- 详情 / 保存 ----------
   /** 拉取员工详情（IDENTITY 正文 = introduction，SOUL 正文 = soul，allows_tools 云技能清单） */
   async function loadAgentDetail(name: string): Promise<AgentDetailResp> {
@@ -376,7 +271,7 @@ export const useAgentsStore = defineStore('agents-store', () => {
     license.value = { title, content }
   }
 
-  // ---------- 确认范式（modal 组件消费；市场覆盖安装共用） ----------
+  // ---------- 确认范式（modal 组件消费；TeamEditorModal 删除确认等共用） ----------
   const pendingConfirm = ref<{ title: string; message: string; confirmText: string; successText: string } | null>(null)
   let confirmAction: (() => Promise<unknown>) | null = null
 
@@ -418,7 +313,6 @@ export const useAgentsStore = defineStore('agents-store', () => {
     skills,
     skillsLoaded,
     loadSkills,
-    skillZhMap,
     // 招募/散伙
     operating,
     hire,
@@ -442,17 +336,6 @@ export const useAgentsStore = defineStore('agents-store', () => {
     teamEditor,
     openTeamEditor,
     closeTeamEditor,
-    // 市场
-    marketPackages,
-    marketWarning,
-    marketLoaded,
-    marketLoading,
-    installing,
-    loadMarket,
-    installedNames,
-    marketDomains,
-    installAgentPackage,
-    recruitMarketPackage,
     // 详情/保存
     loadAgentDetail,
     updateAgent,

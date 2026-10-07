@@ -1,23 +1,20 @@
 /**
- * skills 插件内部状态（Model）：全局技能清单 + 导出/编辑/删除 + 在线市场货架与安装。
+ * skills 插件内部状态（Model）：全局技能清单 + 导出/编辑/删除 + 本地导入分发包。
  * 数据读写全部经 daemon.connection 服务（daemon 为唯一连接源）；
  * 壳编排（Overlay 开合、banner 推送、FLIP 详情）归组件，本 store 只持数据与 RPC 调用。
  * skills_changed 热重载广播到达即静默重拉清单（后台保新，失败不打扰）。
  * 动作失败一律抛错由调用方呈现（banner），同名冲突以 SkillExistsError 供调用方走覆盖确认。
  */
 
-import { computed, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useService } from '@mindx-work/ui-shell-vue'
 import type { MxDesktopBridge } from '@mindx-work/ui-shell'
 import type {
   BundleInstallResult,
-  MarketListResult,
-  MarketPackageInfo,
   SkillInfo,
   SkillPrepareResult,
 } from './types'
-import { FIXED_DOMAINS } from './types'
 
 // 服务以纯字符串名消费（插件间禁止 import；契约 §10.2）
 const DAEMON_CONNECTION = 'daemon.connection'
@@ -175,85 +172,6 @@ export const useSkillsStore = defineStore('skills-store', () => {
     license.value = { title, content }
   }
 
-  // ---------- 在线市场（服务端分页 API 为主入口：搜索走服务端 q，滚动触底由哨兵追加） ----------
-  const MARKET_PAGE_SIZE = 30
-  const marketPackages = ref<MarketPackageInfo[]>([])
-  const marketPage = ref(0) // 已拉取页码（1 起始，0 = 尚未拉取）
-  const marketTotal = ref(0) // 服务端命中总数
-  const marketDone = ref(false) // 已到服务端末页
-  const marketWarning = ref('')
-  const marketLoaded = ref(false)
-  const marketLoading = ref(false)
-  const marketLoadingMore = ref(false)
-  /** 搜索词（组件防抖后调 loadMarket，服务端 q 过滤 name/description） */
-  const marketSearch = ref('')
-  /** 正在安装的市场包名称（按钮 loading） */
-  const installing = ref('')
-
-  /** 加载序号：每次 loadMarket 递增，过期响应据此丢弃（防旧请求污染新列表） */
-  let marketLoadSeq = 0
-
-  /** 拉取市场货架下一页并追加（带参走服务端分页；API 不可达时 daemon 回退静态清单过滤并附 warning）。
-   * seq 为启动时的加载序号：await 返回后序号已变（期间触发了新一轮加载）则丢弃本次响应 */
-  async function fetchMarketPage(): Promise<void> {
-    const seq = marketLoadSeq
-    const q = marketSearch.value.trim()
-    const res = await daemon.call<MarketListResult>('market.list', {
-      page: marketPage.value + 1,
-      page_size: MARKET_PAGE_SIZE,
-      kind: 'skill',
-      ...(q ? { q } : {}),
-    })
-    if (seq !== marketLoadSeq) return
-    marketPackages.value.push(...(res.packages || []))
-    if (res.warning) marketWarning.value = res.warning
-    marketPage.value = res.page || marketPage.value + 1
-    if (typeof res.total === 'number') {
-      marketTotal.value = res.total
-      if (marketPage.value * MARKET_PAGE_SIZE >= res.total) marketDone.value = true
-    } else if ((res.packages || []).length < MARKET_PAGE_SIZE) {
-      // 无 total（回退形态未带计数）：返回不足一页即到底
-      marketTotal.value = marketPage.value * MARKET_PAGE_SIZE
-      marketDone.value = true
-    }
-  }
-
-  /** 重新拉取市场货架：重置游标取第一页（懒加载 / 搜索防抖 / 刷新共用入口）。
-   * 失败时复位 marketLoaded，让组件走「加载失败」空态而非误示「暂无可安装」；异常原样上抛由调用方通知 */
-  async function loadMarket(): Promise<void> {
-    const seq = ++marketLoadSeq
-    marketLoading.value = true
-    marketWarning.value = ''
-    marketLoaded.value = false
-    marketPackages.value = []
-    marketPage.value = 0
-    marketTotal.value = 0
-    marketDone.value = false
-    try {
-      await fetchMarketPage()
-      if (seq === marketLoadSeq) marketLoaded.value = true
-    } catch (err: unknown) {
-      if (seq === marketLoadSeq) marketLoaded.value = false
-      throw err
-    } finally {
-      if (seq === marketLoadSeq) marketLoading.value = false
-    }
-  }
-
-  /** 无限滚动追加：滚动触底时取下一页（到底后不再请求） */
-  async function loadMarketMore(): Promise<void> {
-    if (marketLoading.value || marketLoadingMore.value || marketDone.value) return
-    marketLoadingMore.value = true
-    try {
-      await fetchMarketPage()
-    } finally {
-      marketLoadingMore.value = false
-    }
-  }
-
-  /** 已安装的全局技能名集合：市场包与全局库同名即视为已安装 */
-  const installedNames = computed<Set<string>>(() => new Set(skills.value.map((s) => s.name)))
-
   // ---------- 决策计量：技能整体评价（白皮书《决策量表》7.2 管理页辅收集） ----------
 
   /** 已评价技能当日集合（限频的本地镜像；daemon 校验为准） */
@@ -275,70 +193,6 @@ export const useSkillsStore = defineStore('skills-store', () => {
     if (res && res.ok === false) return { ok: false, reason: res.reason }
     ratedToday.add(key)
     return { ok: true }
-  }
-
-  /** 市场卡片展示名：包内中文名 → 本地库中文名（已安装）→ 包名 */
-  function marketDisplayName(pkg: MarketPackageInfo): string {
-    const zh = pkg.skillNames?.[pkg.name]
-    if (zh) return zh
-    const local = skills.value.find((s) => s.name === pkg.name)
-    return (local && skillDisplayName(local)) || pkg.name
-  }
-
-  /** 市场货架分类标签：清单 category 去重，固定分类在前、其余字典序在后 */
-  const marketDomains = computed<string[]>(() => {
-    const present = new Set<string>()
-    for (const p of marketPackages.value) {
-      const c = (p.category || '').trim()
-      if (c) present.add(c)
-    }
-    const ordered = FIXED_DOMAINS.filter((d) => present.has(d))
-    const rest = [...present].filter((d) => !FIXED_DOMAINS.includes(d)).sort()
-    return [...ordered, ...rest]
-  })
-
-  /**
-   * 安装市场技能包（下载 → sha256 校验 → 进全局库）。
-   * 后端对同名技能默认拒绝——错误消息含"已存在同名技能"时抛 SkillExistsError 供覆盖确认。
-   * 安装成功即触发准备流程编排（requires.oauth 授权 / install 命令确认随响应带回）。
-   */
-  async function installMarket(pkg: MarketPackageInfo, overwrite = false): Promise<string> {
-    let result: BundleInstallResult
-    try {
-      result = await daemon.call<BundleInstallResult>('market.install', {
-        kind: 'skill',
-        name: pkg.name,
-        ...(overwrite ? { overwrite: true } : {}),
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('已存在同名技能')) throw new SkillExistsError(msg)
-      throw err
-    }
-    await refresh()
-    handlePrepares(result.prepares)
-    return `已安装「${marketDisplayName(pkg)}」`
-  }
-
-  /** 排队覆盖安装确认（已安装或冲突裁决后调用；modal 打开归组件） */
-  function requestOverwrite(pkg: MarketPackageInfo): void {
-    requestConfirm(
-      '同名技能冲突',
-      `全局库已存在同名技能「${pkg.name}」，是否覆盖？覆盖后原技能内容将被替换，不可恢复。`,
-      '覆盖',
-      `已覆盖安装「${marketDisplayName(pkg)}」`,
-      () => installMarket(pkg, true),
-    )
-  }
-
-  /** 安装 loading 包裹：installing 记录包名供按钮 loading；结果与异常原样上抛（编排归组件） */
-  async function withInstalling<T>(pkg: MarketPackageInfo, action: () => Promise<T>): Promise<T> {
-    installing.value = pkg.name
-    try {
-      return await action()
-    } finally {
-      installing.value = ''
-    }
   }
 
   // ---------- 本地导入分发包 ----------
@@ -448,25 +302,14 @@ export const useSkillsStore = defineStore('skills-store', () => {
   })
 
   // ---------- 详情正文读取 ----------
-  /**
-   * 读取技能正文：本地读技能目录；市场优先读已安装副本、未安装走预览 RPC（下载读取不安装）。
-   * 返回原始 markdown（frontmatter 剥离与渲染归视图层）。
-   */
-  async function readSkillDoc(kind: 'local' | 'market', name: string, rootDir?: string): Promise<string> {
-    if (kind === 'local') {
-      if (!rootDir) throw new Error('该技能无文件系统路径，无法预览内容')
-      // fs.read 返回 { content }（daemon 实证），非纯字符串
-      return (await daemon.call<{ content: string }>('fs.read', { path: rootDir + '/SKILL.md' })).content
-    }
-    const local = skills.value.find((s) => s.name === name)
-    if (local?.root_dir) {
-      return (await daemon.call<{ content: string }>('fs.read', { path: local.root_dir + '/SKILL.md' })).content
-    }
-    const r = await daemon.call<{ content: string }>('market.package.read', { name })
-    return r.content
+  /** 读取技能 SKILL.md 正文（技能目录 root_dir）。返回原始 markdown（frontmatter 剥离与渲染归视图层）。 */
+  async function readSkillDoc(rootDir?: string): Promise<string> {
+    if (!rootDir) throw new Error('该技能无文件系统路径，无法预览内容')
+    // fs.read 返回 { content }（daemon 实证），非纯字符串
+    return (await daemon.call<{ content: string }>('fs.read', { path: rootDir + '/SKILL.md' })).content
   }
 
-  // ---------- 确认范式（modal 组件消费；删除/覆盖安装/覆盖导入共用） ----------
+  // ---------- 确认范式（modal 组件消费；删除/覆盖导入共用） ----------
   const pendingConfirm = ref<{ title: string; message: string; confirmText: string; successText: string } | null>(null)
   let confirmAction: (() => Promise<unknown>) | null = null
 
@@ -516,28 +359,9 @@ export const useSkillsStore = defineStore('skills-store', () => {
     // 许可证
     license,
     openLicense,
-    // 市场（服务端分页：搜索/追加加载）
-    marketPackages,
-    marketWarning,
-    marketLoaded,
-    marketLoading,
-    marketLoadingMore,
-    marketPage,
-    marketTotal,
-    marketDone,
-    marketSearch,
-    installing,
-    loadMarket,
-    loadMarketMore,
     // 决策计量：技能整体评价
     rateSkill,
     ratedToday,
-    installedNames,
-    marketDisplayName,
-    marketDomains,
-    installMarket,
-    requestOverwrite,
-    withInstalling,
     // 导入
     pickImportPath,
     importPackage,

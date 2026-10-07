@@ -25,6 +25,61 @@ const DAEMON_CONNECTION = 'daemon.connection'
 /** daemon 连接服务结构契约（消费侧仅声明所需形状） */
 interface DaemonConnection {
   call<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
+  /** 订阅 daemon 通知（如 market_changed 换源广播）；返回退订函数 */
+  onNotification(method: string, cb: (params: unknown) => void): () => void
+}
+
+/**
+ * 市场分发包条目（market.list 货架项，agent/skill 货架共用；字段与冻结协议对齐）。
+ */
+export interface MarketPkg {
+  kind: 'agent' | 'skill' | 'team'
+  name: string
+  description?: string
+  icon?: string
+  /** 昵称（展示主名；缺失回退 name） */
+  nick_name?: string
+  /** 岗位头衔（kind=agent） */
+  role?: string
+  /** 业务分类（中文原文） */
+  category?: string
+  /** 负责人 Agent 名（kind=team） */
+  leader?: string
+  /** 包内成员 Agent 名（kind=team，含负责人） */
+  members?: string[]
+  /** 包内技能名 */
+  skills?: string[]
+  /** 技能中文展示名映射（技能名 → metadata.name_zh） */
+  skillNames?: Record<string, string>
+  /** 包版本 */
+  version?: string
+  /** 包文件相对清单地址的路径（服务端分页 API 响应可为空，下载走 download_url 直连） */
+  file?: string
+  /** 包文件下载直连地址（服务端分页 API 下发） */
+  download_url?: string
+  sha256: string
+  size?: number
+}
+
+/** 货架展示名（统一显示规则：昵称优先，回退包名） */
+export function pkgDisplayName(pkg: MarketPkg): string {
+  return (typeof pkg.nick_name === 'string' && pkg.nick_name.trim()) || pkg.name
+}
+
+/** 同名冲突（成员包；后端默认拒绝，调用方捕获后走覆盖确认重试） */
+export class AgentExistsError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentExistsError'
+  }
+}
+
+/** 同名冲突（技能包；后端默认拒绝，调用方捕获后走覆盖确认重试） */
+export class SkillExistsError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SkillExistsError'
+  }
 }
 
 /** 同名冲突（团队或任一成员 Agent 已存在，后端默认拒绝；调用方捕获后走覆盖确认重试） */
@@ -403,6 +458,260 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
+  // ---------- 市场源（daemon user.config market_manifest_url；空 = 官方源） ----------
+  const marketSourceUrl = ref('')
+  /** 换源序号：market_changed 广播后递增，货架据此重置重拉 */
+  const sourceEpoch = ref(0)
+
+  async function fetchSource(): Promise<void> {
+    if (!daemon) return
+    const cfg = await daemon.call<Record<string, unknown>>('user.config', {})
+    marketSourceUrl.value = String(cfg?.market_manifest_url || '')
+  }
+
+  /** 换源：写 user.config（空串恢复官方），daemon 重建客户端并广播 market_changed */
+  async function setSource(url: string): Promise<void> {
+    if (!daemon) throw new Error('更换市场源需要连接智能主机')
+    const cfg = await daemon.call<Record<string, unknown>>('user.config', { market_manifest_url: url })
+    marketSourceUrl.value = String(cfg?.market_manifest_url || '')
+  }
+
+  /** 订阅换源广播（市场页 onMounted 调用一次；返回退订函数）。货架刷新由本订阅驱动，本机换源不重复递增 */
+  function watchMarketChanged(): () => void {
+    if (!daemon) return () => {}
+    return daemon.onNotification('market_changed', () => {
+      sourceEpoch.value++
+      void fetchSource()
+    })
+  }
+
+  // ---------- 成员货架（market.list kind=agent；服务端分页 + 服务端 q 搜索） ----------
+  const SHELF_PAGE_SIZE = 30
+  const agentPackages = ref<MarketPkg[]>([])
+  const agentPage = ref(0)
+  const agentTotal = ref(0)
+  const agentDone = ref(false)
+  const agentSearch = ref('')
+  const agentWarning = ref('')
+  const agentLoaded = ref(false)
+  const agentLoading = ref(false)
+  const agentLoadingMore = ref(false)
+  const agentError = ref<string | null>(null)
+  /** 正在招募/散伙的包名（按钮 loading） */
+  const installingAgent = ref('')
+  /** 已招募员工名集合（本地注册表口径：agent.list hired=true） */
+  const hiredNames = ref<Set<string>>(new Set())
+  /** 技能中文名映射（skill.list → metadata.name_zh；卡片技能标签显示用） */
+  const skillZhMap = ref<Record<string, string>>({})
+
+  /** 刷新本地参照：已招募员工集合 + 技能中文名映射（货架招募态与技能标签的数据源） */
+  async function refreshLocalRefs(): Promise<void> {
+    if (!daemon) return
+    try {
+      const list = await daemon.call<Array<{ name: string; hired?: boolean }>>('agent.list', {})
+      hiredNames.value = new Set((list || []).filter((a) => a.hired).map((a) => a.name))
+    } catch {
+      /* 参照刷新失败不阻断货架：招募态回退为未招募 */
+    }
+    try {
+      const list = await daemon.call<Array<{ name: string; metadata?: Record<string, string> }>>('skill.list', {})
+      const map: Record<string, string> = {}
+      for (const s of list || []) {
+        const zh = s.metadata?.name_zh
+        if (zh) map[s.name] = zh
+      }
+      skillZhMap.value = map
+    } catch {
+      /* 中文名映射失败回退原名 */
+    }
+  }
+
+  async function fetchAgentPage(): Promise<void> {
+    if (!daemon) return
+    const seq = agentLoadSeq
+    const q = agentSearch.value.trim()
+    const res = await daemon.call<MarketTeamListResult>('market.list', {
+      page: agentPage.value + 1,
+      page_size: SHELF_PAGE_SIZE,
+      kind: 'agent',
+      ...(q ? { q } : {}),
+    })
+    if (seq !== agentLoadSeq) return
+    agentPackages.value.push(...((res.packages || []) as MarketPkg[]))
+    if (res.warning) agentWarning.value = res.warning
+    agentPage.value = res.page || agentPage.value + 1
+    if (typeof res.total === 'number') {
+      agentTotal.value = res.total
+      if (agentPage.value * SHELF_PAGE_SIZE >= res.total) agentDone.value = true
+    } else if ((res.packages || []).length < SHELF_PAGE_SIZE) {
+      // 无 total（回退形态未带计数）：返回不足一页即到底
+      agentTotal.value = agentPage.value * SHELF_PAGE_SIZE
+      agentDone.value = true
+    }
+  }
+
+  /** 加载序号：每次 loadAgentMarket 递增，过期响应据此丢弃 */
+  let agentLoadSeq = 0
+
+  /** 重新拉取成员货架：重置游标取第一页（懒加载 / 搜索防抖 / 换源 / 刷新共用入口） */
+  async function loadAgentMarket(): Promise<void> {
+    if (!daemon) return
+    const seq = ++agentLoadSeq
+    agentLoading.value = true
+    agentError.value = null
+    agentWarning.value = ''
+    agentPackages.value = []
+    agentPage.value = 0
+    agentTotal.value = 0
+    agentDone.value = false
+    try {
+      await Promise.all([fetchAgentPage(), refreshLocalRefs()])
+      if (seq === agentLoadSeq) agentLoaded.value = true
+    } catch (error) {
+      agentError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      if (seq === agentLoadSeq) agentLoading.value = false
+    }
+  }
+
+  /** 无限滚动追加：滚动触底时取下一页 */
+  async function loadAgentMarketMore(): Promise<void> {
+    if (!daemon || agentLoading.value || agentLoadingMore.value || agentDone.value) return
+    agentLoadingMore.value = true
+    try {
+      await fetchAgentPage()
+    } catch (error) {
+      agentError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      agentLoadingMore.value = false
+    }
+  }
+
+  /** 安装市场成员包（market.install kind=agent；同名冲突默认拒绝，错误原样上抛由组件确认后 overwrite 重试） */
+  async function installAgentPackage(pkg: MarketPkg, overwrite = false): Promise<void> {
+    if (!daemon) throw new Error('成员安装需要连接智能主机')
+    try {
+      await daemon.call('market.install', { kind: 'agent', name: pkg.name, ...(overwrite ? { overwrite: true } : {}) })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('已存在同名智能体')) throw new AgentExistsError(msg)
+      throw err
+    }
+    await Promise.all([refreshLocalRefs(), refreshTeamRefs()])
+  }
+
+  /** 招募（一键语义）：始终先安装（市场包自包含技能装配）再雇佣 */
+  async function recruitAgent(pkg: MarketPkg): Promise<void> {
+    await installAgentPackage(pkg)
+    if (!daemon) return
+    await daemon.call('agent.hire', { name: pkg.name })
+    await refreshLocalRefs()
+  }
+
+  /** 散伙（市场卡片已招募态按钮；与团队货架的成员散伙同 RPC） */
+  async function fireAgent(name: string): Promise<void> {
+    if (!daemon) throw new Error('散伙需要连接智能主机')
+    await daemon.call('agent.fire', { name })
+    await refreshLocalRefs()
+  }
+
+  // ---------- 技能货架（market.list kind=skill；服务端分页 + 服务端 q 搜索） ----------
+  const skillPackages = ref<MarketPkg[]>([])
+  const skillPage = ref(0)
+  const skillTotal = ref(0)
+  const skillDone = ref(false)
+  const skillSearch = ref('')
+  const skillWarning = ref('')
+  const skillLoaded = ref(false)
+  const skillLoading = ref(false)
+  const skillLoadingMore = ref(false)
+  const skillError = ref<string | null>(null)
+  /** 正在安装的包名（按钮 loading） */
+  const installingSkill = ref('')
+  /** 已安装技能名集合（本地全局库口径：skill.list） */
+  const installedSkillNames = ref<Set<string>>(new Set())
+
+  async function refreshTeamRefs(): Promise<void> {
+    if (!daemon) return
+    try {
+      const list = await daemon.call<Array<{ name: string }>>('skill.list', {})
+      installedSkillNames.value = new Set((list || []).map((s) => s.name))
+    } catch {
+      /* 已安装集合刷新失败不阻断货架 */
+    }
+  }
+
+  async function fetchSkillPage(): Promise<void> {
+    if (!daemon) return
+    const seq = skillLoadSeq
+    const q = skillSearch.value.trim()
+    const res = await daemon.call<MarketTeamListResult>('market.list', {
+      page: skillPage.value + 1,
+      page_size: SHELF_PAGE_SIZE,
+      kind: 'skill',
+      ...(q ? { q } : {}),
+    })
+    if (seq !== skillLoadSeq) return
+    skillPackages.value.push(...((res.packages || []) as MarketPkg[]))
+    if (res.warning) skillWarning.value = res.warning
+    skillPage.value = res.page || skillPage.value + 1
+    if (typeof res.total === 'number') {
+      skillTotal.value = res.total
+      if (skillPage.value * SHELF_PAGE_SIZE >= res.total) skillDone.value = true
+    } else if ((res.packages || []).length < SHELF_PAGE_SIZE) {
+      skillTotal.value = skillPage.value * SHELF_PAGE_SIZE
+      skillDone.value = true
+    }
+  }
+
+  /** 加载序号：每次 loadSkillMarket 递增，过期响应据此丢弃 */
+  let skillLoadSeq = 0
+
+  async function loadSkillMarket(): Promise<void> {
+    if (!daemon) return
+    const seq = ++skillLoadSeq
+    skillLoading.value = true
+    skillError.value = null
+    skillWarning.value = ''
+    skillPackages.value = []
+    skillPage.value = 0
+    skillTotal.value = 0
+    skillDone.value = false
+    try {
+      await Promise.all([fetchSkillPage(), refreshTeamRefs()])
+      if (seq === skillLoadSeq) skillLoaded.value = true
+    } catch (error) {
+      skillError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      if (seq === skillLoadSeq) skillLoading.value = false
+    }
+  }
+
+  async function loadSkillMarketMore(): Promise<void> {
+    if (!daemon || skillLoading.value || skillLoadingMore.value || skillDone.value) return
+    skillLoadingMore.value = true
+    try {
+      await fetchSkillPage()
+    } catch (error) {
+      skillError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      skillLoadingMore.value = false
+    }
+  }
+
+  /** 安装市场技能包（market.install kind=skill；同名冲突默认拒绝，错误原样上抛） */
+  async function installSkillPackage(pkg: MarketPkg, overwrite = false): Promise<void> {
+    if (!daemon) throw new Error('技能安装需要连接智能主机')
+    try {
+      await daemon.call('market.install', { kind: 'skill', name: pkg.name, ...(overwrite ? { overwrite: true } : {}) })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('已存在同名技能')) throw new SkillExistsError(msg)
+      throw err
+    }
+    await refreshTeamRefs()
+  }
+
   // ---------- 团队货架（mindx 市场 kind=team 包，团队整包招聘；daemon RPC） ----------
   // 服务端分页 API 为主入口（契约 §2.2）：搜索走服务端 q，滚动触底由哨兵追加；
   // API 不可达时 daemon 回退静态清单过滤并在 warning 附原因。
@@ -546,6 +855,63 @@ export const useMarketStore = defineStore('market', () => {
     teamPendingConfirm.value = null
   }
 
+  // ---------- 成员/技能安装覆盖确认（modal 组件消费；范式同团队确认） ----------
+  const agentPendingConfirm = ref<{ title: string; message: string; confirmText: string; successText: string } | null>(null)
+  let agentConfirmAction: (() => Promise<unknown>) | null = null
+
+  function requestAgentConfirm(
+    title: string,
+    message: string,
+    confirmText: string,
+    successText: string,
+    action: () => Promise<unknown>,
+  ): void {
+    agentPendingConfirm.value = { title, message, confirmText, successText }
+    agentConfirmAction = action
+  }
+
+  async function runAgentConfirm(): Promise<string | undefined> {
+    const action = agentConfirmAction
+    const successText = agentPendingConfirm.value?.successText
+    agentConfirmAction = null
+    agentPendingConfirm.value = null
+    await action?.()
+    return successText
+  }
+
+  function cancelAgentConfirm(): void {
+    agentConfirmAction = null
+    agentPendingConfirm.value = null
+  }
+
+  const skillPendingConfirm = ref<{ title: string; message: string; confirmText: string; successText: string } | null>(null)
+  let skillConfirmAction: (() => Promise<unknown>) | null = null
+
+  function requestSkillConfirm(
+    title: string,
+    message: string,
+    confirmText: string,
+    successText: string,
+    action: () => Promise<unknown>,
+  ): void {
+    skillPendingConfirm.value = { title, message, confirmText, successText }
+    skillConfirmAction = action
+  }
+
+  async function runSkillConfirm(): Promise<string | undefined> {
+    const action = skillConfirmAction
+    const successText = skillPendingConfirm.value?.successText
+    skillConfirmAction = null
+    skillPendingConfirm.value = null
+    await action?.()
+    return successText
+  }
+
+  function cancelSkillConfirm(): void {
+    skillConfirmAction = null
+    skillPendingConfirm.value = null
+  }
+
   return {
     installed,
     corePlugins,
@@ -567,6 +933,45 @@ export const useMarketStore = defineStore('market', () => {
     uninstall,
     exportPlugin,
     importFromFile,
+    // 市场源（换源入口；货架刷新由 market_changed 广播驱动）
+    marketSourceUrl,
+    sourceEpoch,
+    fetchSource,
+    setSource,
+    watchMarketChanged,
+    // 成员货架（market.list kind=agent；服务端分页：搜索/追加加载）
+    agentPackages,
+    agentTotal,
+    agentDone,
+    agentSearch,
+    agentWarning,
+    agentLoaded,
+    agentLoading,
+    agentLoadingMore,
+    agentError,
+    installingAgent,
+    hiredNames,
+    skillZhMap,
+    loadAgentMarket,
+    loadAgentMarketMore,
+    installAgentPackage,
+    recruitAgent,
+    fireAgent,
+    // 技能货架（market.list kind=skill；服务端分页：搜索/追加加载）
+    skillPackages,
+    skillTotal,
+    skillDone,
+    skillSearch,
+    skillWarning,
+    skillLoaded,
+    skillLoading,
+    skillLoadingMore,
+    skillError,
+    installingSkill,
+    installedSkillNames,
+    loadSkillMarket,
+    loadSkillMarketMore,
+    installSkillPackage,
     // 团队货架（mindx 市场 kind=team 包；服务端分页：搜索/追加加载）
     teamPackages,
     teamMarketWarning,
@@ -588,5 +993,14 @@ export const useMarketStore = defineStore('market', () => {
     requestTeamConfirm,
     runTeamConfirm,
     cancelTeamConfirm,
+    // 成员/技能安装覆盖确认（modal 组件消费）
+    agentPendingConfirm,
+    requestAgentConfirm,
+    runAgentConfirm,
+    cancelAgentConfirm,
+    skillPendingConfirm,
+    requestSkillConfirm,
+    runSkillConfirm,
+    cancelSkillConfirm,
   }
 })

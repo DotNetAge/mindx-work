@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
  * 技能管理行："技能"设置页唯一自定义行，承载完整管理器（models 管理行先例）。
- * 双视图：本地（全局技能库，导出/修改/删除/许可证）+ 在线市场（懒加载，安装进全局库）。
+ * 本地视图：全局技能库（导出/修改/删除/许可证）。
  * 详情弹层为 FLIP 分段动效（ghost 卡片拉宽→拉高→到位即呈现），贴触发点的局部浮层
  * 由组件自绘（契约 §6：只收全局层，popover/sheet 归组件）；编辑/许可证/确认走壳 Overlay modal。
  * 注意壳 modal z 序低于本组件 Teleport 层——弹层内动作先硬关弹层再开 modal（避免层叠纠缠）。
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, useCssModule, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import { useSkillsStore, skillDisplayName, skillLocaleDesc, isThirdParty, SkillExistsError } from '../store'
@@ -14,15 +14,13 @@ import MetricRateButtons from './MetricRateButtons.vue'
 import { pushNotice } from '../notice'
 import { MODAL_SKILLS_CONFIRM, MODAL_SKILL_EDIT, MODAL_SKILL_LICENSE } from '../ids'
 import { renderMarkdown } from '../markdown'
-import type { MarketPackageInfo, SkillInfo } from '../types'
+import type { SkillInfo } from '../types'
 import ConfirmModal from '../overlays/ConfirmModal.vue'
 import EditSkillModal from '../overlays/EditSkillModal.vue'
 import LicenseModal from '../overlays/LicenseModal.vue'
 
 const store = useSkillsStore()
 const shell = useShell()
-// script 内访问 CSS module 需显式取用（$style 仅为模板可用）
-const $style = useCssModule()
 
 onMounted(() => {
   store.loadSkills().catch((err: unknown) => {
@@ -38,23 +36,6 @@ function openModal(id: string, component: Component) {
 
 function openConfirm(): void {
   openModal(MODAL_SKILLS_CONFIRM, ConfirmModal)
-}
-
-// ── 视图切换：本地 / 市场（市场懒加载：首次切到才拉清单） ──
-const view = ref<'local' | 'market'>('local')
-
-watch(view, (v) => {
-  if (v === 'market' && !store.marketLoaded && !store.marketLoading) {
-    void onMarketRefresh()
-  }
-})
-
-async function onMarketRefresh() {
-  try {
-    await store.loadMarket()
-  } catch (err: unknown) {
-    pushNotice(shell, 'error', err instanceof Error ? err.message : '市场清单加载失败')
-  }
 }
 
 // ── 本地视图：搜索筛选 ──
@@ -130,81 +111,20 @@ async function onImport() {
   }
 }
 
-// ── 市场视图：分类筛选（搜索走服务端 q，store.marketSearch 防抖后重置加载） ──
-const marketDomain = ref('')
-
-/** 市场技能包筛选（分类为已加载范围内的前端过滤；搜索已由服务端 q 过滤） */
-const filteredMarketPackages = computed<MarketPackageInfo[]>(() => {
-  return store.marketPackages.filter(
-    (p) => !marketDomain.value || (p.category || '').trim() === marketDomain.value,
-  )
-})
-
-// 搜索改服务端触发（防抖 300ms）：重置游标从第一页重新拉取
-let marketSearchTimer: ReturnType<typeof setTimeout> | undefined
-watch(
-  () => store.marketSearch,
-  () => {
-    clearTimeout(marketSearchTimer)
-    marketSearchTimer = setTimeout(() => {
-      void onMarketRefresh()
-    }, 300)
-  },
-)
-
-// ── 无限滚动哨兵：滚动到底部进入视口即触发追加（行组件在壳层滚动区内，root 取视口） ──
-const marketSentinelRef = ref<HTMLElement | null>(null)
-watch(marketSentinelRef, (el, _prev, onCleanup) => {
-  if (!el) return
-  const observer = new IntersectionObserver(
-    (entries) => {
-      if (entries.some((e) => e.isIntersecting)) void store.loadMarketMore()
-    },
-    { rootMargin: '240px' },
-  )
-  observer.observe(el)
-  onCleanup(() => observer.disconnect())
-})
-
-/** 安装市场技能包（未安装直装；已安装或同名冲突走覆盖确认） */
-function onInstall(pkg: MarketPackageInfo) {
-  if (store.installedNames.has(pkg.name)) {
-    store.requestOverwrite(pkg)
-    openConfirm()
-    return
-  }
-  void store
-    .withInstalling(pkg, () => store.installMarket(pkg))
-    .then((text) => {
-      pushNotice(shell, 'success', text)
-    })
-    .catch((err: unknown) => {
-      if (err instanceof SkillExistsError) {
-        store.requestOverwrite(pkg)
-        openConfirm()
-        return
-      }
-      pushNotice(shell, 'error', err instanceof Error ? `安装失败：${err.message}` : '安装失败')
-    })
-}
-
-// ── 详情弹层（本地 + 市场卡片共用）：FLIP 分段动效 + SKILL.md markdown 正文预览 ──
+// ── 详情弹层（本地卡片）：FLIP 分段动效 + SKILL.md markdown 正文预览 ──
 // 动效编排（只动 transform/opacity，GPU 合成零重排，不用 backdrop-filter）：
 // 点击卡片 → ① 拉长左右至弹层宽度 → ② 拉长上下至弹层高度，到位即终结（弹层立即呈现，无淡入尾段）；
 // 关闭时反向：先收上下 → 再收左右 → 落回格子。
 
 interface ZoomTarget {
-  kind: 'local' | 'market'
   /** 展示名 */
   title: string
-  /** 技能/包原名 */
+  /** 技能原名 */
   name: string
   tagText: string
   tagTone: 'success' | 'info' | 'warning'
   description: string
-  /** market：安装动作需要的货架条目 */
-  pkg?: MarketPackageInfo
-  /** local：修改动作需要的技能条目 */
+  /** 修改动作需要的技能条目 */
   skill?: SkillInfo
 }
 
@@ -231,14 +151,14 @@ const prefersReducedMotion =
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/** 加载并渲染技能正文：本地读技能目录，市场优先读已安装副本、未安装走预览 RPC（下载读取不安装） */
+/** 加载并渲染技能正文：本地读技能目录 */
 async function loadZoomContent(target: ZoomTarget) {
   const seq = ++zoomReqSeq
   zoomContentHtml.value = ''
   zoomContentError.value = ''
   zoomContentLoading.value = true
   try {
-    const raw = await store.readSkillDoc(target.kind, target.name, target.skill?.root_dir)
+    const raw = await store.readSkillDoc(target.skill?.root_dir)
     if (seq !== zoomReqSeq || !zoomed.value) return
     zoomContentHtml.value = renderMarkdown(raw)
   } catch (err: unknown) {
@@ -352,29 +272,12 @@ function openZoomWith(target: ZoomTarget, sourceEl: HTMLElement | null) {
 function openZoomLocal(skill: SkillInfo, e?: Event) {
   openZoomWith(
     {
-      kind: 'local',
       title: skillDisplayName(skill),
       name: skill.name,
       tagText: isThirdParty(skill) ? '第三方' : '全局技能',
       tagTone: isThirdParty(skill) ? 'warning' : 'info',
       description: skillLocaleDesc(skill) || '(无描述)',
       skill,
-    },
-    (e?.currentTarget as HTMLElement) || null,
-  )
-}
-
-function openZoomMarket(pkg: MarketPackageInfo, e?: Event) {
-  const installed = store.installedNames.has(pkg.name)
-  openZoomWith(
-    {
-      kind: 'market',
-      title: store.marketDisplayName(pkg),
-      name: pkg.name,
-      tagText: installed ? '已安装' : '未安装',
-      tagTone: installed ? 'success' : 'info',
-      description: pkg.description || '(无描述)',
-      pkg,
     },
     (e?.currentTarget as HTMLElement) || null,
   )
@@ -441,184 +344,75 @@ function editFromZoom(target: ZoomTarget) {
   disposeZoomOverlay()
   if (skill) onEdit(skill)
 }
-
-/** 弹层内安装：先硬关弹层再走安装流程（确认 modal 同受 z 序约束） */
-function installFromZoom(target: ZoomTarget) {
-  const pkg = target.pkg
-  disposeZoomOverlay()
-  if (pkg) onInstall(pkg)
-}
-
-// ── 视图分段页签指示器（.mx-tabs 指示器位移经 JS 写 transform） ──
-const tabsRef = ref<HTMLElement | null>(null)
-
-function syncIndicator(): void {
-  const root = tabsRef.value
-  if (!root) return
-  const tab = root.querySelector<HTMLButtonElement>('button[aria-selected="true"]')
-  const ind = root.querySelector<HTMLElement>(`:scope > .${$style.tabsIndicator}`)
-  if (!tab || !ind) return
-  ind.style.width = `${tab.offsetWidth}px`
-  ind.style.transform = `translateX(${tab.offsetLeft - 4}px)`
-}
-
-watch(view, () => void nextTick(syncIndicator))
-onMounted(syncIndicator)
 </script>
 
 <template>
   <div :class="$style.wrap">
-    <!-- 节头：标题 + 说明 + 导入动作（本地视图） -->
+    <!-- 节头：标题 + 说明 + 导入动作 -->
     <div :class="$style.sectionHead">
       <div :class="$style.headText">
         <span :class="$style.sectionTitle">技能</span>
-        <span :class="$style.sectionHint">管理全局技能与在线市场；安装后即可在会话中启用</span>
+        <span :class="$style.sectionHint">管理全局技能；安装后即可在会话中启用</span>
       </div>
-      <button v-if="view === 'local'" type="button" class="mx-btn" :class="$style.importBtn" @click="onImport">
+      <button type="button" class="mx-btn" :class="$style.importBtn" @click="onImport">
         <MxIcon name="lucide:package-plus" :size="16" />
         <span>导入分发包</span>
       </button>
     </div>
+    <input v-model="searchQuery" class="mx-input" :class="$style.search" placeholder="搜索技能名称或描述" />
 
-    <!-- 工具栏：页签独占一行居中，搜索独占一行全宽（计数与手动刷新冗余，已删） -->
-    <div :class="$style.tabsRow">
-      <div ref="tabsRef" class="mx-tabs" :class="$style.viewTabs">
-        <span :class="$style.tabsIndicator" aria-hidden="true" />
-        <button type="button" class="mx-tab" role="tab" :aria-selected="view === 'local' ? 'true' : 'false'" @click="view = 'local'">
-          本地
-        </button>
-        <button type="button" class="mx-tab" role="tab" :aria-selected="view === 'market' ? 'true' : 'false'" @click="view = 'market'">
-          在线市场
-        </button>
-      </div>
-    </div>
-    <input v-if="view === 'local'" v-model="searchQuery" class="mx-input" :class="$style.search" placeholder="搜索技能名称或描述" />
-    <input v-else v-model="store.marketSearch" class="mx-input" :class="$style.search" placeholder="搜索技能名称或描述" />
-
-    <!-- 市场降级提示（在线拉取失败降级本地缓存） -->
-    <p v-if="view === 'market' && store.marketWarning" :class="$style.warning">{{ store.marketWarning }}</p>
-
-    <!-- 分类标签行（仅市场视图；固定分类在前、其余字典序在后） -->
-    <div v-if="view === 'market' && store.marketDomains.length > 0" :class="$style.domains">
-      <button
-        type="button"
-        :class="$style.domainTag"
-        :aria-pressed="marketDomain === '' ? 'true' : 'false'"
-        @click="marketDomain = ''"
+    <!-- ── 全局技能库 ── -->
+    <p v-if="store.loading && !store.loaded" :class="[$style.hint, 'mx-text-loading']">正在加载技能清单…</p>
+    <div v-else-if="filteredSkills.length > 0" :class="$style.grid">
+      <div
+        v-for="skill in filteredSkills"
+        :key="skill.name"
+        role="button"
+        tabindex="0"
+        :class="$style.card"
+        @click="openZoomLocal(skill, $event)"
+        @keydown.enter.prevent="openZoomLocal(skill, $event)"
       >
-        全部
-      </button>
-      <button
-        v-for="d in store.marketDomains"
-        :key="d"
-        type="button"
-        :class="$style.domainTag"
-        :aria-pressed="marketDomain === d ? 'true' : 'false'"
-        @click="marketDomain = marketDomain === d ? '' : d"
-      >
-        {{ d }}
-      </button>
-    </div>
-
-    <!-- ── 本地视图 ── -->
-    <template v-if="view === 'local'">
-      <p v-if="store.loading && !store.loaded" :class="[$style.hint, 'mx-text-loading']">正在加载技能清单…</p>
-      <div v-else-if="filteredSkills.length > 0" :class="$style.grid">
-        <div
-          v-for="skill in filteredSkills"
-          :key="skill.name"
-          role="button"
-          tabindex="0"
-          :class="$style.card"
-          @click="openZoomLocal(skill, $event)"
-          @keydown.enter.prevent="openZoomLocal(skill, $event)"
-        >
-          <div :class="$style.cardTop">
-            <span :class="$style.avatar"><MxIcon name="lucide:sparkles" :size="20" /></span>
-            <div :class="$style.titleCol">
-              <span :class="$style.name" :title="skill.name">{{ skillDisplayName(skill) }}</span>
-              <span :class="$style.id">{{ skill.name }}</span>
-            </div>
-            <span v-if="isThirdParty(skill)" class="mx-tag" data-tone="warning">第三方</span>
-            <!-- 操作组右上角（@click.stop 防触发卡片详情弹层） -->
-            <div :class="$style.cardActions" @click.stop>
-              <!-- 决策计量：技能整体评价双指（agent.rate subject_type=skill，每日限频） -->
-              <MetricRateButtons :name="skill.name" />
-              <button type="button" class="mx-icon-btn" aria-label="导出为分发包" @click="onExport(skill)">
-                <MxIcon name="lucide:download" :size="16" />
-              </button>
-              <button type="button" class="mx-icon-btn" aria-label="修改 SKILL.md" @click="onEdit(skill)">
-                <MxIcon name="lucide:pencil" :size="16" />
-              </button>
-              <button type="button" class="mx-icon-btn" aria-label="删除技能" @click="onDelete(skill)">
-                <MxIcon name="lucide:trash-2" :size="16" />
-              </button>
-            </div>
+        <div :class="$style.cardTop">
+          <span :class="$style.avatar"><MxIcon name="lucide:sparkles" :size="20" /></span>
+          <div :class="$style.titleCol">
+            <span :class="$style.name" :title="skill.name">{{ skillDisplayName(skill) }}</span>
+            <span :class="$style.id">{{ skill.name }}</span>
           </div>
-          <p :class="$style.desc" :title="skillLocaleDesc(skill)">{{ skillLocaleDesc(skill) || '(无描述)' }}</p>
-          <div :class="$style.tagRow">
-            <span v-if="skill.metadata?.version" class="mx-tag" data-tone="info">v{{ skill.metadata?.version }}</span>
-            <span v-if="skill.metadata?.author" class="mx-tag" data-tone="neutral">{{ skill.metadata?.author }}</span>
-            <span
-              v-if="skill.license"
-              class="mx-tag"
-              data-tone="warning"
-              :class="$style.licenseTag"
-              role="button"
-              tabindex="0"
-              @click.stop="onLicense(skill)"
-              @keydown.enter.prevent="onLicense(skill)"
-            >许可证</span>
-          </div>
-        </div>
-      </div>
-      <p v-else :class="$style.hint">暂无技能；可从在线市场安装，或导入分发包。</p>
-    </template>
-
-    <!-- ── 在线市场视图（skill 类型分发包，安装进全局库） ── -->
-    <template v-else>
-      <p v-if="store.marketLoading && !store.marketLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载市场清单…</p>
-      <div v-else-if="filteredMarketPackages.length > 0" :class="$style.grid">
-        <div
-          v-for="pkg in filteredMarketPackages"
-          :key="pkg.kind + '/' + pkg.name"
-          role="button"
-          tabindex="0"
-          :class="$style.card"
-          @click="openZoomMarket(pkg, $event)"
-          @keydown.enter.prevent="openZoomMarket(pkg, $event)"
-        >
-          <div :class="$style.cardTop">
-            <span :class="$style.avatar"><MxIcon name="lucide:sparkles" :size="20" /></span>
-            <div :class="$style.titleCol">
-              <span :class="$style.name" :title="pkg.name">{{ store.marketDisplayName(pkg) }}</span>
-              <span :class="$style.id">{{ pkg.name }}</span>
-            </div>
-            <!-- 安装动作上移至右上角取代状态标签；已安装仅显示标签，覆盖安装走详情弹层 -->
-            <button
-              v-if="!store.installedNames.has(pkg.name)"
-              type="button"
-              class="mx-btn mx-btn--primary"
-              :disabled="store.installing === pkg.name"
-              @click.stop="onInstall(pkg)"
-            >
-              <span v-if="store.installing === pkg.name" class="mx-text-loading">安装中…</span>
-              <template v-else>安装</template>
+          <span v-if="isThirdParty(skill)" class="mx-tag" data-tone="warning">第三方</span>
+          <!-- 操作组右上角（@click.stop 防触发卡片详情弹层） -->
+          <div :class="$style.cardActions" @click.stop>
+            <!-- 决策计量：技能整体评价双指（agent.rate subject_type=skill，每日限频） -->
+            <MetricRateButtons :name="skill.name" />
+            <button type="button" class="mx-icon-btn" aria-label="导出为分发包" @click="onExport(skill)">
+              <MxIcon name="lucide:download" :size="16" />
             </button>
-            <span v-else class="mx-tag" data-tone="success">已安装</span>
+            <button type="button" class="mx-icon-btn" aria-label="修改 SKILL.md" @click="onEdit(skill)">
+              <MxIcon name="lucide:pencil" :size="16" />
+            </button>
+            <button type="button" class="mx-icon-btn" aria-label="删除技能" @click="onDelete(skill)">
+              <MxIcon name="lucide:trash-2" :size="16" />
+            </button>
           </div>
-          <p :class="$style.desc" :title="pkg.description">{{ pkg.description || '(无描述)' }}</p>
         </div>
-
-        <!-- 无限滚动哨兵：进入视口触发下一页追加（全部加载完显示终态提示） -->
-        <div ref="marketSentinelRef" :class="$style.gridSentinel">
-          <span v-if="store.marketLoadingMore" class="mx-text-loading">正在加载更多…</span>
-          <span v-else-if="store.marketDone">已加载全部分发包</span>
+        <p :class="$style.desc" :title="skillLocaleDesc(skill)">{{ skillLocaleDesc(skill) || '(无描述)' }}</p>
+        <div :class="$style.tagRow">
+          <span v-if="skill.metadata?.version" class="mx-tag" data-tone="info">v{{ skill.metadata?.version }}</span>
+          <span v-if="skill.metadata?.author" class="mx-tag" data-tone="neutral">{{ skill.metadata?.author }}</span>
+          <span
+            v-if="skill.license"
+            class="mx-tag"
+            data-tone="warning"
+            :class="$style.licenseTag"
+            role="button"
+            tabindex="0"
+            @click.stop="onLicense(skill)"
+            @keydown.enter.prevent="onLicense(skill)"
+          >许可证</span>
         </div>
       </div>
-      <p v-else-if="store.marketLoaded" :class="$style.hint">市场暂无可安装的技能。</p>
-      <p v-else :class="$style.hint">市场清单加载失败，请点击刷新重试。</p>
-    </template>
+    </div>
+    <p v-else :class="$style.hint">暂无技能；可导入分发包。</p>
 
     <!-- ── 技能详情弹层：FLIP 分段动效（ghost 卡片拉宽→拉高），到位即呈现 ── -->
     <Teleport to="body">
@@ -654,18 +448,7 @@ onMounted(syncIndicator)
           <div :class="$style.cardFoot" @click.stop>
             <span></span>
             <div :class="$style.cardActions">
-              <button v-if="zoomed.kind === 'local'" type="button" class="mx-btn" @click="editFromZoom(zoomed)">修改</button>
-              <button
-                v-else-if="zoomed.pkg"
-                type="button"
-                class="mx-btn"
-                :class="{ 'mx-btn--primary': !store.installedNames.has(zoomed.name) }"
-                :disabled="store.installing === zoomed.name"
-                @click="installFromZoom(zoomed)"
-              >
-                <span v-if="store.installing === zoomed.name" class="mx-text-loading">安装中…</span>
-                <template v-else>{{ store.installedNames.has(zoomed.name) ? '覆盖安装' : '安装' }}</template>
-              </button>
+              <button type="button" class="mx-btn" @click="editFromZoom(zoomed)">修改</button>
               <button type="button" class="mx-btn" :class="$style.zoomClose" @click="closeZoom">关闭</button>
             </div>
           </div>
@@ -706,31 +489,6 @@ onMounted(syncIndicator)
   color: var(--mx-text-tertiary);
 }
 
-/* 页签行：页签组独占一行且水平居中 */
-.tabsRow {
-  display: flex;
-  justify-content: center;
-}
-
-/* 视图页签：两档等宽（grid 1fr 平分），indicator 与 .mx-tabs-indicator 同几何 */
-.viewTabs {
-  grid-auto-columns: 1fr;
-  grid-auto-flow: column;
-}
-
-.tabsIndicator {
-  position: absolute;
-  inset: 4px auto 4px 4px;
-  box-sizing: border-box;
-  border: 0.5px solid var(--mx-border-strong);
-  border-radius: 8px;
-  background: var(--mx-bg-elevated);
-  transition:
-    transform 180ms ease,
-    width 180ms ease;
-  pointer-events: none;
-}
-
 /* 节头右侧导入按钮：图标与文字对齐（原工具栏按钮样式迁移至此） */
 .importBtn {
   display: inline-flex;
@@ -748,46 +506,6 @@ onMounted(syncIndicator)
   color: var(--mx-state-warn-label);
 }
 
-/* 分类标签行：胶囊小钮，选中态 accent 描边 */
-.domains {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-2);
-  flex-wrap: wrap;
-}
-
-.domainTag {
-  height: 24px;
-  padding: 0 12px;
-  border: 0.5px solid var(--mx-separator-soft);
-  border-radius: 999px;
-  background: var(--mx-module);
-  font: var(--mx-font-caption);
-  color: var(--mx-text-secondary);
-  cursor: pointer;
-  transition:
-    border-color var(--mx-duration-fast) var(--mx-ease-standard),
-    color var(--mx-duration-fast) var(--mx-ease-standard);
-}
-
-.domainTag:hover {
-  border-color: var(--mx-border-strong);
-}
-
-.domainTag:active {
-  background: var(--mx-active);
-}
-
-.domainTag:focus-visible {
-  outline: 2px solid var(--mx-accent);
-  outline-offset: 1px;
-}
-
-.domainTag[aria-pressed='true'] {
-  border-color: var(--mx-accent);
-  color: var(--mx-accent);
-}
-
 /* 卡片网格：自适应列宽（与连接器/源组件同布局口径） */
 .grid {
   display: grid;
@@ -796,18 +514,6 @@ onMounted(syncIndicator)
   align-content: start;
   /* 卡片高度随内容自适应（不随行内最高卡片拉伸） */
   align-items: start;
-}
-
-/* 无限滚动哨兵：占满网格整行（加载中文字提示，到底显示终态） */
-.gridSentinel {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 28px;
-  padding: var(--mx-space-1) 0;
-  font: var(--mx-font-body);
-  color: var(--mx-text-secondary);
 }
 
 .card {
@@ -926,17 +632,6 @@ onMounted(syncIndicator)
 .card:hover .cardActions,
 .card:focus-within .cardActions {
   opacity: 1;
-}
-
-/* 测连/安装进行中：图标旋转示意 */
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .hint {

@@ -62,6 +62,11 @@
 
 - **插件 modal 根元素写死宽度必须配 `max-width: 100%`**：壳层 `.modalCard` 的 `max-width: min(520px, …)` 是 border-box 含自身 `padding: var(--mx-space-6)`，内容区上限实测仅 472px。根元素 `width: 520px`（ImportBrowser）或 `min-width: 560px/480px`（skills 的 EditSkillModal/LicenseModal，存量同病）都会把头部 × 与底部按钮行顶出卡片右缘。正确写法：`width: <期望值>; max-width: 100%`。量测法：CDP 取 `[class*=modalCard]` 与内容根元素的 `getBoundingClientRect()` 对比 right 值。
 
+## 代码删除纪律（2026-10-08 agents/skills 市场分支剥离实踩）
+
+- **Edit 删大段代码时 old_string 只圈删除目标本身，勿把相邻要保留的函数圈进来**：删 agents/store.ts 市场段时，old_string 上界多圈了紧邻的 `agentDisplayName`，保存后该函数直接从文件消失（全仓十余处引用将 TS2305），靠回读 diff 立即发现恢复。大段删除保存后必须对 old_string 边界上出现过的每个保留符号 grep 复核存在性；多文件改造攒到一半才跑 typecheck 会把单点误删放大成一片报错，每删完一个文件先跑一次增量检查。
+- **删 store 导出前先 grep 全仓引用而非仅当前组件**：本轮 `requestConfirm` 看似只被市场覆盖确认调用，实际 TeamEditorModal 也在用（删了就断团队删除确认）；`requestConfirm`、`SkillExistsError`（skill.import 同名冲突仍用）这类"确认范式/错误类型"是多视图共用基础设施，剥离市场时逐个符号 grep 确认归属再动手。
+
 ## 首启向导与 CDP 断言细节（2026-10-02）
 
 - **Shell 会话内 `&`/nohup/disown 启动的 electron 会随命令结束被杀**（连杀 3 次排查半小时）：Agent 工具的 shell 沙箱在命令返回后清理整个进程组，nohup+disown 也拦不住 SIGTERM。常驻验证实例必须用工具的 `run_in_background` 参数启动。【2026-10-02 二期验证再次连踩 2 次——写完命令顺手 `&` 是肌肉记忆，凡是启动 electron 实例的命令，先想 run_in_background 再动手】

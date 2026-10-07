@@ -2,33 +2,27 @@
 /**
  * 团队管理行："团队"设置页唯一自定义行，承载完整管理器（skills 管理行先例）。
  * 布局为上下结构（桌面端左右结构移植改形）：
- * 上 = 员工卡片网格（团队视图：已招募员工；市场视图：agent 类型分发包货架），
- * 下 = 选中员工的配置面板（头部 + 指令/技能/云技能/工具四区）。
- * 市场卡片详情为 FLIP 分段动效弹层（ghost 卡片拉宽→拉高→到位即呈现），
- * 贴触发点的局部浮层由组件自绘（契约 §6）；确认/许可证走壳 Overlay modal。
- * 注意壳 modal z 序低于本组件 Teleport 层——弹层内动作先硬关弹层再开 modal。
+ * 上 = 顶部「成员 | 团队」分段切换 + 选中对象卡片横排（strip），
+ * 下 = 选中对象的配置面板（头部 + 指令/技能/云技能/工具四区；团队为档案/成员页签）。
+ * 许可证走壳 Overlay modal。
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, useCssModule, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useCssModule, watch } from 'vue'
 import type { Component } from 'vue'
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import {
   useAgentsStore,
   agentDisplayName,
   agentRoleSubtitle,
-  marketPkgDisplayName,
-  marketPkgRoleSubtitle,
   skillDisplayName,
   skillLocaleDesc,
   teamDisplayName,
-  AgentExistsError,
 } from '../store'
 import { pushNotice } from '../notice'
-import { MODAL_AGENTS_CONFIRM, MODAL_AGENTS_LICENSE } from '../ids'
+import { MODAL_AGENTS_LICENSE } from '../ids'
 import MetricRateButtons from './MetricRateButtons.vue'
-import ConfirmModal from '../overlays/ConfirmModal.vue'
 import LicenseModal from '../overlays/LicenseModal.vue'
 import TeamEditorModal from './TeamEditorModal.vue'
-import type { AgentMeta, MarketAgentPackage, SkillInfo, TeamMeta, TeamUpdateParams } from '../types'
+import type { AgentMeta, SkillInfo, TeamMeta, TeamUpdateParams } from '../types'
 import {
   AGENT_TOOLS,
   AGENT_TOOL_GROUPS,
@@ -64,34 +58,9 @@ function openModal(id: string, component: Component) {
   shell.Overlay.add({ id, kind: 'modal', component })
 }
 
-function openConfirm(): void {
-  openModal(MODAL_AGENTS_CONFIRM, ConfirmModal)
-}
-
 function openLicense(name: string, content: string): void {
   store.openLicense(`许可证 — ${name}`, content)
   openModal(MODAL_AGENTS_LICENSE, LicenseModal)
-}
-
-// ── 视图切换：团队 / 市场（市场懒加载：首次切到才拉清单） ──
-const view = ref<'team' | 'market'>('team')
-
-watch(view, (v) => {
-  if (v !== 'market' || store.marketLoading) return
-  // 每次切入都重拉：已有清单先渲染旧数据，后台静默刷新（stale-while-revalidate），
-  // 避免 daemon/线上清单更新后前端内存旧分类永不失效
-  void onMarketRefresh()
-})
-
-async function onMarketRefresh() {
-  try {
-    await store.loadMarket()
-  } catch (err: unknown) {
-    // 已有数据的静默刷新失败不打扰（旧清单仍可浏览），仅首拉失败提示
-    if (!store.marketLoaded) {
-      pushNotice(shell, 'error', err instanceof Error ? err.message : '市场清单加载失败，请检查网络连接')
-    }
-  }
 }
 
 // ── 团队视图：搜索筛选（已招募员工） ──
@@ -583,7 +552,7 @@ const teamMemberAvatars = computed<TeamStackAvatar[]>(() => {
     .filter((m) => !!m)
 })
 
-// ── 散伙（团队卡片 / 配置头部 / 市场卡片 / 详情弹层共用） ──
+// ── 散伙（成员卡片配置面板头部共用） ──
 function onFire(name: string, display: string): void {
   store
     .fire(name)
@@ -593,314 +562,7 @@ function onFire(name: string, display: string): void {
     })
 }
 
-// ── 市场视图：搜索 + 分类筛选 ──
-const marketSearch = ref('')
-const marketDomain = ref('')
-
-const marketCards = computed<MarketAgentPackage[]>(() => {
-  const q = marketSearch.value.trim().toLowerCase()
-  return store.marketPackages.filter((p) => {
-    if (marketDomain.value && (p.category || '').trim() !== marketDomain.value) return false
-    if (!q) return true
-    const hay = [
-      p.name,
-      marketPkgDisplayName(p),
-      p.description || '',
-      (p.category || '').trim(),
-      ...(p.skills ?? []).map((s) => store.skillZhMap[s] || p.skillNames?.[s] || s),
-    ]
-      .join(' ')
-      .toLowerCase()
-    return hay.includes(q)
-  })
-})
-
-/** 已招募员工名集合（市场卡片招募态标签口径：本地注册表且 hired） */
-const hiredNames = computed<Set<string>>(() => new Set(store.hiredAgents.map((a) => a.name)))
-
-/**
- * 市场卡片招募（一键语义）：始终先安装（市场包自包含技能装配）再雇佣。
- * 同名冲突走覆盖确认后重试。
- */
-function onRecruit(pkg: MarketAgentPackage): void {
-  void store
-    .recruitMarketPackage(pkg)
-    .then(() => {
-      pushNotice(shell, 'success', `已招募「${marketPkgDisplayName(pkg)}」，现在可用于会话`)
-    })
-    .catch((err: unknown) => {
-      if (err instanceof AgentExistsError) {
-        const m = err.message.match(/已存在同名智能体\s*"([^"]+)"/)
-        store.requestConfirm(
-          '同名冲突',
-          `已存在同名智能体「${m?.[1] || pkg.name}」，是否覆盖？覆盖后原内容将被替换，不可恢复。`,
-          '覆盖',
-          `已覆盖安装「${marketPkgDisplayName(pkg)}」并重新招募`,
-          async () => {
-            await store.installAgentPackage(pkg, true)
-            await Promise.all([store.refreshAgents(), store.loadSkills()])
-            await store.hire(pkg.name)
-          },
-        )
-        openConfirm()
-        return
-      }
-      pushNotice(shell, 'error', err instanceof Error ? err.message : '操作失败')
-    })
-}
-
-function onMarketFire(pkg: MarketAgentPackage): void {
-  const a = store.agents.find((x) => x.name === pkg.name)
-  onFire(pkg.name, a ? agentDisplayName(a) : marketPkgDisplayName(pkg))
-}
-
-// ── 市场详情弹层（FLIP 分段动效）：头部卡 + 技能装备清单 + 招募/散伙 ──
-// 动效编排（只动 transform/opacity，GPU 合成零重排，不用 backdrop-filter）：
-// 点击卡片 → ① 拉长左右至弹层宽度 → ② 拉长上下至弹层高度，到位即终结（弹层立即呈现，无淡入尾段）；
-// 关闭时反向：先收上下 → 再收左右 → 落回格子。
-
-/** 技能装备清单条目（中文名回退链：本地库 metadata.name_zh → 包清单 skillNames → 原名） */
-interface DetailSkillItem {
-  name: string
-  nameZh: string
-  desc: string
-  version: string
-}
-
-interface ZoomTarget {
-  pkg: MarketAgentPackage
-  /** 展示名（role 优先） */
-  title: string
-  name: string
-  description: string
-  category: string
-  version: string
-  hired: boolean
-  installed: boolean
-  skillItems: DetailSkillItem[]
-}
-
-const zoomed = ref<ZoomTarget | null>(null)
-/** true = 弹层已挂载但隐藏，等待 ghost 分段动画到位后立即呈现 */
-const zoomPreparing = ref(true)
-const zoomClosing = ref(false)
-const zoomCardRef = ref<HTMLElement | null>(null)
-
-/** FLIP ghost 元素与来源卡片（命令式管理，随动画创建/销毁） */
-let zoomGhost: HTMLDivElement | null = null
-let zoomSourceEl: HTMLElement | null = null
-let zoomAnim: Animation | null = null
-
-const prefersReducedMotion =
-  typeof window !== 'undefined' &&
-  typeof window.matchMedia === 'function' &&
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches
-
-/** 在来源卡片位置创建 ghost（纯色圆角盒，scale 拉伸不会暴露形变） */
-function createGhost(rect: DOMRect): HTMLDivElement {
-  const g = document.createElement('div')
-  g.style.cssText = [
-    'position:fixed',
-    `left:${rect.left}px`,
-    `top:${rect.top}px`,
-    `width:${rect.width}px`,
-    `height:${rect.height}px`,
-    'background:var(--mx-bg-surface)',
-    'border:0.5px solid var(--mx-separator-soft)',
-    'border-radius:var(--mx-radius-card)',
-    'box-shadow:var(--mx-shadow-prominent)',
-    'z-index:2001',
-    'pointer-events:none',
-    'transform-origin:top left',
-  ].join(';')
-  document.body.appendChild(g)
-  return g
-}
-
-function removeGhost(): void {
-  zoomAnim?.cancel()
-  zoomAnim = null
-  zoomGhost?.remove()
-  zoomGhost = null
-}
-
-function restoreSourceCard(): void {
-  if (zoomSourceEl) zoomSourceEl.style.visibility = ''
-  zoomSourceEl = null
-}
-
-function disposeZoomOverlay(): void {
-  removeGhost()
-  restoreSourceCard()
-  zoomed.value = null
-  zoomPreparing.value = true
-  zoomClosing.value = false
-}
-
-/** 打开详情：拉宽 → 拉高 → 到位即呈现 */
-function openZoomWith(target: ZoomTarget, sourceEl: HTMLElement | null): void {
-  zoomClosing.value = false
-  zoomPreparing.value = true
-  zoomed.value = target
-
-  // reduced motion：跳过分段动画，弹层直接呈现
-  if (prefersReducedMotion) {
-    zoomPreparing.value = false
-    return
-  }
-
-  // 卡片让位给 ghost（同一帧无缝换位，视觉上就是卡片自己移位）
-  restoreSourceCard()
-  zoomSourceEl = sourceEl
-  if (zoomSourceEl) zoomSourceEl.style.visibility = 'hidden'
-  const cardRect = zoomSourceEl
-    ? zoomSourceEl.getBoundingClientRect()
-    : new DOMRect(window.innerWidth / 2 - 200, window.innerHeight / 2 - 120, 400, 240)
-  removeGhost()
-  zoomGhost = createGhost(cardRect)
-
-  void nextTick(() => {
-    if (!zoomGhost || !zoomed.value) return
-    const dialogRect = zoomCardRef.value?.getBoundingClientRect()
-    if (!dialogRect || dialogRect.width === 0) {
-      // 弹层量不到尺寸（异常兜底）：跳过动画直接呈现
-      removeGhost()
-      restoreSourceCard()
-      zoomPreparing.value = false
-      return
-    }
-    const dx = dialogRect.left - cardRect.left
-    const dy = dialogRect.top - cardRect.top
-    const sx = dialogRect.width / cardRect.width
-    const sy = dialogRect.height / cardRect.height
-    zoomAnim = zoomGhost.animate(
-      [
-        { transform: 'translate(0px, 0px) scale(1, 1)', offset: 0, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
-        // ① 拉长左右至弹层宽度
-        { transform: `translate(${dx}px, 0px) scale(${sx}, 1)`, offset: 0.55, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
-        // ② 拉长上下至弹层高度，到位即终结（弹层立即接管，无淡入尾段）
-        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, offset: 1 },
-      ],
-      { duration: 620, fill: 'forwards' },
-    )
-    zoomAnim.onfinish = () => {
-      // 换位顺序不能反：先让弹层立即不透明（与 ghost 同矩形同底色，视觉无缝），
-      // 渲染一帧后再撤 ghost 与恢复卡片——若先撤 ghost，落位矩形会出现一帧大空隙
-      if (zoomed.value) zoomPreparing.value = false
-      void nextTick(() => {
-        removeGhost()
-        restoreSourceCard()
-      })
-    }
-  })
-}
-
-function openZoomMarket(pkg: MarketAgentPackage, e?: Event): void {
-  const skillMap = new Map(store.skills.map((s) => [s.name, s]))
-  const skillItems: DetailSkillItem[] = (pkg.skills ?? []).map((n) => {
-    const s = skillMap.get(n)
-    if (!s) {
-      // 本地技能库无详情（未安装 / 技能库未加载）：中文名/描述回退包清单映射；版本回退包版本
-      return {
-        name: n,
-        nameZh: pkg.skillNames?.[n] || n,
-        desc: pkg.skillDescs?.[n] || '',
-        version: pkg.version || '',
-      }
-    }
-    // 技能展示名/描述以 frontmatter 中文名（metadata.name_zh/description_zh）优先
-    return {
-      name: n,
-      nameZh: skillDisplayName(s),
-      desc: skillLocaleDesc(s),
-      version: s.metadata?.version || '',
-    }
-  })
-  const installed = store.installedNames.has(pkg.name)
-  openZoomWith(
-    {
-      pkg,
-      title: marketPkgDisplayName(pkg),
-      name: pkg.name,
-      description: pkg.description || '暂无描述',
-      category: (pkg.category || '').trim(),
-      version: pkg.version || '',
-      hired: hiredNames.value.has(pkg.name),
-      installed,
-      skillItems,
-    },
-    (e?.currentTarget as HTMLElement) || null,
-  )
-}
-
-/** 关闭详情：弹层淡出，ghost 反向收上下 → 收左右 → 落回格子 */
-function closeZoom(): void {
-  if (!zoomed.value || zoomClosing.value || zoomPreparing.value) return
-  zoomClosing.value = true
-
-  if (prefersReducedMotion) {
-    window.setTimeout(disposeZoomOverlay, 160)
-    return
-  }
-
-  const dialogRect = zoomCardRef.value?.getBoundingClientRect()
-  const cardRect = zoomSourceEl?.getBoundingClientRect()
-  if (!dialogRect || dialogRect.width === 0 || !cardRect || cardRect.width === 0) {
-    window.setTimeout(disposeZoomOverlay, 200)
-    return
-  }
-  const dx = dialogRect.left - cardRect.left
-  const dy = dialogRect.top - cardRect.top
-  const sx = dialogRect.width / cardRect.width
-  const sy = dialogRect.height / cardRect.height
-  removeGhost()
-  zoomGhost = createGhost(dialogRect)
-  zoomAnim = zoomGhost.animate(
-    [
-      { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, offset: 0, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
-      // 反向 ① 收上下
-      { transform: `translate(${dx}px, 0px) scale(${sx}, 1)`, offset: 0.55, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
-      // 反向 ② 收左右，落回格子
-      { transform: 'translate(0px, 0px) scale(1, 1)', offset: 1 },
-    ],
-    { duration: 460, fill: 'forwards' },
-  )
-  zoomAnim.onfinish = () => {
-    disposeZoomOverlay()
-  }
-}
-
-/** Esc 收详情（capture 阶段拦截，避免壳同时把设置面板一并收起） */
-function onZoomKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') {
-    e.stopImmediatePropagation()
-    closeZoom()
-  }
-}
-
-watch(zoomed, (v) => {
-  if (v) window.addEventListener('keydown', onZoomKey, true)
-  else window.removeEventListener('keydown', onZoomKey, true)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', onZoomKey, true)
-  disposeZoomOverlay()
-})
-
-/** 弹层内招募：先硬关弹层再走安装流程（确认 modal 同受 z 序约束） */
-function recruitFromZoom(target: ZoomTarget): void {
-  disposeZoomOverlay()
-  onRecruit(target.pkg)
-}
-
-/** 弹层内散伙：先硬关弹层再执行 */
-function fireFromZoom(target: ZoomTarget): void {
-  disposeZoomOverlay()
-  onMarketFire(target.pkg)
-}
-
-// ── 分段页签指示器（.mx-tabs 指示器位移经 JS 写 transform；视图页签 + 配置区页签两处） ──
+// ── 分段页签指示器（.mx-tabs 指示器位移经 JS 写 transform；分段切换 + 配置区页签两处） ──
 const viewTabsRef = ref<HTMLElement | null>(null)
 const configTabsRef = ref<HTMLElement | null>(null)
 
@@ -913,7 +575,7 @@ function syncIndicator(root: HTMLElement | null): void {
   ind.style.transform = `translateX(${tab.offsetLeft - 4}px)`
 }
 
-watch(view, () => void nextTick(() => syncIndicator(viewTabsRef.value)))
+watch(selectedKind, () => void nextTick(() => syncIndicator(viewTabsRef.value)))
 watch(editorTab, () => void nextTick(() => syncIndicator(configTabsRef.value)))
 // 团队页签切换与团队清单变化：指示器同步；选中团队被删除时回落到首个已招募成员
 watch(teamEditorTab, () => void nextTick(() => syncIndicator(configTabsRef.value)))
@@ -942,23 +604,22 @@ onMounted(() => {
     <div :class="$style.sectionHead">
       <div :class="$style.headText">
         <span :class="$style.sectionTitle">团队</span>
-        <span :class="$style.sectionHint">配置员工的基本能力与技能；点击员工卡片展开配置，到市场招募新员工</span>
+        <span :class="$style.sectionHint">配置员工的基本能力与技能；点击卡片在下方展开配置</span>
       </div>
     </div>
 
-    <!-- 工具栏：页签独占一行居中（右端"新建团队"入口），搜索独占一行全宽（计数与手动刷新冗余，已删） -->
+    <!-- 工具栏：「成员 | 团队」分段切换独占一行居中（右端"新建团队"入口），搜索独占一行全宽 -->
     <div :class="$style.tabsRow">
       <div ref="viewTabsRef" class="mx-tabs" :class="$style.viewTabs">
         <span data-indicator aria-hidden="true" :class="$style.tabsIndicator" />
-        <button type="button" class="mx-tab" role="tab" :aria-selected="view === 'team' ? 'true' : 'false'" @click="view = 'team'">
-          团队
+        <button type="button" class="mx-tab" role="tab" :aria-selected="selectedKind === 'agent' ? 'true' : 'false'" @click="selectedKind = 'agent'">
+          成员
         </button>
-        <button type="button" class="mx-tab" role="tab" :aria-selected="view === 'market' ? 'true' : 'false'" @click="view = 'market'">
-          市场
+        <button type="button" class="mx-tab" role="tab" :aria-selected="selectedKind === 'team' ? 'true' : 'false'" @click="selectedKind = 'team'">
+          团队
         </button>
       </div>
       <button
-        v-if="view === 'team'"
         type="button"
         class="mx-btn mx-btn--primary"
         :class="$style.tabsNewTeam"
@@ -968,96 +629,63 @@ onMounted(() => {
       </button>
     </div>
     <input
-      v-if="view === 'team'"
       v-model="search"
       class="mx-input"
       :class="$style.search"
       placeholder="搜索名称、角色或描述"
     />
-    <input
-      v-else
-      v-model="marketSearch"
-      class="mx-input"
-      :class="$style.search"
-      placeholder="搜索名称、角色或描述"
-    />
 
-    <!-- 市场降级提示（在线拉取失败降级本地缓存） -->
-    <p v-if="view === 'market' && store.marketWarning" :class="$style.warning">{{ store.marketWarning }}</p>
+    <!-- ── 成员与团队迷你卡横排（供应商品牌卡同款）；下：选中对象配置面板 ── -->
+    <p v-if="store.loading && !store.loaded" :class="[$style.hint, 'mx-text-loading']">正在加载员工清单…</p>
+    <div v-else-if="teamCards.length > 0 || store.teams.length > 0" :class="$style.strip">
+      <div
+        v-for="a in teamCards"
+        v-if="selectedKind === 'agent'"
+        :key="a.name"
+        role="button"
+        tabindex="0"
+        :class="$style.mCard"
+        :data-active="selectedKind === 'agent' && a.name === selectedName ? 'true' : 'false'"
+        @click="selectAgentCard(a.name)"
+        @keydown.enter.prevent="selectAgentCard(a.name)"
+      >
+        <img v-if="a.icon" :class="[$style.mAvatar, $style.avatarImg]" :src="a.icon" :alt="agentDisplayName(a)" />
+        <span v-else :class="$style.mAvatar">{{ (agentDisplayName(a) || '?').charAt(0).toUpperCase() }}</span>
+        <span :class="$style.mName" :title="a.name">{{ agentDisplayName(a) }}</span>
+        <span v-if="agentRoleSubtitle(a)" :class="$style.mRole">{{ agentRoleSubtitle(a) }}</span>
+        <!-- 分类与统计标签：挪到卡片右端（原散伙按钮位）；散伙入口收进配置面板头部 -->
+        <div :class="$style.mTags">
+          <span v-if="(a.category || '').trim()" class="mx-tag" data-tone="info">{{ (a.category || '').trim() }}</span>
+          <span v-if="ratingsOf(a) > 0" class="mx-tag" data-tone="neutral">★ {{ ratingsOf(a) }}</span>
+          <span v-if="(a.skills || []).length" class="mx-tag" data-tone="warning">{{ (a.skills || []).length }} 个技能</span>
+        </div>
+      </div>
 
-    <!-- 市场分类标签行（固定分类在前、其余字典序在后） -->
-    <div v-if="view === 'market' && store.marketDomains.length > 0" :class="$style.domains">
-      <button
-        type="button"
-        :class="$style.domainTag"
-        :aria-pressed="marketDomain === '' ? 'true' : 'false'"
-        @click="marketDomain = ''"
+      <!-- 团队卡：与成员迷你卡同样式，「团队」徽标 + 成员数区分 -->
+      <div
+        v-for="t in store.teams"
+        v-else-if="selectedKind === 'team'"
+        :key="'team:' + t.name"
+        role="button"
+        tabindex="0"
+        :class="$style.mCard"
+        :data-active="selectedKind === 'team' && t.name === selectedTeamName ? 'true' : 'false'"
+        @click="selectTeamCard(t.name)"
+        @keydown.enter.prevent="selectTeamCard(t.name)"
       >
-        全部
-      </button>
-      <button
-        v-for="d in store.marketDomains"
-        :key="d"
-        type="button"
-        :class="$style.domainTag"
-        :aria-pressed="marketDomain === d ? 'true' : 'false'"
-        @click="marketDomain = marketDomain === d ? '' : d"
-      >
-        {{ d }}
-      </button>
+        <img v-if="t.icon" :class="[$style.mAvatar, $style.avatarImg]" :src="t.icon" :alt="teamDisplayName(t)" />
+        <span v-else :class="$style.mAvatar">{{ (teamDisplayName(t) || '?').charAt(0).toUpperCase() }}</span>
+        <span :class="$style.mName" :title="t.name">{{ teamDisplayName(t) }}</span>
+        <span :class="$style.mRole">{{ t.name }}</span>
+        <div :class="$style.mTags">
+          <span class="mx-tag" data-tone="warning">团队</span>
+          <span class="mx-tag" data-tone="neutral">{{ (t.members || []).length }} 名成员</span>
+        </div>
+      </div>
     </div>
-
-    <!-- ── 团队视图（上：成员与团队迷你卡横排（供应商品牌卡同款）；下：选中对象配置面板） ── -->
-    <template v-if="view === 'team'">
-      <p v-if="store.loading && !store.loaded" :class="[$style.hint, 'mx-text-loading']">正在加载员工清单…</p>
-      <div v-else-if="teamCards.length > 0 || store.teams.length > 0" :class="$style.strip">
-        <div
-          v-for="a in teamCards"
-          :key="a.name"
-          role="button"
-          tabindex="0"
-          :class="$style.mCard"
-          :data-active="selectedKind === 'agent' && a.name === selectedName ? 'true' : 'false'"
-          @click="selectAgentCard(a.name)"
-          @keydown.enter.prevent="selectAgentCard(a.name)"
-        >
-          <img v-if="a.icon" :class="[$style.mAvatar, $style.avatarImg]" :src="a.icon" :alt="agentDisplayName(a)" />
-          <span v-else :class="$style.mAvatar">{{ (agentDisplayName(a) || '?').charAt(0).toUpperCase() }}</span>
-          <span :class="$style.mName" :title="a.name">{{ agentDisplayName(a) }}</span>
-          <span v-if="agentRoleSubtitle(a)" :class="$style.mRole">{{ agentRoleSubtitle(a) }}</span>
-          <!-- 分类与市场统计标签：挪到卡片右端（原散伙按钮位）；散伙入口收进配置面板头部 -->
-          <div :class="$style.mTags">
-            <span v-if="(a.category || '').trim()" class="mx-tag" data-tone="info">{{ (a.category || '').trim() }}</span>
-            <span v-if="ratingsOf(a) > 0" class="mx-tag" data-tone="neutral">★ {{ ratingsOf(a) }}</span>
-            <span v-if="(a.skills || []).length" class="mx-tag" data-tone="warning">{{ (a.skills || []).length }} 个技能</span>
-          </div>
-        </div>
-
-        <!-- 团队卡：与成员迷你卡同样式，「团队」徽标 + 成员数区分 -->
-        <div
-          v-for="t in store.teams"
-          :key="'team:' + t.name"
-          role="button"
-          tabindex="0"
-          :class="$style.mCard"
-          :data-active="selectedKind === 'team' && t.name === selectedTeamName ? 'true' : 'false'"
-          @click="selectTeamCard(t.name)"
-          @keydown.enter.prevent="selectTeamCard(t.name)"
-        >
-          <img v-if="t.icon" :class="[$style.mAvatar, $style.avatarImg]" :src="t.icon" :alt="teamDisplayName(t)" />
-          <span v-else :class="$style.mAvatar">{{ (teamDisplayName(t) || '?').charAt(0).toUpperCase() }}</span>
-          <span :class="$style.mName" :title="t.name">{{ teamDisplayName(t) }}</span>
-          <span :class="$style.mRole">{{ t.name }}</span>
-          <div :class="$style.mTags">
-            <span class="mx-tag" data-tone="warning">团队</span>
-            <span class="mx-tag" data-tone="neutral">{{ (t.members || []).length }} 名成员</span>
-          </div>
-        </div>
-      </div>
-      <div v-else :class="$style.emptyBox">
-        <p :class="$style.hint">团队里还没有智能体</p>
-        <button type="button" class="mx-btn mx-btn--primary" @click="view = 'market'">去招募</button>
-      </div>
+    <div v-else :class="$style.emptyBox">
+      <p :class="$style.hint">团队里还没有智能体</p>
+    </div>
 
       <!-- ── 下方配置面板（团队）：与成员配置同骨架，页签为「团队档案 / 成员」 ── -->
       <div v-if="selectedKind === 'team' && selectedTeam" :class="$style.config">
@@ -1541,151 +1169,6 @@ onMounted(() => {
           </template>
         </div>
       </div>
-    </template>
-
-    <!-- ── 市场视图（agent 类型分发包货架） ── -->
-    <template v-else>
-      <p v-if="store.marketLoading && !store.marketLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载市场清单…</p>
-      <div v-else-if="marketCards.length > 0" :class="$style.grid">
-        <div
-          v-for="pkg in marketCards"
-          :key="pkg.name"
-          role="button"
-          tabindex="0"
-          :class="$style.card"
-          @click="openZoomMarket(pkg, $event)"
-          @keydown.enter.prevent="openZoomMarket(pkg, $event)"
-        >
-          <div :class="$style.cardTop">
-            <img
-              v-if="pkg.icon"
-              :class="[$style.avatar, $style.avatarImg]"
-              :src="pkg.icon"
-              :alt="marketPkgDisplayName(pkg)"
-            />
-            <span v-else :class="$style.avatar">{{ (marketPkgDisplayName(pkg) || '?').charAt(0).toUpperCase() }}</span>
-            <div :class="$style.titleCol">
-              <span :class="$style.name" :title="pkg.name">{{ marketPkgDisplayName(pkg) }}</span>
-              <span v-if="marketPkgRoleSubtitle(pkg)" :class="$style.sub">{{ marketPkgRoleSubtitle(pkg) }}</span>
-            </div>
-            <!-- 招募/散伙动作上移至右上角取代状态标签（与团队卡片同款） -->
-            <button
-              v-if="!hiredNames.has(pkg.name)"
-              type="button"
-              class="mx-btn mx-btn--primary"
-              :disabled="store.installing === pkg.name"
-              @click.stop="onRecruit(pkg)"
-            >
-              {{ store.installing === pkg.name ? '招募中…' : '招募' }}
-            </button>
-            <button
-              v-else
-              type="button"
-              class="mx-btn"
-              :disabled="store.operating === pkg.name || !canFire"
-              :title="!canFire ? '系统至少需要保留一个智能体' : undefined"
-              @click.stop="onMarketFire(pkg)"
-            >
-              <span v-if="store.operating === pkg.name" class="mx-text-loading">执行中…</span>
-              <template v-else>散伙</template>
-            </button>
-          </div>
-          <p :class="$style.desc" :title="pkg.description">{{ pkg.description || '暂无描述' }}</p>
-          <div :class="$style.tagRow">
-            <span v-if="(pkg.category || '').trim()" class="mx-tag" data-tone="info">{{ (pkg.category || '').trim() }}</span>
-            <span v-if="(pkg.skills || []).length" class="mx-tag" data-tone="warning">{{ (pkg.skills || []).length }} 个技能</span>
-          </div>
-        </div>
-      </div>
-      <p v-else-if="store.marketLoaded" :class="$style.hint">市场暂无可安装的智能体</p>
-      <p v-else :class="$style.hint">市场清单加载失败，请点击刷新重试</p>
-    </template>
-
-    <!-- ── 市场详情弹层：FLIP 分段动效（ghost 卡片拉宽→拉高），到位即呈现 ── -->
-    <Teleport to="body">
-      <div
-        v-if="zoomed"
-        :class="[$style.zoomBackdrop, { [$style.zoomPreparing]: zoomPreparing, [$style.zoomClosing]: zoomClosing }]"
-        @click="closeZoom"
-      >
-        <div
-          ref="zoomCardRef"
-          :class="[$style.zoomCard, { [$style.zoomPreparing]: zoomPreparing, [$style.zoomClosing]: zoomClosing }]"
-          @click.stop
-        >
-          <!-- 头部卡：头像 + 展示名 + 元信息 + 招募操作 + 简介 -->
-          <div :class="$style.cardTop">
-            <img
-              v-if="zoomed.pkg.icon"
-              :class="[$style.zoomAvatar, $style.avatarImg]"
-              :src="zoomed.pkg.icon"
-              :alt="zoomed.title"
-            />
-            <span v-else :class="$style.zoomAvatar">{{ (zoomed.title || '?').charAt(0).toUpperCase() }}</span>
-            <div :class="$style.titleCol">
-              <span :class="$style.name">{{ zoomed.title }}</span>
-              <span v-if="marketPkgRoleSubtitle(zoomed.pkg)" :class="$style.sub">{{ marketPkgRoleSubtitle(zoomed.pkg) }}</span>
-            </div>
-            <span
-              class="mx-tag"
-              :data-tone="zoomed.hired ? 'success' : zoomed.installed ? 'info' : 'warning'"
-            >
-              {{ zoomed.hired ? '已招募' : zoomed.installed ? '未招募' : '未安装' }}
-            </span>
-          </div>
-          <div :class="$style.tagRow">
-            <span v-if="zoomed.category" class="mx-tag" data-tone="info">{{ zoomed.category }}</span>
-            <span v-if="zoomed.version" class="mx-tag" data-tone="neutral">版本 {{ zoomed.version }}</span>
-          </div>
-          <p :class="$style.zoomDesc">{{ zoomed.description }}</p>
-
-          <!-- 技能装备清单：头部与底栏钉住，仅清单滚动 -->
-          <div :class="$style.zoomContent">
-            <div :class="$style.sectionTitle">
-              技能装备
-              <span :class="$style.skillCount">{{ zoomed.skillItems.length }} 个技能</span>
-            </div>
-            <div v-if="zoomed.skillItems.length > 0" :class="$style.skillList">
-              <div v-for="s in zoomed.skillItems" :key="s.name" :class="$style.skillItem">
-                <div :class="$style.skillHead">
-                  <span :class="$style.skillName">{{ s.nameZh }}</span>
-                  <span v-if="s.version" class="mx-tag" data-tone="info">v{{ s.version }}</span>
-                </div>
-                <p :class="[$style.summaryDesc, { [$style.descEmpty]: !s.desc }]">{{ s.desc || '暂无技能描述' }}</p>
-              </div>
-            </div>
-            <p v-else :class="$style.hint">该智能体暂未装配技能</p>
-          </div>
-
-          <div :class="$style.cardFoot" @click.stop>
-            <span></span>
-            <div :class="$style.cardActions">
-              <button
-                v-if="!zoomed.hired"
-                type="button"
-                class="mx-btn mx-btn--primary"
-                :disabled="store.installing === zoomed.name"
-                @click="recruitFromZoom(zoomed)"
-              >
-                {{ store.installing === zoomed.name ? '招募中…' : '招募' }}
-              </button>
-              <button
-                v-else
-                type="button"
-                class="mx-btn"
-                :disabled="store.operating === zoomed.name || !canFire"
-                :title="!canFire ? '系统至少需要保留一个智能体' : undefined"
-                @click="fireFromZoom(zoomed)"
-              >
-                <span v-if="store.operating === zoomed.name" class="mx-text-loading">执行中…</span>
-                <template v-else>散伙</template>
-              </button>
-              <button type="button" class="mx-btn" :class="$style.zoomClose" @click="closeZoom">关闭</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
 
     <!-- 团队编辑对话框：本组件是 agents 设置页常驻行，作为 TeamEditorModal 唯一挂载点
          （TeamsRecruitRow / 本行经 store.openTeamEditor 打开，同状态驱动避免双浮层） -->
@@ -1829,92 +1312,6 @@ onMounted(() => {
   width: 100%;
 }
 
-.warning {
-  margin: 0;
-  font: var(--mx-font-caption);
-  color: var(--mx-state-warn-label);
-}
-
-/* 分类标签行：胶囊小钮，选中态 accent 描边 */
-.domains {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-2);
-  flex-wrap: wrap;
-}
-
-.domainTag {
-  height: 24px;
-  padding: 0 12px;
-  border: 0.5px solid var(--mx-separator-soft);
-  border-radius: 999px;
-  background: var(--mx-module);
-  font: var(--mx-font-caption);
-  color: var(--mx-text-secondary);
-  cursor: pointer;
-  transition:
-    border-color var(--mx-duration-fast) var(--mx-ease-standard),
-    color var(--mx-duration-fast) var(--mx-ease-standard);
-}
-
-.domainTag:hover {
-  border-color: var(--mx-border-strong);
-}
-
-.domainTag:active {
-  background: var(--mx-active);
-}
-
-.domainTag:focus-visible {
-  outline: 2px solid var(--mx-accent);
-  outline-offset: 1px;
-}
-
-.domainTag[aria-pressed='true'] {
-  border-color: var(--mx-accent);
-  color: var(--mx-accent);
-}
-
-/* 卡片网格：自适应列宽（与技能/连接器同布局口径）；
-   团队网格限高内滚，保证下方配置面板（上下结构的"下"）始终在视口内 */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--mx-space-3);
-  align-content: start;
-  /* 卡片高度随内容自适应（不随行内最高卡片拉伸） */
-  align-items: start;
-  max-height: 46vh;
-  overflow-y: auto;
-  padding: 2px;
-}
-
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--mx-space-2);
-  padding: var(--mx-space-3);
-  background: var(--mx-bg-surface);
-  border: 0.5px solid var(--mx-separator-soft);
-  border-radius: var(--mx-radius-card);
-  cursor: pointer;
-  transition:
-    border-color var(--mx-duration-fast) var(--mx-ease-standard),
-    transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 300ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.card:hover {
-  border-color: var(--mx-border-selected);
-  transform: translateY(-2px);
-  box-shadow: var(--mx-shadow-panel);
-}
-
-.card:focus-visible {
-  outline: 2px solid var(--mx-accent);
-  outline-offset: 1px;
-}
-
 /* 团队迷你卡横排（供应商品牌卡同款）：一行滚动，点击在下方配置面板展开 */
 .strip {
   display: flex;
@@ -1996,83 +1393,6 @@ onMounted(() => {
 }
 
 .mTags {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-1);
-}
-
-.cardTop {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-2);
-}
-
-.avatar {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--mx-module);
-  font: var(--mx-font-heading);
-  color: var(--mx-text-secondary);
-}
-
-.titleCol {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.name {
-  font: var(--mx-font-body);
-  font-weight: 600;
-  color: var(--mx-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 副题小字（Role）：统一显示规则 = 昵称主名 + Role 小字 */
-.sub {
-  font: var(--mx-font-caption);
-  color: var(--mx-text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.desc {
-  margin: 0;
-  font: var(--mx-font-caption);
-  color: var(--mx-text-secondary);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  word-break: break-word;
-}
-
-.tagRow {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-1);
-  flex-wrap: wrap;
-}
-
-.cardFoot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--mx-space-1);
-  margin-top: auto;
-}
-
-.cardActions {
   display: flex;
   align-items: center;
   gap: var(--mx-space-1);
@@ -2354,10 +1674,6 @@ onMounted(() => {
   word-break: break-word;
 }
 
-.descEmpty {
-  color: var(--mx-text-tertiary);
-}
-
 .summaryMeta {
   display: flex;
   align-items: center;
@@ -2493,139 +1809,5 @@ onMounted(() => {
   line-height: 1.5;
   white-space: pre-line;
   word-break: break-word;
-}
-
-/* ── 详情弹层：FLIP 分段动效由 ghost 元素承担（WAAPI transform），弹层仅退场做透明度过渡；
-      不用 backdrop-filter——大面积实时模糊是此前弹层卡顿的根源，纯色压暗即可 ── */
-/* 遮罩入场即时呈现（无透明度过渡——ghost 落位即全量显示，无"模糊到显示"尾段）；
-   仅退场走淡出 */
-.zoomBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--mx-mask);
-  opacity: 1;
-}
-
-.zoomBackdrop.zoomPreparing {
-  opacity: 0;
-  transition: none;
-}
-
-.zoomBackdrop.zoomClosing {
-  opacity: 0;
-  transition: opacity 160ms ease;
-}
-
-.zoomCard {
-  /* 固定尺寸：ghost 落点矩形确定，内容不跳动 */
-  width: min(880px, 92vw);
-  height: min(84vh, 780px);
-  display: flex;
-  flex-direction: column;
-  gap: var(--mx-space-3);
-  padding: var(--mx-space-4);
-  box-sizing: border-box;
-  border-radius: var(--mx-radius-window);
-  background: var(--mx-bg-elevated);
-  border: 0.5px solid var(--mx-separator-soft);
-  box-shadow: var(--mx-shadow-prominent);
-  /* 入场不做透明度过渡：ghost 落位瞬间弹层立即不透明换位，避免落位矩形出现空隙；
-     仅退场走淡出（退场时 ghost 已盖住矩形，淡出不可见，双保险） */
-  opacity: 1;
-  transition: none;
-}
-
-.zoomCard.zoomPreparing {
-  opacity: 0;
-}
-
-.zoomCard.zoomClosing {
-  opacity: 0;
-  transition: opacity 160ms ease;
-}
-
-.zoomAvatar {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--mx-module);
-  font: var(--mx-font-heading);
-  color: var(--mx-text-secondary);
-}
-
-.zoomDesc {
-  margin: 0;
-  font: var(--mx-font-caption);
-  color: var(--mx-text-secondary);
-  line-height: 1.7;
-  word-break: break-word;
-  white-space: pre-wrap;
-}
-
-/* 内容区：分隔线之上为头部（标题+描述）；头部与底栏钉住，仅清单滚动 */
-.zoomContent {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--mx-space-2);
-  border-top: 0.5px solid var(--mx-separator);
-  padding-top: var(--mx-space-2);
-  padding-right: var(--mx-space-1);
-}
-
-.sectionTitle {
-  display: flex;
-  align-items: baseline;
-  gap: var(--mx-space-2);
-  font: var(--mx-font-body);
-  font-weight: 600;
-  color: var(--mx-text);
-}
-
-.skillCount {
-  font: var(--mx-font-caption);
-  font-weight: 400;
-  color: var(--mx-text-tertiary);
-}
-
-.skillList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--mx-space-2);
-}
-
-.skillItem {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--mx-space-2) var(--mx-space-3);
-  background: var(--mx-module);
-  border: 0.5px solid var(--mx-separator-soft);
-  border-radius: var(--mx-radius-control);
-}
-
-.skillHead {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-2);
-}
-
-.skillName {
-  font: var(--mx-font-body);
-  font-weight: 600;
-  color: var(--mx-text);
-}
-
-.zoomClose {
-  margin-left: var(--mx-space-2);
 }
 </style>
