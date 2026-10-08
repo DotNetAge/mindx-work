@@ -1,14 +1,15 @@
 <script setup lang="ts">
 /**
- * 市场页（独立 Settings Tab）：mindx 市场 agent/skill/team 三类分发包货架 + 插件市场，
+ * 市场页（独立 Settings Tab）：mindx 市场 agent/skill/team/plugin 四类分发包货架，
  * 顶部胶囊切换，标题右侧市场源信息与换源入口。
- * 数据归 market store（成员/技能/团队货架均服务端分页 + 服务端 q 搜索）；
+ * 搜索框与分类过滤胶囊为全货架共用一组组件（随激活货架映射数据源；
+ * 搜索走服务端 q，分类为已加载条目的前端过滤）。
  * 换源写 user.config（daemon 重建客户端并广播 market_changed，货架经 sourceEpoch 重置重拉）；
- * 插件市场走主进程桥（bridge().market()/install），覆盖/安装确认走壳 Overlay modal。
+ * 插件货架安装经宿主桥下载落盘（installFromUrl + sha256 校验），覆盖/安装确认走壳 Overlay modal。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
-import { useMarketStore, pkgDisplayName, AgentExistsError as AgentExistsErrorCls, SkillExistsError as SkillExistsErrorCls, TeamExistsError as TeamExistsErrorCls } from '../store'
+import { useMarketStore, pkgDisplayName, type MarketPkg, AgentExistsError as AgentExistsErrorCls, SkillExistsError as SkillExistsErrorCls, TeamExistsError as TeamExistsErrorCls } from '../store'
 import { pushNotice } from '../notice'
 import InstallConfirmModal from '../overlays/InstallConfirmModal.vue'
 import TeamConfirmModal from '../overlays/TeamConfirmModal.vue'
@@ -28,6 +29,78 @@ const shelves: Array<{ key: ShelfKey; label: string }> = [
   { key: 'plugin', label: '插件' },
 ]
 const activeShelf = ref<ShelfKey>('agent')
+
+// ── 共用搜索 + 分类过滤（全部货架共用同一组组件，按激活货架映射数据源） ──
+/** 市场固定业务分类（与服务端 categories 种子同词汇表；未收录分类排在固定分类之后按字典序） */
+const FIXED_DOMAINS = ['办公提效', '产品研发', '智能硬件', '工业', '内容创作', '数据分析', '市场营销', '财务', '经营管理']
+
+/** 搜索词双向绑定：读写激活货架各自的搜索 state（服务端 q 防抖在各自 watch 内） */
+const searchModel = computed({
+  get: () =>
+    activeShelf.value === 'agent' ? store.agentSearch
+    : activeShelf.value === 'skill' ? store.skillSearch
+    : activeShelf.value === 'team' ? store.teamSearch
+    : store.pluginSearch,
+  set: (v: string) => {
+    if (activeShelf.value === 'agent') store.agentSearch = v
+    else if (activeShelf.value === 'skill') store.skillSearch = v
+    else if (activeShelf.value === 'team') store.teamSearch = v
+    else store.pluginSearch = v
+  },
+})
+
+const searchPlaceholder = computed(
+  () =>
+    ({
+      agent: '搜索成员名称或描述',
+      skill: '搜索技能名称或描述',
+      team: '搜索团队名称或描述',
+      plugin: '搜索插件名称或描述',
+    })[activeShelf.value],
+)
+
+/** 激活货架的已加载条目 */
+const shelfPackages = computed(
+  () =>
+    ({
+      agent: store.agentPackages,
+      skill: store.skillPackages,
+      team: store.teamPackages,
+      plugin: store.pluginPackages,
+    })[activeShelf.value],
+)
+
+/** 分类胶囊集合：当前货架已加载条目的 category 去重（固定分类顺序在前，其余字典序） */
+const shelfDomains = computed<string[]>(() => {
+  const present = new Set<string>()
+  for (const p of shelfPackages.value) {
+    const c = (p.category || '').trim()
+    if (c) present.add(c)
+  }
+  return [...FIXED_DOMAINS.filter((d) => present.has(d)), ...[...present].filter((d) => !FIXED_DOMAINS.includes(d)).sort()]
+})
+
+/** 分类过滤选中态（'' = 全部）；切换货架重置 */
+const activeDomain = ref('')
+watch(activeShelf, () => {
+  activeDomain.value = ''
+})
+
+/** 分类过滤视图（前端本地过滤，作用于已加载条目） */
+function domainFiltered(pkgs: MarketPkg[]): MarketPkg[] {
+  return !activeDomain.value ? pkgs : pkgs.filter((p) => (p.category || '').trim() === activeDomain.value)
+}
+
+/** 加载计数文案（激活货架：已加载条数 / 服务端总数） */
+const shelfCountText = computed(() => {
+  const loaded = shelfPackages.value.length
+  const total =
+    activeShelf.value === 'agent' ? store.agentTotal
+    : activeShelf.value === 'skill' ? store.skillTotal
+    : activeShelf.value === 'team' ? store.teamMarketTotal
+    : store.pluginTotal
+  return total > 0 ? `已加载 ${loaded} / 共 ${total}` : `${loaded}`
+})
 
 // ── 市场源（源列表选择；商户源需访问令牌解锁） ──
 const sourcePanelOpen = ref(false)
@@ -370,21 +443,29 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
       >{{ s.label }}</button>
     </div>
 
+    <!-- ── 共用搜索行 + 分类过滤胶囊（全部货架共用，随激活货架切换数据源） ── -->
+    <div :class="$style.toolbar">
+      <input v-model="searchModel" class="mx-input" :class="$style.search" :placeholder="searchPlaceholder" spellcheck="false" />
+      <span :class="$style.count">{{ shelfCountText }}</span>
+    </div>
+    <div v-if="shelfDomains.length > 0" :class="$style.domains">
+      <button type="button" :class="$style.domainTag" :data-active="activeDomain === '' ? 'true' : 'false'" @click="activeDomain = ''">全部</button>
+      <button
+        v-for="d in shelfDomains"
+        :key="d"
+        type="button"
+        :class="$style.domainTag"
+        :data-active="activeDomain === d ? 'true' : 'false'"
+        @click="activeDomain = activeDomain === d ? '' : d"
+      >{{ d }}</button>
+    </div>
+
     <!-- ══════════ 成员货架 ══════════ -->
     <div v-show="activeShelf === 'agent'">
       <p v-if="store.agentWarning" :class="$style.hint">{{ store.agentWarning }}</p>
       <p v-if="store.agentError" :class="$style.error">{{ store.agentError }}</p>
-      <div :class="$style.toolbar">
-        <input v-model="store.agentSearch" class="mx-input" :class="$style.search" placeholder="搜索成员名称或描述" spellcheck="false" />
-        <button type="button" class="mx-icon-btn" aria-label="刷新成员货架" :disabled="store.agentLoading" @click="store.loadAgentMarket()">
-          <MxIcon name="lucide:refresh-cw" :size="16" />
-        </button>
-        <span :class="$style.count">
-          {{ store.agentTotal > 0 ? `已加载 ${store.agentPackages.length} / 共 ${store.agentTotal}` : `${store.agentPackages.length}` }}
-        </span>
-      </div>
       <p v-if="store.agentLoading && !store.agentLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载成员货架…</p>
-      <div v-for="pkg in store.agentPackages" v-show="!store.agentLoading || store.agentLoaded" :key="pkg.name" :class="$style.marketItem">
+      <div v-for="pkg in domainFiltered(store.agentPackages)" v-show="!store.agentLoading || store.agentLoaded" :key="pkg.name" :class="$style.marketItem">
         <img v-if="pkg.icon" :class="$style.avatar" :src="pkg.icon" :alt="pkgDisplayName(pkg)" />
         <span v-else :class="$style.avatar">{{ pkgDisplayName(pkg).charAt(0).toUpperCase() }}</span>
         <div :class="$style.itemText">
@@ -423,17 +504,8 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
     <div v-show="activeShelf === 'skill'">
       <p v-if="store.skillWarning" :class="$style.hint">{{ store.skillWarning }}</p>
       <p v-if="store.skillError" :class="$style.error">{{ store.skillError }}</p>
-      <div :class="$style.toolbar">
-        <input v-model="store.skillSearch" class="mx-input" :class="$style.search" placeholder="搜索技能名称或描述" spellcheck="false" />
-        <button type="button" class="mx-icon-btn" aria-label="刷新技能货架" :disabled="store.skillLoading" @click="store.loadSkillMarket()">
-          <MxIcon name="lucide:refresh-cw" :size="16" />
-        </button>
-        <span :class="$style.count">
-          {{ store.skillTotal > 0 ? `已加载 ${store.skillPackages.length} / 共 ${store.skillTotal}` : `${store.skillPackages.length}` }}
-        </span>
-      </div>
       <p v-if="store.skillLoading && !store.skillLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载技能货架…</p>
-      <div v-for="pkg in store.skillPackages" :key="pkg.name" :class="$style.marketItem">
+      <div v-for="pkg in domainFiltered(store.skillPackages)" :key="pkg.name" :class="$style.marketItem">
         <span :class="$style.avatar">{{ pkgDisplayName(pkg).charAt(0).toUpperCase() }}</span>
         <div :class="$style.itemText">
           <div :class="$style.nameRow">
@@ -468,17 +540,8 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
     <div v-show="activeShelf === 'team'">
       <p v-if="store.teamMarketWarning" :class="$style.hint">{{ store.teamMarketWarning }}</p>
       <p v-if="store.teamMarketError" :class="$style.error">{{ store.teamMarketError }}</p>
-      <div :class="$style.toolbar">
-        <input v-model="store.teamSearch" class="mx-input" :class="$style.search" placeholder="搜索团队名称或描述" spellcheck="false" />
-        <button type="button" class="mx-icon-btn" aria-label="刷新团队货架" :disabled="store.teamMarketLoading" @click="store.loadTeamMarket()">
-          <MxIcon name="lucide:refresh-cw" :size="16" />
-        </button>
-        <span :class="$style.count">
-          {{ store.teamMarketTotal > 0 ? `已加载 ${store.teamPackages.length} / 共 ${store.teamMarketTotal}` : `${store.teamPackages.length}` }}
-        </span>
-      </div>
       <p v-if="store.teamMarketLoading && !store.teamMarketLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载团队货架…</p>
-      <div v-for="pkg in store.teamPackages" :key="pkg.name" :class="$style.marketItem">
+      <div v-for="pkg in domainFiltered(store.teamPackages)" :key="pkg.name" :class="$style.marketItem">
         <img v-if="pkg.icon" :class="$style.avatar" :src="pkg.icon" :alt="pkgDisplayName(pkg)" />
         <span v-else :class="$style.avatar">{{ pkgDisplayName(pkg).charAt(0).toUpperCase() }}</span>
         <div :class="$style.itemText">
@@ -510,10 +573,9 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
 
     <!-- ══════════ 插件货架（market.list kind=plugin；数据源统一走 daemon 市场服务） ══════════ -->
     <div v-show="activeShelf === 'plugin'">
-      <input v-model="store.pluginSearch" class="mx-input" :class="$style.search" placeholder="搜索插件名称或描述" spellcheck="false" />
       <p v-if="store.pluginError" :class="$style.error">{{ store.pluginError }}</p>
-      <p v-else-if="store.pluginLoading" class="mx-text-loading">正在加载插件货架…</p>
-      <div v-for="pkg in store.pluginPackages" :key="pkg.name" :class="$style.marketItem">
+      <p v-else-if="store.pluginLoading && !store.pluginLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载插件货架…</p>
+      <div v-for="pkg in domainFiltered(store.pluginPackages)" :key="pkg.name" :class="$style.marketItem">
         <div :class="$style.itemText">
           <div :class="$style.nameRow">
             <span :class="$style.itemName">{{ pkgDisplayName(pkg) }}</span>
@@ -671,7 +733,8 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
 }
 
 .search {
-  width: 220px;
+  flex: 1;
+  min-width: 0;
 }
 
 .count {
@@ -679,6 +742,41 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
   font: var(--mx-font-body);
   color: var(--mx-text-secondary);
   white-space: nowrap;
+}
+
+/* 分类过滤胶囊行（共用）：小号 check-tag 风格，选中语义对齐货架胶囊 */
+.domains {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mx-space-1);
+  margin-bottom: var(--mx-space-2);
+}
+
+.domainTag {
+  padding: 2px 10px;
+  border: 1px solid var(--mx-border-l4);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--mx-text-secondary);
+  font: var(--mx-font-caption);
+  cursor: pointer;
+  transition:
+    background-color var(--mx-duration-fast) var(--mx-ease-standard),
+    border-color var(--mx-duration-fast) var(--mx-ease-standard),
+    color var(--mx-duration-fast) var(--mx-ease-standard);
+}
+
+.domainTag:hover {
+  color: var(--mx-text);
+  background: var(--mx-hover);
+}
+
+.domainTag[data-active='true'] {
+  border-color: color-mix(in srgb, var(--mx-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--mx-accent) 14%, transparent);
+  color: var(--mx-accent);
+  font-weight: 600;
 }
 
 .marketItem {
