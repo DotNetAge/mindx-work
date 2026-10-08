@@ -128,7 +128,6 @@ contextBridge.exposeInMainWorld('mxDesktop', {
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
     installFromFile: (): Promise<PluginInstallResult> => ipcRenderer.invoke('plugins:install-from-file'),
-    marketList: (): Promise<unknown> => ipcRenderer.invoke('plugins:market-list'),
     installFromUrl: (url: string, sha256?: string): Promise<PluginInstallResult> =>
       ipcRenderer.invoke('plugins:install-from-url', url, sha256),
     uninstall: (id: string) => ipcRenderer.invoke('plugins:uninstall', id),

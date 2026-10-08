@@ -24,28 +24,6 @@ export interface PluginInstallResult {
   message?: string
 }
 
-/** 市场条目的一个可装版本（静态托管 index.json 格式定稿） */
-export interface MarketVersionView {
-  version: string
-  /** zip 包完整 URL */
-  url: string
-  /** 包 sha256（安装时完整性校验） */
-  sha256: string
-}
-
-/** 市场条目（index.json plugins 数组成员；社区化元数据是安装确认的呈现依据） */
-export interface MarketPluginView {
-  id: string
-  name: string
-  description: string
-  author: string
-  url?: string
-  repo?: string
-  license: string
-  permissions: string[]
-  versions: MarketVersionView[]
-}
-
 /** 在线插件运行期控制（宿主装配层提供，market 插件经 services 消费；
  * 类型定稿在 ui-shell——app 实现与插件消费都正向依赖本包，避免插件反向依赖 app） */
 export interface MarketRuntime {
@@ -206,9 +184,7 @@ export interface MxDesktopBridge {
   plugins: {
     list(): Promise<InstalledPluginView[] | null>
     installFromFile(): Promise<PluginInstallResult>
-    /** 拉取市场索引（结构校验在渲染侧消费处执行） */
-    marketList(): Promise<unknown>
-    /** 从市场 URL 下载安装（sha256 非空时做完整性比对） */
+    /** 从市场源 URL 下载安装（sha256 非空时做完整性比对）；市场数据源统一走 daemon 市场服务 */
     installFromUrl(url: string, sha256?: string): Promise<PluginInstallResult>
     uninstall(id: string): Promise<boolean>
     setEnabled(id: string, enabled: boolean): Promise<boolean>

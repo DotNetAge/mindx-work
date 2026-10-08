@@ -1,30 +1,23 @@
 <script setup lang="ts">
 /**
  * 安装确认 modal（纯内容组件：卡片壳由 Overlay 容器提供）。
- * 信任模型硬纪律（契约 §18.6）：安装确认必须完整呈现 author / url / repo /
- * license / permissions / versions，用户确认后才落盘安装。
+ * 信任模型硬纪律（契约 §18.6）：安装确认必须完整呈现 author / license /
+ * permissions / 版本 / 体积，用户确认后才落盘安装。
+ * 数据源统一走 daemon 市场服务（market.list kind=plugin），单条目单版本。
  */
-import { computed, ref } from 'vue'
-import type { MarketVersionView } from '@mindx-work/ui-shell'
-import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
+import { computed } from 'vue'
 import { useMarketStore } from '../store'
-import { OVERLAY_CONFIRM } from '../ids'
 
 const store = useMarketStore()
-const shell = useShell()
 
 const pending = computed(() => store.pendingConfirm)
-/** 待安装版本（缺省最新版，多版本时可改选） */
-const selected = ref<MarketVersionView | null>(pending.value?.versions[0] ?? null)
 
 function close() {
   store.cancelConfirm()
-  shell.Overlay.remove(OVERLAY_CONFIRM)
 }
 
 async function install() {
-  if (!selected.value) return
-  await store.confirmInstall(selected.value)
+  await store.confirmInstall()
   // 成功才关（失败保留 modal，错误行内展示）
   if (!store.lastError) close()
 }
@@ -34,46 +27,27 @@ async function install() {
   <div v-if="pending" :class="$style.body">
     <div :class="$style.titleRow">
       <span :class="$style.title">安装插件</span>
-      <span :class="$style.name">{{ pending.entry.name }}</span>
+      <span :class="$style.name">{{ pending.pkg.name }}</span>
     </div>
-    <p :class="$style.desc">{{ pending.entry.description }}</p>
+    <p :class="$style.desc">{{ pending.pkg.description || '暂无描述' }}</p>
 
     <dl :class="$style.meta">
+      <dt>版本</dt>
+      <dd>{{ pending.pkg.version || '—' }}</dd>
       <dt>作者</dt>
-      <dd>{{ pending.entry.author }}</dd>
+      <dd>{{ pending.pkg.author || '—' }}</dd>
       <dt>许可证</dt>
-      <dd>{{ pending.entry.license }}</dd>
-      <template v-if="pending.entry.url">
-        <dt>网站</dt>
-        <dd>{{ pending.entry.url }}</dd>
-      </template>
-      <template v-if="pending.entry.repo">
-        <dt>源码库</dt>
-        <dd>{{ pending.entry.repo }}</dd>
+      <dd>{{ pending.pkg.license || '—' }}</dd>
+      <template v-if="pending.pkg.size">
+        <dt>体积</dt>
+        <dd>{{ pending.pkg.size }} 字节</dd>
       </template>
     </dl>
 
-    <div v-if="pending.entry.permissions.length > 0" :class="$style.perm">
+    <div v-if="(pending.pkg.permissions ?? []).length > 0" :class="$style.perm">
       <span :class="$style.permLabel">声明的权限（告知性，不构成授权）</span>
       <div :class="$style.permTags">
-        <span v-for="p in pending.entry.permissions" :key="p" class="mx-tag" data-tone="quiet">{{ p }}</span>
-      </div>
-    </div>
-
-    <div :class="$style.versions">
-      <span :class="$style.permLabel">版本</span>
-      <div :class="$style.versionList">
-        <button
-          v-for="v in pending.versions"
-          :key="v.version"
-          type="button"
-          :class="$style.versionCell"
-          :data-active="selected?.version === v.version ? 'true' : 'false'"
-          @click="selected = v"
-        >
-          <MxIcon v-if="selected?.version === v.version" name="lucide:check" :size="16" />
-          <span>{{ v.version }}</span>
-        </button>
+        <span v-for="p in pending.pkg.permissions" :key="p" class="mx-tag" data-tone="quiet">{{ p }}</span>
       </div>
     </div>
 
@@ -84,7 +58,7 @@ async function install() {
       <button
         type="button"
         class="mx-btn mx-btn--primary"
-        :disabled="!selected || store.busyId !== null"
+        :disabled="store.busyId !== null"
         @click="install()"
       >
         <span v-if="store.busyId" class="mx-text-loading">安装中…</span>
@@ -157,58 +131,6 @@ async function install() {
   display: flex;
   flex-wrap: wrap;
   gap: var(--mx-space-1);
-}
-
-.versions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--mx-space-1);
-}
-
-.versionList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--mx-space-1);
-}
-
-/* 版本选择格：选中描边（对齐外观三卡选中语义） */
-.versionCell {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--mx-space-1);
-  padding: var(--mx-space-1) var(--mx-space-2);
-  font: var(--mx-font-caption);
-  color: var(--mx-text);
-  background: transparent;
-  border: 0.5px solid var(--mx-border-l4);
-  border-radius: var(--mx-radius-control);
-  cursor: pointer;
-  transition:
-    background-color var(--mx-duration-fast) var(--mx-ease-standard),
-    border-color var(--mx-duration-fast) var(--mx-ease-standard);
-}
-
-.versionCell:hover {
-  background: var(--mx-hover);
-}
-
-.versionCell:active {
-  background: var(--mx-active);
-}
-
-.versionCell:focus-visible {
-  outline: 2px solid var(--mx-accent);
-  outline-offset: 1px;
-}
-
-.versionCell:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.versionCell[data-active='true'] {
-  border-color: var(--mx-border-selected);
-  background: var(--mx-hover);
 }
 
 .error {

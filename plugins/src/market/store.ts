@@ -1,9 +1,9 @@
 /**
- * market 插件内部状态（Model）：已安装清单 + 市场索引 + 安装/启停/切版/卸载动作 +
- * mindx 市场团队货架（kind=team 团队整包招聘，经 daemon.connection 服务）。
+ * market 插件内部状态（Model）：已安装清单 + 安装/启停/切版/卸载动作 +
+ * mindx 市场四货架（成员/技能/团队/插件，market.list kind 分页，经 daemon.connection 服务）。
+ * 插件货架数据源统一走 daemon 市场服务（kind=plugin），宿主桥只承担下载落盘（installFromUrl）。
  * 壳编排归组件（Overlay.add/remove），本 store 只持数据与宿主桥/daemon 调用。
- * 环境边界（契约 §17）：市场索引是网络数据，渲染侧消费处做结构校验（schemaVersion 未知拒绝）；
- * 宿主桥缺失（纯 Web）时全部动作显式报错，不做静默降级。
+ * 环境边界（契约 §17）：宿主桥缺失（纯 Web）时全部动作显式报错，不做静默降级。
  */
 
 import { computed, ref } from 'vue'
@@ -13,9 +13,7 @@ import {
   PLUGIN_CATALOG_SERVICE,
   type CorePluginInfo,
   type InstalledPluginView,
-  type MarketPluginView,
   type MarketRuntime,
-  type MarketVersionView,
 } from '@mindx-work/ui-shell'
 import { useService } from '@mindx-work/ui-shell-vue'
 
@@ -30,10 +28,10 @@ interface DaemonConnection {
 }
 
 /**
- * 市场分发包条目（market.list 货架项，agent/skill 货架共用；字段与冻结协议对齐）。
+ * 市场分发包条目（market.list 货架项，四货架共用；字段与冻结协议对齐）。
  */
 export interface MarketPkg {
-  kind: 'agent' | 'skill' | 'team'
+  kind: 'agent' | 'skill' | 'team' | 'plugin'
   name: string
   description?: string
   icon?: string
@@ -59,6 +57,10 @@ export interface MarketPkg {
   download_url?: string
   sha256: string
   size?: number
+  /** 插件元数据（kind=plugin；安装确认弹窗的信任呈现依据） */
+  author?: string
+  license?: string
+  permissions?: string[]
 }
 
 /** 货架展示名（统一显示规则：昵称优先，回退包名） */
@@ -90,36 +92,9 @@ export class TeamExistsError extends Error {
   }
 }
 
-/**
- * mindx 市场分发包条目（market.list 货架项）。本插件仅消费 kind=team 的团队整包
- * （安装 = 团队 + 全部成员 Agent 一次落位，成员默认未雇佣），字段与冻结协议对齐。
- */
-export interface MarketTeamPackage {
-  kind: 'agent' | 'skill' | 'team'
-  name: string
-  description?: string
-  icon?: string
-  /** 昵称（展示主名；缺失回退 name） */
-  nick_name?: string
-  /** 业务分类（中文原文） */
-  category?: string
-  /** 负责人 Agent 名（kind=team） */
-  leader?: string
-  /** 包内成员 Agent 名（kind=team，含负责人；卡片显示成员数） */
-  members?: string[]
-  /** 包版本 */
-  version?: string
-  /** 包文件相对清单地址的路径（服务端分页 API 响应可为空，下载走 download_url 直连） */
-  file?: string
-  /** 包文件下载直连地址（服务端分页 API 下发；安装直连无需清单拼接） */
-  download_url?: string
-  sha256: string
-  size?: number
-}
-
 /** market.list 结果（仅保留本插件消费字段） */
 interface MarketTeamListResult {
-  packages: MarketTeamPackage[]
+  packages: MarketPkg[]
   source: 'remote' | 'cache'
   /** 降级原因（source=cache 时非空） */
   warning?: string
@@ -140,7 +115,7 @@ export interface TeamInstallResult {
 }
 
 /** 团队包展示名（统一显示规则：昵称优先，回退包名） */
-export function teamPkgDisplayName(pkg: MarketTeamPackage): string {
+export function teamPkgDisplayName(pkg: MarketPkg): string {
   return (typeof pkg.nick_name === 'string' && pkg.nick_name.trim()) || pkg.name
 }
 
@@ -148,48 +123,6 @@ function bridge(): NonNullable<Window['mxDesktop']>['plugins'] {
   const plugins = window.mxDesktop?.plugins
   if (!plugins) throw new Error('当前环境不支持插件市场（需要应用宿主）')
   return plugins
-}
-
-/** 市场索引结构校验（消费处唯一家）：未知 schemaVersion 拒绝；形状不合格条目跳过 */
-function parseMarketIndex(raw: unknown): MarketPluginView[] {
-  if (typeof raw !== 'object' || raw === null) throw new Error('市场索引不是对象')
-  const data = raw as { schemaVersion?: unknown; plugins?: unknown }
-  if (data.schemaVersion !== 1) {
-    throw new Error(`市场索引 schemaVersion ${String(data.schemaVersion)} 未知，拒绝读取`)
-  }
-  if (!Array.isArray(data.plugins)) throw new Error('市场索引缺少 plugins 数组')
-  const entries: MarketPluginView[] = []
-  for (const item of data.plugins) {
-    const e = item as Partial<MarketPluginView>
-    if (
-      typeof e.id !== 'string' ||
-      typeof e.name !== 'string' ||
-      typeof e.description !== 'string' ||
-      typeof e.author !== 'string' ||
-      typeof e.license !== 'string' ||
-      !Array.isArray(e.versions) ||
-      !e.versions.every(
-        (v) =>
-          typeof v?.version === 'string' &&
-          typeof v?.url === 'string' &&
-          typeof v?.sha256 === 'string',
-      )
-    ) {
-      continue
-    }
-    entries.push({
-      id: e.id,
-      name: e.name,
-      description: e.description,
-      author: e.author,
-      url: e.url,
-      repo: e.repo,
-      license: e.license,
-      permissions: Array.isArray(e.permissions) ? e.permissions : [],
-      versions: e.versions,
-    })
-  }
-  return entries
 }
 
 export const useMarketStore = defineStore('market', () => {
@@ -210,11 +143,8 @@ export const useMarketStore = defineStore('market', () => {
   const installed = ref<InstalledPluginView[]>([])
   /** 预置插件快照（拷贝防外部改写 provide 的原数组） */
   const corePlugins = ref<CorePluginInfo[]>([...coreCatalog])
-  const market = ref<MarketPluginView[]>([])
-  const marketError = ref<string | null>(null)
-  const loadingMarket = ref(false)
-  /** 待确认安装（市场条目 + 全部可装版本）；null = 关闭 */
-  const pendingConfirm = ref<{ entry: MarketPluginView; versions: MarketVersionView[] } | null>(null)
+  /** 待确认安装（插件货架条目）；null = 关闭 */
+  const pendingConfirm = ref<{ pkg: MarketPkg } | null>(null)
   /** 最近一次操作错误（行内展示） */
   const lastError = ref<string | null>(null)
   /** 正在执行动作的插件 id（按钮防重） */
@@ -286,22 +216,80 @@ export const useMarketStore = defineStore('market', () => {
     })
   }
 
-  async function refreshMarket(): Promise<void> {
-    loadingMarket.value = true
-    marketError.value = null
-    try {
-      market.value = parseMarketIndex(await bridge().marketList())
-    } catch (error) {
-      market.value = []
-      marketError.value = error instanceof Error ? error.message : String(error)
-    } finally {
-      loadingMarket.value = false
+  // ---------- 插件货架（market.list kind=plugin；服务端分页 + 服务端 q 搜索；
+  // 数据源统一走 daemon 市场服务，宿主桥只承担下载落盘与 sha256 校验） ----------
+  const pluginPackages = ref<MarketPkg[]>([])
+  const pluginPage = ref(0)
+  const pluginTotal = ref(0)
+  const pluginDone = ref(false)
+  const pluginSearch = ref('')
+  const pluginLoaded = ref(false)
+  const pluginLoading = ref(false)
+  const pluginLoadingMore = ref(false)
+  const pluginError = ref<string | null>(null)
+
+  /** 已安装插件 id 集合（市场条目 name 即反向域 id，同名视为已安装） */
+  const installedPluginIds = computed(() => new Set(installed.value.map((p) => p.id)))
+
+  async function fetchPluginPage(): Promise<void> {
+    if (!daemon) return
+    const seq = pluginLoadSeq
+    const q = pluginSearch.value.trim()
+    const res = await daemon.call<MarketTeamListResult>('market.list', {
+      page: pluginPage.value + 1,
+      page_size: SHELF_PAGE_SIZE,
+      kind: 'plugin',
+      ...(q ? { q } : {}),
+    })
+    if (seq !== pluginLoadSeq) return
+    pluginPackages.value.push(...filterByKind(res.packages || [], 'plugin'))
+    pluginPage.value = res.page || pluginPage.value + 1
+    if (typeof res.total === 'number') {
+      pluginTotal.value = res.total
+      if (pluginPage.value * SHELF_PAGE_SIZE >= res.total) pluginDone.value = true
+    } else if ((res.packages || []).length < SHELF_PAGE_SIZE) {
+      pluginTotal.value = pluginPage.value * SHELF_PAGE_SIZE
+      pluginDone.value = true
     }
   }
 
-  function requestConfirm(entry: MarketPluginView): void {
+  /** 加载序号：每次 loadPluginMarket 递增，过期响应据此丢弃 */
+  let pluginLoadSeq = 0
+
+  async function loadPluginMarket(): Promise<void> {
+    if (!daemon) return
+    const seq = ++pluginLoadSeq
+    pluginLoading.value = true
+    pluginError.value = null
+    pluginPackages.value = []
+    pluginPage.value = 0
+    pluginTotal.value = 0
+    pluginDone.value = false
+    try {
+      await fetchPluginPage()
+      if (seq === pluginLoadSeq) pluginLoaded.value = true
+    } catch (error) {
+      pluginError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      if (seq === pluginLoadSeq) pluginLoading.value = false
+    }
+  }
+
+  async function loadPluginMarketMore(): Promise<void> {
+    if (!daemon || pluginLoading.value || pluginLoadingMore.value || pluginDone.value) return
+    pluginLoadingMore.value = true
+    try {
+      await fetchPluginPage()
+    } catch (error) {
+      pluginError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      pluginLoadingMore.value = false
+    }
+  }
+
+  function requestConfirm(pkg: MarketPkg): void {
     lastError.value = null
-    pendingConfirm.value = { entry, versions: entry.versions }
+    pendingConfirm.value = { pkg }
   }
 
   function cancelConfirm(): void {
@@ -317,24 +305,24 @@ export const useMarketStore = defineStore('market', () => {
 
   /** 安装确认：停用旧代际（幂等）→ 下载落盘（宿主校验 sha256）→ 刷新清单 → 激活新代际。
    * 激活失败时停用落盘保持"盘上状态与运行期一致"，报错提示重新启用 */
-  async function confirmInstall(version: MarketVersionView): Promise<void> {
-    const entry = pendingConfirm.value?.entry
-    if (!entry) return
-    if (!beginBusy(entry.id)) return
+  async function confirmInstall(): Promise<void> {
+    const pkg = pendingConfirm.value?.pkg
+    if (!pkg) return
+    if (!beginBusy(pkg.name)) return
     lastError.value = null
     try {
-      runtime.deactivate(entry.id)
-      const result = await bridge().installFromUrl(version.url, version.sha256)
+      runtime.deactivate(pkg.name)
+      const result = await bridge().installFromUrl(pkg.download_url ?? '', pkg.sha256)
       if (!result.ok) throw new Error(result.message ?? '安装失败')
       await refreshInstalled()
-      const view = installed.value.find((p) => p.id === entry.id)
+      const view = installed.value.find((p) => p.id === pkg.name)
       if (view?.enabled) {
         try {
           await runtime.activate(view)
         } catch {
           // 首次激活失败：停用落盘，保持盘上状态与运行期一致，用户可从列表重新启用
           lastError.value = '已安装但首次激活失败，可从已安装列表重新启用'
-          await bridge().setEnabled(entry.id, false).catch(() => undefined)
+          await bridge().setEnabled(pkg.name, false).catch(() => undefined)
         }
       }
       pendingConfirm.value = null
@@ -564,8 +552,8 @@ export const useMarketStore = defineStore('market', () => {
 
   /** 货架条目按请求 kind 防御过滤：旧 daemon 的 market.list 忽略 kind 返回全量清单，
    * 不过滤会让团队货架混入 agent/skill 包（实证 bug）。 */
-  function filterByKind(items: MarketPkg[] | MarketTeamPackage[], kind: MarketPkg['kind']): MarketPkg[] {
-    return (items as MarketPkg[]).filter((p) => p.kind === kind)
+  function filterByKind(items: MarketPkg[], kind: MarketPkg['kind']): MarketPkg[] {
+    return items.filter((p) => p.kind === kind)
   }
 
   async function fetchAgentPage(): Promise<void> {
@@ -758,7 +746,7 @@ export const useMarketStore = defineStore('market', () => {
   // 服务端分页 API 为主入口（契约 §2.2）：搜索走服务端 q，滚动触底由哨兵追加；
   // API 不可达时 daemon 回退静态清单过滤并在 warning 附原因。
   const TEAM_PAGE_SIZE = 30
-  const teamPackages = ref<MarketTeamPackage[]>([])
+  const teamPackages = ref<MarketPkg[]>([])
   const teamMarketPage = ref(0) // 已拉取页码（1 起始，0 = 尚未拉取）
   const teamMarketTotal = ref(0) // 服务端命中总数
   const teamMarketDone = ref(false) // 已到服务端末页
@@ -841,7 +829,7 @@ export const useMarketStore = defineStore('market', () => {
   /** 安装团队整包（market.install kind=team）：团队 + 全部成员 Agent 一次落位，
    * 成员默认未雇佣。同名冲突（团队/任一成员）默认拒绝——错误消息含"已存在同名"
    * 时抛 TeamExistsError 供覆盖确认后 overwrite 重试 */
-  async function installTeamPackage(pkg: MarketTeamPackage, overwrite = false): Promise<TeamInstallResult> {
+  async function installTeamPackage(pkg: MarketPkg, overwrite = false): Promise<TeamInstallResult> {
     if (!daemon) throw new Error('团队安装需要连接智能主机')
     try {
       return await daemon.call<TeamInstallResult>('market.install', {
@@ -858,7 +846,7 @@ export const useMarketStore = defineStore('market', () => {
 
   /** 团队整包安装入口（组件调用）：installing loading 包裹，结果与异常原样上抛
    * （编排归组件：成功通知与覆盖确认 modal 由组件处理，范式同 agents 插件） */
-  async function installTeam(pkg: MarketTeamPackage): Promise<TeamInstallResult> {
+  async function installTeam(pkg: MarketPkg): Promise<TeamInstallResult> {
     installingTeam.value = pkg.name
     try {
       return await installTeamPackage(pkg)
@@ -957,15 +945,11 @@ export const useMarketStore = defineStore('market', () => {
   return {
     installed,
     corePlugins,
-    market,
-    marketError,
-    loadingMarket,
     pendingConfirm,
     lastError,
     busyId,
     hasBridge,
     refreshInstalled,
-    refreshMarket,
     requestConfirm,
     cancelConfirm,
     confirmInstall,
@@ -975,6 +959,18 @@ export const useMarketStore = defineStore('market', () => {
     uninstall,
     exportPlugin,
     importFromFile,
+    // 插件货架（market.list kind=plugin；数据源统一走 daemon 市场服务，安装经宿主桥落盘）
+    pluginPackages,
+    pluginTotal,
+    pluginDone,
+    pluginSearch,
+    pluginLoaded,
+    pluginLoading,
+    pluginLoadingMore,
+    pluginError,
+    installedPluginIds,
+    loadPluginMarket,
+    loadPluginMarketMore,
     // 市场源（换源入口：源列表选择 + 商户访问令牌；货架刷新由广播与本地 epoch 双驱动）
     sources,
     sourcesLoading,

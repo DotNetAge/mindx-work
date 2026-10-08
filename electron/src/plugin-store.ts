@@ -56,9 +56,6 @@ export interface InstalledPluginView {
 export const ID_RE = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/
 export const VERSION_RE = /^\d+\.\d+\.\d+$/
 
-/** 市场索引地址（静态托管定稿）；测试与私有部署经环境变量覆盖 */
-export const MARKET_INDEX_URL = process.env.MX_MARKET_INDEX_URL ?? 'https://plugins.mindx.work/index.json'
-
 /** 资源上限（防解压炸弹与超大包打爆进程）：下载体 ≤ 50MB、解压总量 ≤ 100MB、文件数 ≤ 2000 */
 export const MARKET_MAX_ZIP_BYTES = 50 * 1024 * 1024
 export const MARKET_MAX_UNCOMPRESSED = 100 * 1024 * 1024
@@ -125,10 +122,10 @@ async function assertPublicUrl(url: string): Promise<void> {
   }
 }
 
-/** 信任边界：env 显式覆盖市场源 = 开发者/私有部署的本机手势（本地验收指向 127.0.0.1 合法），
- * 该模式下市场源与其给出的包地址全部可信；生产（env 缺省）强制公网。
- * CLI 进程的 env 由发起方（终端）决定，本机用户即信任主体，边界与 app 一致 */
-const DEV_MARKET_MODE = process.env.MX_MARKET_INDEX_URL != null
+/** 信任边界：MX_MARKET_DEV 显式置值 = 开发者/私有部署的本机手势（本地验收指向
+ * 127.0.0.1 的市场源合法），该模式下市场源与其给出的包地址全部可信；
+ * 生产（env 缺省）强制公网。CLI 进程的 env 由发起方（终端）决定，本机用户即信任主体，边界与 app 一致 */
+const DEV_MARKET_MODE = process.env.MX_MARKET_DEV != null
 
 async function assertMarketUrlAllowed(url: string): Promise<void> {
   if (DEV_MARKET_MODE) return

@@ -91,7 +91,7 @@ function loadActive(): void {
   if (activeShelf.value === 'agent') void store.loadAgentMarket()
   else if (activeShelf.value === 'skill') void store.loadSkillMarket()
   else if (activeShelf.value === 'team') void store.loadTeamMarket()
-  else void store.refreshMarket()
+  else void store.loadPluginMarket()
 }
 
 // 换源广播：当前激活货架立即重拉（其余货架切换时按 epoch 感知重拉）
@@ -125,8 +125,8 @@ function switchShelf(key: ShelfKey): void {
   } else if (key === 'team' && (epochChanged || teamEpochMiss.value || !store.teamMarketLoaded)) {
     void store.loadTeamMarket()
     teamEpochMiss.value = false
-  } else if (key === 'plugin' && (epochChanged || pluginEpochMiss.value || store.market.length === 0)) {
-    void store.refreshMarket()
+  } else if (key === 'plugin' && (epochChanged || pluginEpochMiss.value || !store.pluginLoaded)) {
+    void store.loadPluginMarket()
     pluginEpochMiss.value = false
   }
   activeShelf.value = key
@@ -155,6 +155,14 @@ watch(
   () => {
     clearTimeout(teamTimer)
     teamTimer = setTimeout(() => void store.loadTeamMarket(), 300)
+  },
+)
+let pluginTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => store.pluginSearch,
+  () => {
+    clearTimeout(pluginTimer)
+    pluginTimer = setTimeout(() => void store.loadPluginMarket(), 300)
   },
 )
 
@@ -264,16 +272,17 @@ function onInstallTeam(pkg: (typeof store.teamPackages)[number]): void {
     })
 }
 
-// ── 插件货架（主进程桥）：安装确认弹层（复用 InstallConfirmModal） ──
-function hasInstallableVersion(entry: (typeof store.market)[number]): boolean {
-  const record = store.installed.find((p) => p.id === entry.id)
-  if (!record) return true
-  return entry.versions.some((v) => !record.versions.includes(v.version))
+// ── 插件货架（market.list kind=plugin）：安装确认弹层（复用 InstallConfirmModal） ──
+function onInstallPlugin(pkg: (typeof store.pluginPackages)[number]): void {
+  store.requestConfirm(pkg)
+  openOverlay(OVERLAY_CONFIRM, InstallConfirmModal)
 }
 
-function onInstallPlugin(entry: (typeof store.market)[number]): void {
-  store.requestConfirm(entry)
-  openOverlay(OVERLAY_CONFIRM, InstallConfirmModal)
+/** 包体积人性化展示（KB/MB 一位小数，Bytes 原样） */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 // Overlay modal 互斥惯例：add 前先 remove 同 id
@@ -290,6 +299,7 @@ function pushOk(text: string): void {
 const agentSentinel = ref<HTMLElement | null>(null)
 const skillSentinel = ref<HTMLElement | null>(null)
 const teamSentinel = ref<HTMLElement | null>(null)
+const pluginSentinel = ref<HTMLElement | null>(null)
 watch(agentSentinel, (el, _prev, onCleanup) => {
   if (!el) return
   const ob = new IntersectionObserver(
@@ -317,6 +327,17 @@ watch(teamSentinel, (el, _prev, onCleanup) => {
   const ob = new IntersectionObserver(
     (entries) => {
       if (entries.some((e) => e.isIntersecting)) void store.loadTeamMarketMore()
+    },
+    { rootMargin: '240px' },
+  )
+  ob.observe(el)
+  onCleanup(() => ob.disconnect())
+})
+watch(pluginSentinel, (el, _prev, onCleanup) => {
+  if (!el) return
+  const ob = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) void store.loadPluginMarketMore()
     },
     { rootMargin: '240px' },
   )
@@ -487,25 +508,43 @@ watch(teamSentinel, (el, _prev, onCleanup) => {
       </p>
     </div>
 
-    <!-- ══════════ 插件货架 ══════════ -->
+    <!-- ══════════ 插件货架（market.list kind=plugin；数据源统一走 daemon 市场服务） ══════════ -->
     <div v-show="activeShelf === 'plugin'">
-      <p v-if="store.marketError" :class="$style.error">{{ store.marketError }}</p>
-      <div v-for="entry in store.market" :key="entry.id" :class="$style.marketItem">
+      <input v-model="store.pluginSearch" class="mx-input" :class="$style.search" placeholder="搜索插件名称或描述" spellcheck="false" />
+      <p v-if="store.pluginError" :class="$style.error">{{ store.pluginError }}</p>
+      <p v-else-if="store.pluginLoading" class="mx-text-loading">正在加载插件货架…</p>
+      <div v-for="pkg in store.pluginPackages" :key="pkg.name" :class="$style.marketItem">
         <div :class="$style.itemText">
-          <span :class="$style.itemName">{{ entry.name }}</span>
-          <span :class="$style.itemVersion">{{ entry.author }} · {{ entry.license }}</span>
-          <span :class="$style.desc">{{ entry.description }}</span>
+          <div :class="$style.nameRow">
+            <span :class="$style.itemName">{{ pkgDisplayName(pkg) }}</span>
+            <span class="mx-tag" data-tone="info">插件</span>
+            <span v-if="pkg.version" class="mx-tag" data-tone="neutral">v{{ pkg.version }}</span>
+          </div>
+          <span :class="$style.itemVersion">{{ pkg.name }}</span>
+          <div :class="$style.tagRow">
+            <span v-if="pkg.author" class="mx-tag" data-tone="neutral">{{ pkg.author }}</span>
+            <span v-if="pkg.license" class="mx-tag" data-tone="neutral">{{ pkg.license }}</span>
+            <span v-if="pkg.size" class="mx-tag" data-tone="neutral">{{ formatSize(pkg.size) }}</span>
+          </div>
+          <span :class="$style.desc">{{ pkg.description || '暂无描述' }}</span>
         </div>
         <button
           type="button"
           class="mx-btn"
-          :disabled="store.busyId === entry.id || !hasInstallableVersion(entry)"
-          @click="onInstallPlugin(entry)"
+          :disabled="store.installedPluginIds.has(pkg.name)"
+          @click="onInstallPlugin(pkg)"
         >
-          {{ !store.installed.some((p) => p.id === entry.id) ? '安装' : hasInstallableVersion(entry) ? '安装此版本' : '已安装' }}
+          {{ store.installedPluginIds.has(pkg.name) ? '已安装' : '安装' }}
         </button>
       </div>
-      <p v-if="!store.hasBridge" :class="$style.hint">当前环境不支持插件市场（需要应用宿主）。</p>
+      <div ref="pluginSentinel" :class="$style.sentinel">
+        <span v-if="store.pluginLoadingMore" class="mx-text-loading">正在加载更多…</span>
+        <span v-else-if="store.pluginDone && store.pluginPackages.length > 0">已加载全部插件</span>
+      </div>
+      <p v-if="store.pluginLoaded && store.pluginPackages.length === 0 && !store.pluginError" :class="$style.hint">
+        插件市场暂无可安装的插件。
+      </p>
+      <p v-if="!store.hasBridge" :class="$style.hint">当前环境不支持安装插件（需要应用宿主）。</p>
     </div>
 
     <!-- ── 换源面板（自绘浮层：源列表单选，商户源需访问令牌解锁） ── -->

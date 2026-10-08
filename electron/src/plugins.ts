@@ -8,7 +8,7 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
 import { existsSync, readFileSync, statSync, watch } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { createPluginStore, ID_RE, VERSION_RE, MARKET_INDEX_URL, MARKET_MAX_ZIP_BYTES } from './plugin-store'
+import { createPluginStore, ID_RE, VERSION_RE, MARKET_MAX_ZIP_BYTES } from './plugin-store'
 
 /** 特权协议注册：必须在 app.ready 之前执行。
  * mx-plugin://<插件id>/<版本>/<文件> —— 渲染进程动态加载插件的统一通道
@@ -96,13 +96,6 @@ export function registerPluginBridge(): void {
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : String(error) }
     }
-  })
-  ipcMain.handle('plugins:market-list', async (event) => {
-    if (!BrowserWindow.fromWebContents(event.sender)) return null
-    // 机械层只透传解析后的索引 JSON；结构校验在渲染侧消费处执行（契约 §17 边界分工）
-    const res = await net.fetch(MARKET_INDEX_URL, { signal: AbortSignal.timeout(10_000) })
-    if (!res.ok) throw new Error(`市场索引拉取失败（HTTP ${res.status}）`)
-    return JSON.parse(new TextDecoder().decode(await res.arrayBuffer()))
   })
   ipcMain.handle('plugins:install-from-url', async (event, url: unknown, sha256: unknown) => {
     if (!BrowserWindow.fromWebContents(event.sender) || typeof url !== 'string') {
