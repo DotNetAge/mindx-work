@@ -38,15 +38,23 @@ export const webViewerPlugin: VuePlugin = (ctx) => {
     service.store.open(url)
   })
 
-  // link_open 订阅：Agent-Driven UI 命令（mindx ui open-link）走系统浏览器——
-  // 授权登录等场景目标站拒绝 iframe 嵌入（X-Frame-Options），不能落 web-viewer。
-  // 无宿主桥（纯 Web）降级新窗口打开；服务注册顺序：connection 先于本插件激活。
+  // link_open 订阅：Agent-Driven UI 命令（mindx ui open-link）打开网页。
+  // mode=in_app（设备授权登录等需用户交互的授权页）：GitHub 授权页拒绝 iframe
+  // 嵌入（X-Frame-Options），也不能把用户带离应用——落 Electron 授权子窗口；
+  // 无该桥（旧宿主/纯 Web）回落系统浏览器（openExternal）或新窗口。
+  // 其余链接走系统浏览器；无宿主桥（纯 Web）降级新窗口打开；服务注册顺序：
+  // connection 先于本插件激活。
   const daemon = ctx.services.use<{ onNotification(method: string, cb: (params: unknown) => void): () => void }>(
     'daemon.connection'
   )
   const disposeLinkOpen = daemon.onNotification('link_open', (params) => {
-    const url = (params as { data?: { url?: unknown } } | null)?.data?.url
+    const data = (params as { data?: { url?: unknown; mode?: unknown } } | null)?.data
+    const url = data?.url
     if (typeof url !== 'string' || !url) return
+    if (data?.mode === 'in_app' && window.mxDesktop?.openInApp) {
+      void window.mxDesktop.openInApp(url)
+      return
+    }
     if (window.mxDesktop?.openExternal) {
       void window.mxDesktop.openExternal(url)
       return

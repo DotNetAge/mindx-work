@@ -13,6 +13,7 @@ export const metricPlugin: VuePlugin = (ctx) => {
     id: 'metric',
     title: '数据与隐私',
     icon: 'lucide:shield-check',
+    order: 109,
     // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费
     component: MetricConsentRow,
   })

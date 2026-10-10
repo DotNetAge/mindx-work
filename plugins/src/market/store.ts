@@ -10,15 +10,24 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   MARKET_RUNTIME_SERVICE,
-  PLUGIN_CATALOG_SERVICE,
-  type CorePluginInfo,
   type InstalledPluginView,
   type MarketRuntime,
 } from '@mindx-work/ui-shell'
-import { useService } from '@mindx-work/ui-shell-vue'
+import { useService, type PreferencesController } from '@mindx-work/ui-shell-vue'
 
 // 服务以纯字符串名消费（插件间禁止 import；契约 §10.2）
 const DAEMON_CONNECTION = 'daemon.connection'
+
+/** 官方可选件条目（发行搭载资源中的 .mindpkg，未安装待释放） */
+interface OptionalPluginItem {
+  id: string
+  name: string
+  version: string
+  description: string
+  author?: string
+  file: string
+  installed: boolean
+}
 
 /** daemon 连接服务结构契约（消费侧仅声明所需形状） */
 interface DaemonConnection {
@@ -57,15 +66,82 @@ export interface MarketPkg {
   download_url?: string
   sha256: string
   size?: number
-  /** 插件元数据（kind=plugin；安装确认弹窗的信任呈现依据） */
+  /** 插件元数据（kind=plugin；安装确认弹窗与插件页卡片的信任呈现依据） */
   author?: string
+  url?: string
+  /** 源码库地址（Github 等） */
+  repo?: string
   license?: string
   permissions?: string[]
+  /** 插件唯一指纹（sha256(canonical({author,id,version}))，服务端发布时校验） */
+  fingerprint?: string
+  /** 最新版本发布时间（RFC3339；安装时随包记录供插件页卡片展示） */
+  publishedAt?: string
+  /** 累计下载次数（服务端下载经手即计数，§1） */
+  download_count?: number
+  /** 评分均分（1-5，一位小数，服务端聚合冗余列，§2.2） */
+  rating_avg?: number
+  /** 评分数（>0 才显示评分，§2.3） */
+  rating_count?: number
+  /** 衍生谱系（§4）：指向被衍生的原包（原创不透出；卡片「进化自 XXX」小字） */
+  derived_from?: { kind: string; name: string; version?: string }
 }
 
 /** 货架展示名（统一显示规则：昵称优先，回退包名） */
 export function pkgDisplayName(pkg: MarketPkg): string {
   return (typeof pkg.nick_name === 'string' && pkg.nick_name.trim()) || pkg.name
+}
+
+/** market.pack 响应（发布表单预填数据；打包不入库，§3） */
+export interface MarketPackPreview {
+  kind: string
+  name: string
+  description?: string
+  category?: string
+  skills?: string[]
+  members?: string[]
+  version?: string
+  skill_names?: Record<string, string>
+  size: number
+  sha256: string
+}
+
+/** market.publish 输入（谱系三字段成对出现；publish_name 为衍生改名发布的覆盖名，§4.2） */
+export interface MarketPublishInput {
+  kind: string
+  name: string
+  publish_name?: string
+  version: string
+  license?: string
+  derived_kind?: string
+  derived_name?: string
+  derived_version?: string
+}
+
+/** market.submit 输入（投递目标 = 原包名，清单身份须与目标一致，§4） */
+export interface MarketSubmitInput {
+  kind: string
+  name: string
+  version: string
+  note?: string
+}
+
+/** 收件箱条目（market.submissions.list 响应元素，§4） */
+export interface MarketSubmissionItem {
+  id: number
+  from_user_id: number
+  from_login: string
+  version: string
+  sha256: string
+  note?: string
+  status: 'pending' | 'accepted' | 'rejected'
+  created_at: string
+}
+
+/** 本地可发布包条目（agent.list/skill.list/team.list 汇总，发布/收件箱选择器数据源） */
+export interface LocalPackageItem {
+  kind: 'agent' | 'skill' | 'team'
+  name: string
 }
 
 /** 同名冲突（成员包；后端默认拒绝，调用方捕获后走覆盖确认重试） */
@@ -114,9 +190,38 @@ export interface TeamInstallResult {
   overwritten?: boolean
 }
 
+/** 市场源条目（market.sources RPC；UI 按 tier 呈现固定文案，地址字段不外显） */
+export interface MarketSourceItem {
+  id: string
+  name: string
+  tier: 'public' | 'merchant'
+  /** 源头地址 base URL（服务端 base_url 语义；仅内部换源用，UI 不展示） */
+  base_url?: string
+  manifest_url: string
+  selected: boolean
+}
+
 /** 团队包展示名（统一显示规则：昵称优先，回退包名） */
 export function teamPkgDisplayName(pkg: MarketPkg): string {
   return (typeof pkg.nick_name === 'string' && pkg.nick_name.trim()) || pkg.name
+}
+
+/** 服务端 /me 用户档案（UI 侧最小声明，字段与冻结协议对齐） */
+export interface MarketAccountUser {
+  id: number
+  provider: string
+  login: string
+  nick_name: string
+  avatar_url: string
+  points: number
+}
+
+/** market.account.get 结果：user 非空 = 已绑定；has_token 且 user 空 = 令牌失效 */
+export interface MarketAccountState {
+  has_token: boolean
+  client_id: string
+  user: MarketAccountUser | null
+  token_error?: string
 }
 
 function bridge(): NonNullable<Window['mxDesktop']>['plugins'] {
@@ -129,8 +234,6 @@ export const useMarketStore = defineStore('market', () => {
   // 运行期控制在 store 初始化时捕获（首次 useMarketStore 发生在组件 setup 内，
   // inject 有效；action/异步任务里 useService 会因脱离 setup 上下文抛错）
   const runtime = useService<MarketRuntime>(MARKET_RUNTIME_SERVICE)
-  // 预置插件目录（app 装配层 provide）：全量视图的「内置」段数据源
-  const coreCatalog = useService<CorePluginInfo[]>(PLUGIN_CATALOG_SERVICE)
   // daemon 连接为可选依赖：团队货架是智能主机能力，服务缺失时货架区块隐藏而非崩溃
   const daemon = (() => {
     try {
@@ -141,8 +244,9 @@ export const useMarketStore = defineStore('market', () => {
   })()
 
   const installed = ref<InstalledPluginView[]>([])
-  /** 预置插件快照（拷贝防外部改写 provide 的原数组） */
-  const corePlugins = ref<CorePluginInfo[]>([...coreCatalog])
+  /** 官方可选件（发行搭载、未安装的）；bridge 缺失（纯 Web）时空 */
+  const optionalPlugins = ref<OptionalPluginItem[]>([])
+  const optionalLoading = ref(false)
   /** 待确认安装（插件货架条目）；null = 关闭 */
   const pendingConfirm = ref<{ pkg: MarketPkg } | null>(null)
   /** 最近一次操作错误（行内展示） */
@@ -209,11 +313,43 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  // mw CLI 落盘 → 主进程 watch 广播 → 即时重扫激活（订阅在 store 初始化期，hasBridge 宿主才生效）
+  // mw CLI 落盘 → 主进程 watch 广播 → 即时重扫激活 + 可选件区同步（安装/卸载都会改变
+  // 搭载资源的 installed 标注，可选件区必须随之增减；订阅在 store 初始化期，hasBridge 宿主才生效）
   if (hasBridge.value) {
     bridge().onChanged(() => {
       void refreshInstalled()
+      void loadOptionalPlugins()
     })
+  }
+
+  /** 拉取发行搭载的官方可选件清单（只留未安装的供「官方可选件」区释放安装） */
+  async function loadOptionalPlugins(): Promise<void> {
+    if (!hasBridge.value) return
+    optionalLoading.value = true
+    try {
+      const list = await bridge().optionalList()
+      optionalPlugins.value = (Array.isArray(list) ? list : []).filter((o) => !o.installed)
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      optionalLoading.value = false
+    }
+  }
+
+  /** 释放安装官方可选件（与市场安装同一管线；origin=core-optional，卸载后可重装） */
+  async function installOptional(file: string): Promise<void> {
+    if (busyId.value !== null) return
+    busyId.value = `__optional__${file}`
+    lastError.value = null
+    try {
+      await bridge().optionalInstall(file)
+      await refreshInstalled()
+      await loadOptionalPlugins()
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      busyId.value = null
+    }
   }
 
   // ---------- 插件货架（market.list kind=plugin；服务端分页 + 服务端 q 搜索；
@@ -312,7 +448,12 @@ export const useMarketStore = defineStore('market', () => {
     lastError.value = null
     try {
       runtime.deactivate(pkg.name)
-      const result = await bridge().installFromUrl(pkg.download_url ?? '', pkg.sha256)
+      const publishedMs = pkg.publishedAt ? Date.parse(pkg.publishedAt) : NaN
+      const result = await bridge().installFromUrl(
+        pkg.download_url ?? '',
+        pkg.sha256,
+        Number.isFinite(publishedMs) ? publishedMs : undefined,
+      )
       if (!result.ok) throw new Error(result.message ?? '安装失败')
       await refreshInstalled()
       const view = installed.value.find((p) => p.id === pkg.name)
@@ -447,14 +588,6 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   // ---------- 市场源（daemon user.config market_source_id/market_pat；列表经 market.sources RPC） ----------
-  /** 可用源清单（market.sources RPC 转发服务端 /sources；商户源需令牌解锁） */
-  interface MarketSourceItem {
-    id: string
-    name: string
-    tier: 'public' | 'merchant'
-    manifest_url: string
-    selected: boolean
-  }
   const sources = ref<MarketSourceItem[]>([])
   const sourcesLoading = ref(false)
   const sourcesError = ref<string | null>(null)
@@ -490,10 +623,22 @@ export const useMarketStore = defineStore('market', () => {
     void fetchSource()
   }
 
-  /** 保存商户源访问令牌（写 user.config market_pat；明文不回读）。成功后重拉源清单解锁商户源 */
-  async function setPAT(pat: string): Promise<void> {
-    if (!daemon) throw new Error('配置访问令牌需要连接智能主机')
-    await daemon.call('user.config', { market_pat: pat })
+  /** 邀请码对话框状态：待连接的专用源 id（空 = 对话框关闭） */
+  const patDialogSourceId = ref('')
+
+  function requestPatDialog(sourceID: string): void {
+    patDialogSourceId.value = sourceID
+  }
+
+  function cancelPatDialog(): void {
+    patDialogSourceId.value = ''
+  }
+
+  /** 连接专用源：邀请码与源 id 一次写入（daemon 连通探测成功才激活，
+   * 邀请码无效/源不可达时原样抛错）。成功后重拉源清单与货架 */
+  async function connectMerchant(sourceID: string, pat: string): Promise<void> {
+    if (!daemon) throw new Error('连接专用源需要连接智能主机')
+    await daemon.call('user.config', { market_source_id: sourceID, market_pat: pat })
     patSet.value = true
     sourceEpoch.value++
     void fetchSource()
@@ -942,9 +1087,269 @@ export const useMarketStore = defineStore('market', () => {
     skillPendingConfirm.value = null
   }
 
+  // ---------- 市场账号（§2.4/2.5：账号状态 + 绑定 + 档案；daemon RPC 归一通道） ----------
+  const account = ref<MarketAccountState | null>(null)
+  const accountLoading = ref(false)
+  const accountBusy = ref(false)
+  const accountError = ref('')
+
+  /** 拉取账号状态（市场页挂载 / 绑定动作后刷新；daemon 缺失时置空态） */
+  async function fetchAccount(): Promise<void> {
+    if (!daemon) {
+      account.value = null
+      return
+    }
+    accountLoading.value = true
+    accountError.value = ''
+    try {
+      account.value = await daemon.call<MarketAccountState>('market.account.get', {})
+    } catch (err) {
+      accountError.value = err instanceof Error ? err.message : String(err)
+    } finally {
+      accountLoading.value = false
+    }
+  }
+
+  /** 绑定设备到市场账号（device flow）：daemon 打开官网确认页（应用内窗口）并
+   * 后台轮询；本侧定时查询编排状态，done 即刷新账号（匿名评分已迁移到名下）。
+   * 用户只在确认页点一次「授权此设备」，全程无令牌粘贴。 */
+  const deviceLoginPhase = ref<'idle' | 'pending' | 'done' | 'error'>('idle')
+  const deviceLoginError = ref('')
+  let deviceLoginTimer: ReturnType<typeof setInterval> | null = null
+
+  function stopDeviceLoginPolling(): void {
+    if (deviceLoginTimer) {
+      clearInterval(deviceLoginTimer)
+      deviceLoginTimer = null
+    }
+  }
+
+  async function startDeviceLogin(): Promise<void> {
+    if (!daemon) throw new Error('登录市场账号需要连接智能主机')
+    stopDeviceLoginPolling()
+    deviceLoginPhase.value = 'pending'
+    deviceLoginError.value = ''
+    try {
+      await daemon.call('market.device.login', {})
+    } catch (err) {
+      deviceLoginPhase.value = 'error'
+      deviceLoginError.value = err instanceof Error ? err.message : String(err)
+      return
+    }
+    // 编排状态轮询：daemon 侧流程（确认/校验/绑定）完成或失败即落定
+    deviceLoginTimer = setInterval(() => {
+      void (async () => {
+        if (!daemon) return
+        try {
+          const st = await daemon.call<{ status: string; error?: string }>('market.device.status', {})
+          if (st.status === 'done') {
+            stopDeviceLoginPolling()
+            deviceLoginPhase.value = 'done'
+            await fetchAccount()
+          } else if (st.status === 'error') {
+            stopDeviceLoginPolling()
+            deviceLoginPhase.value = 'error'
+            deviceLoginError.value = st.error || '设备登录失败，请重试'
+          }
+        } catch {
+          // 单次查询失败忽略：下个周期继续（daemon 重启等瞬态）
+        }
+      })()
+    }, 1500)
+  }
+
+  /** 组件卸载/关 Sheet 清理轮询（不改状态：后台编排继续，重开可恢复观察） */
+  function disposeDeviceLogin(): void {
+    stopDeviceLoginPolling()
+  }
+
+  /** 更新显示名（服务端 ≤32 字校验；成功后本地档案即时同步，货架/评分弹窗联动） */
+  async function updateProfile(nickName: string): Promise<void> {
+    if (!daemon) throw new Error('更新市场档案需要连接智能主机')
+    accountBusy.value = true
+    accountError.value = ''
+    try {
+      await daemon.call('market.updateProfile', { nick_name: nickName })
+      await fetchAccount()
+    } finally {
+      accountBusy.value = false
+    }
+  }
+
+  /** 上传头像（base64 承载 PNG/JPEG ≤1MB；成功后档案 avatar_url 即时同步） */
+  async function uploadAvatar(dataBase64: string, filename: string): Promise<void> {
+    if (!daemon) throw new Error('上传市场头像需要连接智能主机')
+    accountBusy.value = true
+    accountError.value = ''
+    try {
+      await daemon.call('market.uploadAvatar', { data_base64: dataBase64, filename })
+      await fetchAccount()
+    } finally {
+      accountBusy.value = false
+    }
+  }
+
+  // ---------- 评分（§2.2/2.3：包级 1-5 星；开关 market.shareRatings 为 UI 层门槛） ----------
+  /** 评分弹窗目标包（null = 关闭；评分挂包级 kind+name，不区分版本） */
+  const ratingTarget = ref<MarketPkg | null>(null)
+
+  function requestRatingDialog(pkg: MarketPkg): void {
+    ratingTarget.value = pkg
+  }
+
+  function cancelRatingDialog(): void {
+    ratingTarget.value = null
+  }
+
+  /** 提交评分并同步本地聚合列（服务端返回重算后的 avg/count，对应货架条目即时刷新） */
+  async function rate(kind: MarketPkg['kind'], name: string, score: number): Promise<{ rating_avg?: number; rating_count?: number }> {
+    if (!daemon) throw new Error('评分需要连接智能主机')
+    const res = await daemon.call<{ rating_avg?: number; rating_count?: number }>('market.rate', { kind, name, score })
+    const lists = [agentPackages, skillPackages, teamPackages, pluginPackages]
+    for (const list of lists) {
+      const pkg = list.value.find((p) => p.kind === kind && p.name === name)
+      if (pkg) {
+        pkg.rating_avg = res.rating_avg
+        pkg.rating_count = res.rating_count
+        break
+      }
+    }
+    return res
+  }
+
+  /** 查询当前身份对包的评分（modal 打开时回显；rated=false 即未评过） */
+  async function getMyRating(kind: MarketPkg['kind'], name: string): Promise<{ rated: boolean; score: number }> {
+    if (!daemon) throw new Error('评分查询需要连接智能主机')
+    return daemon.call<{ rated: boolean; score: number }>('market.rating.get', { kind, name })
+  }
+
+  /** 当前生效市场源的服务根地址（官网侧落地页 base；来自源清单选中项，仅引导跳转用不外显） */
+  const marketSite = computed(() => sources.value.find((s) => s.selected)?.base_url || '')
+
+  /** 评分分享开关（market.shareRatings，缺省关；§2.2 UI 层门槛）。
+   * 状态归 store 共享：开关行写、货架评分入口读，同源无漂移 */
+  const preferences = (() => {
+    try {
+      return useService<PreferencesController>('shell.preferences')
+    } catch {
+      return null
+    }
+  })()
+  const shareRatings = ref(preferences?.get<boolean>('market.shareRatings', false) ?? false)
+  if (preferences) {
+    void preferences.ready.then(() => {
+      shareRatings.value = preferences.get<boolean>('market.shareRatings', shareRatings.value)
+    })
+  }
+
+  function setShareRatings(v: boolean): void {
+    shareRatings.value = v
+    preferences?.set('market.shareRatings', v)
+  }
+
+  // ---------- 发布与衍生谱系（§3/§4：打包预填、发布、投递、包主收件箱） ----------
+  /** 发布弹窗目标（null = 关闭；kind 预选） */
+  const publishTarget = ref<{ kind: string } | null>(null)
+
+  function requestPublishDialog(kind = 'agent'): void {
+    publishTarget.value = { kind }
+  }
+
+  function cancelPublishDialog(): void {
+    publishTarget.value = null
+  }
+
+  /** 投递弹窗目标包（§4 回流：对市场包投递进化版本；null = 关闭） */
+  const submitTarget = ref<MarketPkg | null>(null)
+
+  function requestSubmitDialog(pkg: MarketPkg): void {
+    submitTarget.value = pkg
+  }
+
+  function cancelSubmitDialog(): void {
+    submitTarget.value = null
+  }
+
+  /** 收件箱弹窗（§4 包主审核；null = 关闭） */
+  const inboxTarget = ref<{ kind: string } | null>(null)
+
+  function requestInboxDialog(kind = 'agent'): void {
+    inboxTarget.value = { kind }
+  }
+
+  function cancelInboxDialog(): void {
+    inboxTarget.value = null
+  }
+
+  /** 本地可发布包清单（agent.list/skill.list/team.list 汇总；发布/收件箱选择器数据源，
+   * 货架投递按钮的本地存在性判断同源） */
+  const localPackages = ref<LocalPackageItem[]>([])
+
+  /** 本地包名集合（kind → names；卡片投递按钮显隐判断） */
+  const localNameSets = computed(() => {
+    const sets: Record<string, Set<string>> = { agent: new Set(), skill: new Set(), team: new Set() }
+    for (const p of localPackages.value) sets[p.kind]?.add(p.name)
+    return sets
+  })
+
+  /** 拉取本地三类包清单（发布/收件箱弹窗打开时刷新；失败置空不阻断弹窗） */
+  async function fetchLocalPackages(): Promise<void> {
+    if (!daemon) return
+    const items: LocalPackageItem[] = []
+    const results = await Promise.allSettled([
+      daemon.call<Array<{ name: string }>>('agent.list', {}),
+      daemon.call<Array<{ name: string }>>('skill.list', {}),
+      daemon.call<Array<{ name: string }>>('team.list', {}),
+    ])
+    const kinds: Array<LocalPackageItem['kind'] | undefined> = ['agent', 'skill', 'team']
+    results.forEach((r, i) => {
+      const kind = kinds[i]
+      if (r.status === 'fulfilled' && Array.isArray(r.value) && kind) {
+        for (const it of r.value) {
+          if (it?.name) items.push({ kind, name: it.name })
+        }
+      }
+    })
+    localPackages.value = items
+  }
+
+  /** 打包预览（market.pack 不入库；发布表单预填数据源） */
+  async function packPreview(kind: string, name: string): Promise<MarketPackPreview> {
+    if (!daemon) throw new Error('打包预览需要连接智能主机')
+    return daemon.call<MarketPackPreview>('market.pack', { kind, name })
+  }
+
+  /** 发布新版本（market.publish；未绑定/包名冲突/谱系非法等错误原样上抛由 modal 处理） */
+  async function publish(input: MarketPublishInput): Promise<{ package_id: number; version: string; sha256: string; created: boolean; warnings?: string[] }> {
+    if (!daemon) throw new Error('发布需要连接智能主机')
+    return daemon.call('market.publish', input)
+  }
+
+  /** 投递进化版本（market.submit；错误原样上抛） */
+  async function submitEvolution(input: MarketSubmitInput): Promise<{ submission_id: number; version: string; sha256: string; created: boolean }> {
+    if (!daemon) throw new Error('投递需要连接智能主机')
+    return daemon.call('market.submit', input)
+  }
+
+  /** 拉取名下包的投递收件箱（market.submissions.list；非包主 403 原样上抛） */
+  async function listSubmissions(kind: string, name: string): Promise<MarketSubmissionItem[]> {
+    if (!daemon) throw new Error('收件箱需要连接智能主机')
+    const res = await daemon.call<{ submissions: MarketSubmissionItem[] }>('market.submissions.list', { kind, name })
+    return res.submissions || []
+  }
+
+  /** 审核投递（market.submissions.decide；重复决策 409 原样上抛） */
+  async function decideSubmission(kind: string, name: string, id: number, accept: boolean): Promise<{ submission_id: number; version?: string; sha256?: string; created?: boolean; status?: string }> {
+    if (!daemon) throw new Error('审核投递需要连接智能主机')
+    return daemon.call('market.submissions.decide', { kind, name, id, accept })
+  }
+
   return {
     installed,
-    corePlugins,
+    optionalPlugins,
+    optionalLoading,
+    loadOptionalPlugins,
+    installOptional,
     pendingConfirm,
     lastError,
     busyId,
@@ -979,7 +1384,10 @@ export const useMarketStore = defineStore('market', () => {
     sourceEpoch,
     fetchSource,
     setSource,
-    setPAT,
+    patDialogSourceId,
+    requestPatDialog,
+    cancelPatDialog,
+    connectMerchant,
     watchMarketChanged,
     // 成员货架（market.list kind=agent；服务端分页：搜索/追加加载）
     agentPackages,
@@ -1044,5 +1452,45 @@ export const useMarketStore = defineStore('market', () => {
     requestSkillConfirm,
     runSkillConfirm,
     cancelSkillConfirm,
+    // 市场账号（§2.4/2.5：状态/绑定/档案；账户页与账号 Sheet 共用）
+    account,
+    accountLoading,
+    accountBusy,
+    accountError,
+    fetchAccount,
+    deviceLoginPhase,
+    deviceLoginError,
+    startDeviceLogin,
+    disposeDeviceLogin,
+    updateProfile,
+    uploadAvatar,
+    // 评分（§2.2/2.3：包级 1-5 星；开关门槛在组件层）
+    ratingTarget,
+    requestRatingDialog,
+    cancelRatingDialog,
+    rate,
+    getMyRating,
+    marketSite,
+    // 评分分享开关（通用页行写、货架入口读）
+    shareRatings,
+    setShareRatings,
+    // 发布与衍生谱系（§3/§4：打包预填/发布/投递/收件箱）
+    publishTarget,
+    requestPublishDialog,
+    cancelPublishDialog,
+    submitTarget,
+    requestSubmitDialog,
+    cancelSubmitDialog,
+    inboxTarget,
+    requestInboxDialog,
+    cancelInboxDialog,
+    localPackages,
+    localNameSets,
+    fetchLocalPackages,
+    packPreview,
+    publish,
+    submitEvolution,
+    listSubmissions,
+    decideSubmission,
   }
 })

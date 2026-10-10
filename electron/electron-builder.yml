@@ -16,6 +16,10 @@ files:
 extraResources:
   - from: ../app/dist
     to: app-dist
+  # 官方可选件 .mindpkg（打包前由 scripts/optional-plugins/build.mjs 构建 dist-optional/），
+  # 主进程经 process.resourcesPath/plugins-optional 枚举，用户选择式释放安装
+  - from: ../dist-optional
+    to: plugins-optional
   # 系统驻留图标（macOS 模板图 + Windows 彩色图），主进程经 process.resourcesPath/tray 定位
   - from: ../resources/tray
     to: tray

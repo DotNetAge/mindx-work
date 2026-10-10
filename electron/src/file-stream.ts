@@ -10,14 +10,15 @@ import { protocol } from 'electron'
 import { createReadStream, statSync } from 'node:fs'
 import { Readable } from 'node:stream'
 
-/** 特权声明：standard 让 mx-file:///… 可作标准 URL；stream 允许响应为流。
- * 必须在 app.ready 之前执行（与 plugins.ts 的 mx-plugin 声明同为模块加载期） */
-protocol.registerSchemesAsPrivileged([
+/** 特权声明数据：standard 让 mx-file:///… 可作标准 URL；stream 允许响应为流。
+ * 实际注册统一在 main.ts 一次性执行（Electron registerSchemesAsPrivileged 全局只允许
+ * 调用一次，模块级各自调用会让后一次覆盖前一次——mx-plugin 曾因此静默失联） */
+export const FILE_STREAM_SCHEMES: Electron.CustomScheme[] = [
   {
     scheme: 'mx-file',
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
   },
-])
+]
 
 /** 扩展名 → MIME（可直播的媒体形态；未知回落 octet-stream 由 <video> 报错降级） */
 const MIME_BY_EXT: Record<string, string> = {

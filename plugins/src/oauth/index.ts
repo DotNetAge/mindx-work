@@ -26,6 +26,7 @@ export const oauthPlugin: VuePlugin = (ctx) => {
     id: 'oauth',
     title: 'OAuth 提供商',
     icon: 'lucide:key-round',
+    order: 108,
     // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费
     component: OAuthProvidersRow,
   })

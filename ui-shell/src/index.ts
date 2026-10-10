@@ -15,8 +15,6 @@ export { createApp, validateShellConstraints, type AppShell } from './createApp'
 export { MX_API_VERSION, manifestIssues, type PluginManifest } from './plugin-manifest'
 export {
   MARKET_RUNTIME_SERVICE,
-  PLUGIN_CATALOG_SERVICE,
-  type CorePluginInfo,
   type InstalledPluginView,
   type MarketRuntime,
   type MxDesktopBridge,

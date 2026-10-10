@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('mxDesktop', {
   },
   /** 系统浏览器打开链接（mx:open-external，主进程侧仅放行 http/https）；拒绝返回 false */
   openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('mx:open-external', url),
+  /** 应用内授权子窗口打开链接（mx:open-in-app，GitHub 授权页等拒绝 iframe 的交互页）；拒绝返回 false */
+  openInApp: (url: string): Promise<boolean> => ipcRenderer.invoke('mx:open-in-app', url),
   /** 系统默认程序打开本地文件（mx:open-path）；成功返回空串，失败返回错误描述 */
   openPath: (path: string): Promise<string> => ipcRenderer.invoke('mx:open-path', path),
   preferences: {
@@ -59,6 +61,9 @@ contextBridge.exposeInMainWorld('mxDesktop', {
     saveFile: (defaultName: string): Promise<string | null> =>
       ipcRenderer.invoke('mx:dialog-save-file', defaultName),
     openMindpkg: (): Promise<string | null> => ipcRenderer.invoke('mx:dialog-open-mindpkg'),
+    /** 选择头像图片（PNG/JPEG ≤1MB）；返回 base64 内容 + 文件名，取消返回 null */
+    openImage: (): Promise<{ data_base64: string; filename: string } | null> =>
+      ipcRenderer.invoke('mx:dialog-open-image'),
   },
   terminal: {
     create: (cwd: string, cols: number, rows: number): Promise<string | null> =>
@@ -127,9 +132,11 @@ contextBridge.exposeInMainWorld('mxDesktop', {
   },
   plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
+    optionalList: () => ipcRenderer.invoke('plugins:optional-list'),
+    optionalInstall: (file: string) => ipcRenderer.invoke('plugins:optional-install', file),
     installFromFile: (): Promise<PluginInstallResult> => ipcRenderer.invoke('plugins:install-from-file'),
-    installFromUrl: (url: string, sha256?: string): Promise<PluginInstallResult> =>
-      ipcRenderer.invoke('plugins:install-from-url', url, sha256),
+    installFromUrl: (url: string, sha256?: string, publishedAt?: number): Promise<PluginInstallResult> =>
+      ipcRenderer.invoke('plugins:install-from-url', url, sha256, publishedAt),
     uninstall: (id: string) => ipcRenderer.invoke('plugins:uninstall', id),
     setEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke('plugins:set-enabled', id, enabled),
     setActiveVersion: (id: string, version: string) => ipcRenderer.invoke('plugins:set-active-version', id, version),

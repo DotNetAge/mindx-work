@@ -1,0 +1,13 @@
+{
+  "id": "com.mindxwork.video-editor",
+  "name": "视频剪辑",
+  "version": "1.0.0",
+  "description": "时间线视频剪辑：素材导入、预览播放、片段编排与导出。",
+  "author": "MindX",
+  "repo": "https://github.com/DotNetAge/mindx-work.git",
+  "license": "MIT",
+  "entry": "entry.mjs",
+  "permissions": [],
+  "mxApiVersion": "1",
+  "export": "videoEditorPlugin"
+}

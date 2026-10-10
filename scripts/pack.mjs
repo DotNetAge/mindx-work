@@ -64,6 +64,11 @@ function main() {
   console.log('[pack] 构建 app/dist 与 electron/dist …')
   execSync('pnpm build', { cwd: ROOT, stdio: 'inherit' })
 
+  // 官方可选件：.agents/plugins/ 逐个构建 .mindpkg 到 dist-optional/（extraResources 搭载，
+  // 用户选择式释放安装；目录为空时脚本自身跳过）；可选件增多零脚本改动
+  console.log('[pack] 构建官方可选件 …')
+  execSync('node scripts/optional-plugins/build.mjs', { cwd: ROOT, stdio: 'inherit' })
+
   // 随包 daemon 产物：按 mindx 仓库 git tag 下载归档进 electron/resources/mindx（extraResources 注入）。
   // MX_NO_MINDX_BUNDLE=1 可跳过（调试打包流程时省 177MB 下载；运行时缺失回退在线下载）
   if (process.env.MX_NO_MINDX_BUNDLE === '1') {

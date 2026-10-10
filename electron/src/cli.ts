@@ -5,7 +5,7 @@
  * 此模式下 electron API 不可用，故只依赖 plugin-store（纯 Node）。
  * Agent 消费约定：--json 输出机器可读回执；人读输出面向终端用户。
  */
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, chmodSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync, chmodSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createPluginStore, MARKET_MAX_ZIP_BYTES, type InstalledPluginView } from './plugin-store'
@@ -118,6 +118,7 @@ const HELP = [
   '  mw plugin disable <id> [--json]          停用插件',
   '  mw plugin use <id> <version> [--json]    切换激活版本（回滚）',
   '  mw plugin export <id> [目标zip] [--json]  导出激活版本为 zip',
+  '  mw plugin pack <目录> [输出.mindpkg] [--json]  打包插件目录（manifest 校验 + 指纹写入）',
   '  mw install-cli                          把 mw 安装到 ~/.mindx/bin（mindx 同款 PATH 目录）',
   '',
   '说明：安装/卸载/启停立即落盘；正在运行的 MindX Work 会自动感知并激活。',
@@ -186,6 +187,20 @@ async function main(argv: string[]): Promise<void> {
         const written = store.exportToFile(rest[0], target)
         emit({ ok: true, data: { path: written } }, json)
         if (!json) process.stdout.write(`已导出：${written}\n`)
+        return
+      }
+      case 'pack': {
+        if (!rest[0]) throw new Error('用法：mw plugin pack <插件目录> [输出.mindpkg]')
+        const dir = path.resolve(rest[0])
+        // 输出缺省 <id>-<version>.mindpkg：身份在校验后才知，先打到临时名再 rename
+        const staged = path.join(os.tmpdir(), `.mw-pack-${Date.now()}.mindpkg`)
+        const packed = store.packFromDirectory(dir, rest[1] ?? staged)
+        const finalPath = rest[1] ? path.resolve(rest[1]) : path.join(path.resolve(dir), '..', `${packed.id}-${packed.version}.mindpkg`)
+        if (packed.path !== finalPath) renameSync(packed.path, finalPath)
+        emit({ ok: true, data: { ...packed, path: finalPath } }, json)
+        if (!json) {
+          process.stdout.write(`已打包：${finalPath}\n  ${packed.id}@${packed.version}  sha256 ${packed.sha256.slice(0, 12)}…  指纹 ${packed.fingerprint.slice(0, 12)}…\n`)
+        }
         return
       }
       default:

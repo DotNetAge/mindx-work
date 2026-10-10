@@ -14,6 +14,7 @@ export const modelsPlugin: VuePlugin = (ctx) => {
     id: 'models',
     title: '模型',
     icon: 'lucide:cpu',
+    order: 102,
     // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费
     component: ModelsManagerRow,
   })

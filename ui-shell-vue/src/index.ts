@@ -26,6 +26,7 @@ export {
   type VueComponent,
   type VuePlugin,
 } from './reactivity'
+export { installRuntimeBridge, type RuntimeBridge, type RuntimeBridgeDeps } from './runtime-bridge'
 export { default as MxIcon } from './MxIcon.vue'
 export { default as ToolbarIconButton } from './ToolbarIconButton.vue'
 export { default as CodeMirrorPane } from './components/CodeMirrorPane.vue'

@@ -1,0 +1,13 @@
+{
+  "id": "com.mindxwork.gitgraph",
+  "name": "Git 图",
+  "version": "1.0.0",
+  "description": "Git 提交拓扑图：以图形化拓扑呈现工作区 Git 提交历史。",
+  "author": "MindX",
+  "repo": "https://github.com/DotNetAge/mindx-work.git",
+  "license": "MIT",
+  "entry": "entry.mjs",
+  "permissions": [],
+  "mxApiVersion": "1",
+  "export": "gitgraphPlugin"
+}

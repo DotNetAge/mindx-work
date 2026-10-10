@@ -78,6 +78,9 @@ export function showWizard(): void {
 
   if (process.env.MX_DEV_URL) {
     void win.loadURL(new URL('wizard.html', process.env.MX_DEV_URL).toString())
+  } else if (process.env.MX_PROD_DIST) {
+    // 本地产物目录（与主窗 MX_PROD_DIST 分支同语义）：wizard.html 与 index.html 同目录
+    void win.loadFile(path.join(process.env.MX_PROD_DIST, 'wizard.html'))
   } else if (app.isPackaged) {
     // 与主窗同目录（Contents/Resources/app-dist/wizard.html），file:// 同源共享 localStorage
     void win.loadFile(path.join(process.resourcesPath, 'app-dist', 'wizard.html'))

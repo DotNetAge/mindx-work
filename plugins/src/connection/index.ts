@@ -1,5 +1,5 @@
 /**
- * connection 插件：daemon 连接（"连接"设置页）。
+ * connection 插件：daemon 远程连接（"远程连接"设置页）。
  * 装配即按持久化模式建立 daemon 连接并以服务形式提供（daemon.connection）；
  * 设置页呈现连接方式（本地/远程 Switch）+ 远程机器地址（仅远程）+ 手机连接。
  */
@@ -14,11 +14,12 @@ export const connectionPlugin: VuePlugin = (ctx) => {
   const connection = createDaemonConnection()
   ctx.services.provide(DAEMON_CONNECTION_SERVICE, connection)
 
-  // Settings：连接页（先于"模型"页——基础设施页 order 小者在前）
+  // Settings：远程连接页（显式 order 排在市场之后；网络图标为远程连接视觉身份）
   ctx.Settings.page({
     id: 'connection',
-    title: '连接',
-    icon: 'lucide:plug',
+    title: '远程连接',
+    icon: 'lucide:globe',
+    order: 107,
     // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费
     component: ModeRow,
   })

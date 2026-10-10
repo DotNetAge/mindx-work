@@ -46,6 +46,7 @@ export const agentsPlugin: VuePlugin = (ctx) => {
     id: 'agents',
     title: '团队',
     icon: 'lucide:bot',
+    order: 103,
     // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费
     component: AgentsManagerRow,
   })

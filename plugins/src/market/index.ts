@@ -9,26 +9,43 @@
 import type { VuePlugin } from '@mindx-work/ui-shell-vue'
 import MarketManageRow from './prefs/MarketManageRow.vue'
 import MarketPaneRow from './prefs/MarketPaneRow.vue'
+import AccountPaneRow from './prefs/AccountPaneRow.vue'
+import RatingShareRow from './prefs/RatingShareRow.vue'
 
 const marketPlugin: VuePlugin = (app) => {
-  // 市场聚合页：置于插件管理页之前注册（导航顺序随注册顺序）
+  // 账户页（§2.5）：绑定后的市场档案维护（显示名/头像/只读身份），未绑定引导至账号 Sheet
+  app.Settings.page({
+    id: 'account',
+    title: '账户',
+    icon: 'lucide:user-round',
+    order: 100,
+    component: AccountPaneRow,
+  })
+  app.Settings.row({ id: 'account-pane', page: 'account', component: AccountPaneRow })
+
+  // 市场聚合页：显式 order 排在连接器之后（设置导航定稿顺序：插件→模型→团队→技能→连接器→市场）
   app.Settings.page({
     id: 'market',
     title: '市场',
     icon: 'lucide:store',
+    order: 106,
     // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费
     component: MarketPaneRow,
   })
   app.Settings.row({ id: 'market-hub', page: 'market', component: MarketPaneRow })
 
-  // 插件管理页（内置/已安装清单、启停、切版、卸载、导入导出）
+  // 插件页（内置/已安装清单、启停、切版、卸载、导入导出）
   app.Settings.page({
     id: 'plugins',
-    title: '插件管理',
+    title: '插件',
     icon: 'lucide:puzzle',
+    order: 101,
     component: MarketManageRow,
   })
   app.Settings.row({ id: 'market-manage', page: 'plugins', component: MarketManageRow })
+
+  // 评分分享开关（§2.2）：不指定 page 归入壳自带「通用」页（隐私区）
+  app.Settings.row({ id: 'market-rating-share', component: RatingShareRow })
 }
 
 export default marketPlugin

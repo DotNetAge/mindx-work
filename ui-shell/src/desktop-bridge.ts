@@ -16,6 +16,18 @@ export interface InstalledPluginView {
   /** 入口绝对路径（信息面；渲染加载统一走 mx-plugin:// 协议） */
   entryPath: string
   origin: 'market'
+  /** 作者（激活代际包内 manifest 透传；缺失显示 —） */
+  author?: string
+  /** 一句话描述（激活代际 manifest 透传；插件页卡片头副行展示） */
+  description?: string
+  /** 许可证（SPDX，激活代际 manifest 透传；插件页卡片「授权」行） */
+  license?: string
+  /** 源码库地址（Github 等，激活代际 manifest 透传） */
+  repo?: string
+  /** 插件唯一指纹（sha256(canonical({author,id,version}))，激活代际 manifest 透传） */
+  fingerprint?: string
+  /** 发布日期（epoch ms；市场安装时记录货架 publishedAt，本地导入无此值） */
+  publishedAt?: number
 }
 
 /** 本地包安装回执 */
@@ -35,18 +47,6 @@ export interface MarketRuntime {
 
 /** 在线插件运行期控制的 services 注册名（提供方 app 装配层，消费方 market 插件） */
 export const MARKET_RUNTIME_SERVICE = 'shell.market-runtime'
-
-/** 预置（内置）插件展示条目：编译进应用的插件无独立版本号，随应用整体发版 */
-export interface CorePluginInfo {
-  /** 展示用短 id（仅目录显示用，非注册身份） */
-  id: string
-  name: string
-  description: string
-}
-
-/** 预置插件目录的 services 注册名（提供方 app 装配层——唯一知道全量插件清单的地方，
- * 消费方 market 插件的「已安装插件」全量视图） */
-export const PLUGIN_CATALOG_SERVICE = 'shell.plugin-catalog'
 
 /** 导出插件回执：ok 时 path 为写入的 zip 绝对路径 */
 export interface PluginExportResult {
@@ -121,6 +121,8 @@ export interface MxDesktopBridge {
   onOpenUrl(listener: (url: string) => void): () => void
   /** 系统浏览器打开链接（mx:open-external，主进程侧仅放行 http/https）；拒绝返回 false */
   openExternal(url: string): Promise<boolean>
+  /** 应用内授权子窗口打开链接（mx:open-in-app）；拒绝返回 false */
+  openInApp(url: string): Promise<boolean>
   /** 系统默认程序打开本地文件（mx:open-path）；成功返回空串，失败返回错误描述 */
   openPath(path: string): Promise<string>
   preferences: {
@@ -134,6 +136,8 @@ export interface MxDesktopBridge {
     saveFile(defaultName: string): Promise<string | null>
     /** 选择技能分发包（.mindpkg）；取消返回 null */
     openMindpkg(): Promise<string | null>
+    /** 选择头像图片（PNG/JPEG ≤1MB，内容主进程读取）；返回 base64 + 文件名，取消返回 null */
+    openImage(): Promise<{ data_base64: string; filename: string } | null>
   }
   terminal: {
     /** 创建 pty 会话（cwd 空串回退主进程 homedir）；返回会话 id，失败返回 null */
@@ -183,9 +187,13 @@ export interface MxDesktopBridge {
   }
   plugins: {
     list(): Promise<InstalledPluginView[] | null>
+    /** 官方可选件：发行搭载资源中的 .mindpkg 清单（installed 标注是否已装） */
+    optionalList(): Promise<Array<{ id: string; name: string; version: string; description: string; author?: string; file: string; installed: boolean }>>
+    /** 官方可选件：从搭载资源释放安装（与市场安装同一管线，origin=core-optional） */
+    optionalInstall(file: string): Promise<PluginInstallResult>
     installFromFile(): Promise<PluginInstallResult>
     /** 从市场源 URL 下载安装（sha256 非空时做完整性比对）；市场数据源统一走 daemon 市场服务 */
-    installFromUrl(url: string, sha256?: string): Promise<PluginInstallResult>
+    installFromUrl(url: string, sha256?: string, publishedAt?: number): Promise<PluginInstallResult>
     uninstall(id: string): Promise<boolean>
     setEnabled(id: string, enabled: boolean): Promise<boolean>
     setActiveVersion(id: string, version: string): Promise<boolean>

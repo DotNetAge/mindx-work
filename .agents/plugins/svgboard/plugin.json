@@ -1,0 +1,13 @@
+{
+  "id": "com.mindxwork.svgboard",
+  "name": "SVG 画板",
+  "version": "1.0.0",
+  "description": "SVG 矢量画板：图形绘制、便签、连线与 PNG 导出。",
+  "author": "MindX",
+  "repo": "https://github.com/DotNetAge/mindx-work.git",
+  "license": "MIT",
+  "entry": "entry.mjs",
+  "permissions": [],
+  "mxApiVersion": "1",
+  "export": "svgboardPlugin"
+}

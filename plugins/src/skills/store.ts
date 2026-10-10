@@ -264,9 +264,25 @@ export const useSkillsStore = defineStore('skills-store', () => {
       )
       return
     }
+    if (p.status === 'collect_started') {
+      // 凭据收集的呈现与弹窗由 skill.credential_collect 通知通道处理
+      // （collect.ts 单例 + index.ts 订阅，daemon 在同一评估里广播），这里无需动作。
+      return
+    }
     if (p.status === 'blocked') {
       requestConfirm('环境不满足', p.message || '', '知道了', '', async () => {})
     }
+  }
+
+  /**
+   * 提交收集框填入的环境变量（skill.credential.set → 落库键 <skill>:<env>），
+   * 成功后重跑准备检查推进（可能得到 needs_confirm / oauth_started / blocked
+   * 或 ok 静默收尾）。值不进任何日志与通知。
+   */
+  async function submitCredentials(skill: string, envs: { env: string; value: string }[]): Promise<void> {
+    await daemon.call<{ ok: boolean; set: number }>('skill.credential.set', { name: skill, envs })
+    const final = await daemon.call<SkillPrepareResult>('skill.prepare', { name: skill })
+    handlePrepare(final)
   }
 
   // 授权收尾联动：flow_completed 到达且是本插件等待的技能 → 重跑准备检查推进
@@ -372,5 +388,7 @@ export const useSkillsStore = defineStore('skills-store', () => {
     requestConfirm,
     runConfirm,
     cancelConfirm,
+    // 凭据收集（收集框提交 → 落库 + 重跑准备检查推进）
+    submitCredentials,
   }
 })

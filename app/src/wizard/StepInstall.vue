@@ -4,8 +4,10 @@
  * install -s→doctor --fix 装配/launchd 拉起）。本组件只呈现状态与进度，不参与安装逻辑；
  * 错误时展示「讲人话」提示 + 可折叠的诊断详情与 daemon 错误日志（复制反馈用）。
  * ready 后连接语义与本机已有路径一致：落 mode=local 进模型步。
+ * 就绪后追加官方可选件勾选（发行搭载资源的选择式释放安装，见插件生命周期规范 §11）：
+ * 默认全选、用户可取消；单个失败不阻断主流程，行内提示可稍后在插件设置中安装。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { InstallerStatus } from '@mindx-work/ui-shell'
 
 const emit = defineEmits<{ done: []; back: [] }>()
@@ -24,6 +26,50 @@ const busy = computed(() =>
 )
 /** 进度条可见 = 下载中（其余阶段无量化进度） */
 const showProgress = computed(() => state.value === 'downloading' && progress.value != null)
+
+/** 官方可选件条目（plugins:optional-list 回执；只呈现未安装的） */
+interface OptionalItem {
+  id: string
+  name: string
+  version: string
+  description: string
+  author?: string
+  file: string
+  installed: boolean
+}
+
+/** 可选件勾选态（就绪后拉取一次；file 为键） */
+const optionals = ref<OptionalItem[]>([])
+const checked = ref(new Set<string>())
+/** 释放安装进行中（继续按钮防重 + 文案切换） */
+const installingOpts = ref(false)
+const optError = ref<string | null>(null)
+let optionalsLoaded = false
+
+/** 拉取搭载可选件（只显示未安装的；默认全选；列举失败静默跳过——可选件非关键路径） */
+async function loadOptionals(): Promise<void> {
+  if (optionalsLoaded) return
+  optionalsLoaded = true
+  try {
+    const list = await window.mxDesktop?.plugins?.optionalList()
+    optionals.value = (list ?? []).filter((o) => !o.installed)
+    checked.value = new Set(optionals.value.map((o) => o.file))
+  } catch {
+    // 列举失败不阻塞安装步
+  }
+}
+
+// 就绪时才拉可选件（快照直达 ready 与事件推送两条路径都覆盖）
+watch(state, (s) => {
+  if (s === 'ready') void loadOptionals()
+}, { immediate: true })
+
+function toggleOpt(file: string): void {
+  const next = new Set(checked.value)
+  if (next.has(file)) next.delete(file)
+  else next.add(file)
+  checked.value = next
+}
 
 onMounted(async () => {
   const bridge = window.mxDesktop
@@ -58,15 +104,36 @@ async function copyDiagnostics(): Promise<void> {
     `状态：${statusSnapshot.state}`,
     statusSnapshot.message ? `信息：${statusSnapshot.message}` : '',
     statusSnapshot.errorDetail ? `详情：\n${statusSnapshot.errorDetail}` : '',
-    logContent.value ? `daemon 日志（尾部）：\n${logContent.value}` : '',
+    logContent.value ? `daemon 日志（尾部）：\n${logContent}` : '',
   ]
     .filter(Boolean)
     .join('\n\n')
   await navigator.clipboard.writeText(text)
 }
 
-/** 安装就绪：落 mode=local（与本机已有路径同语义——daemon 已在本机 1314 运行） */
-function finishInstall(): void {
+/**
+ * 安装就绪：先释放安装勾选的官方可选件（逐个串行；单个失败记录后继续，不阻断主流程），
+ * 然后落 mode=local（与本机已有路径同语义——daemon 已在本机 1314 运行）进模型步。
+ */
+async function finishInstall(): Promise<void> {
+  const pending = optionals.value.filter((o) => checked.value.has(o.file))
+  if (pending.length > 0) {
+    installingOpts.value = true
+    optError.value = null
+    const failures: string[] = []
+    for (const item of pending) {
+      try {
+        const res = await window.mxDesktop?.plugins?.optionalInstall(item.file)
+        if (res && !res.ok) failures.push(`${item.name}：${res.message ?? '安装失败'}`)
+      } catch (error) {
+        failures.push(`${item.name}：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    installingOpts.value = false
+    if (failures.length > 0) {
+      optError.value = `部分可选件未能安装（不影响使用，可稍后在设置的插件页安装）：\n${failures.join('；')}`
+    }
+  }
   void window.mxDesktop?.preferences.set('mindx.daemon.mode', 'local')
   emit('done')
 }
@@ -116,13 +183,36 @@ function retry(): void {
       </div>
     </template>
 
+    <!-- 就绪后的官方可选件勾选（选择式释放安装；无搭载或全部已装时不显示） -->
+    <div v-if="state === 'ready' && optionals.length > 0" :class="$style.optSection">
+      <span :class="$style.optTitle">官方可选件</span>
+      <label v-for="opt in optionals" :key="opt.file" :class="$style.optRow">
+        <input
+          type="checkbox"
+          :disabled="installingOpts"
+          :checked="checked.has(opt.file)"
+          @change="toggleOpt(opt.file)"
+        />
+        <span :class="$style.optName">{{ opt.name }}</span>
+        <span :class="$style.optDesc">{{ opt.description }}</span>
+      </label>
+      <p v-if="optError" :class="$style.optError">{{ optError }}</p>
+    </div>
+
     <div :class="$style.actions">
       <button type="button" :class="$style.ghost" :disabled="busy" @click="emit('back')">返回</button>
       <button v-if="state === 'error'" type="button" :class="$style.primary" data-wizard-install-retry @click="retry">
         重试
       </button>
-      <button v-if="state === 'ready'" type="button" :class="$style.primary" data-wizard-install-done @click="finishInstall">
-        继续
+      <button
+        v-if="state === 'ready'"
+        type="button"
+        :class="$style.primary"
+        data-wizard-install-done
+        :disabled="installingOpts"
+        @click="finishInstall"
+      >
+        {{ installingOpts ? '正在安装可选件…' : '继续' }}
       </button>
     </div>
   </div>
@@ -280,5 +370,51 @@ function retry(): void {
 .primary:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* 官方可选件勾选区（就绪后呈现；风格对齐 StepModels 的行式勾选列表） */
+.optSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-2);
+  padding: var(--mx-space-3);
+  border: 0.5px solid var(--mx-border-strong);
+  border-radius: var(--mx-radius-control);
+  background: var(--mx-bg-elevated);
+}
+
+.optTitle {
+  font: var(--mx-font-caption);
+  font-weight: 600;
+  color: var(--mx-text-secondary);
+}
+
+.optRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-2);
+  cursor: pointer;
+}
+
+.optName {
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+  white-space: nowrap;
+}
+
+.optDesc {
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.optError {
+  margin: 0;
+  font: var(--mx-font-caption);
+  color: var(--mx-danger);
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

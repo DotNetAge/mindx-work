@@ -13,6 +13,7 @@ export const connectorsPlugin: VuePlugin = (ctx) => {
     id: 'connectors',
     title: '连接器',
     icon: 'lucide:plug',
+    order: 105,
     // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费
     component: ConnectorsManagerRow,
   })

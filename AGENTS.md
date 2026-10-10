@@ -5,6 +5,10 @@
 - **客户可见文案禁用「Daemon」**：daemon 是团队内部叫法，一切对客户呈现的文本（UI 界面、错误消息、对话框、向导、日志的用户可读部分）一律统一用「**智能主机**」；旧文案「智能体主机」也一并废弃统一。代码层不受限：变量名、preferences 键（`mindx.daemon.*`）、RPC 方法名、类名、代码注释里的 daemon 保留原名。改文案时全局自查：`grep -rn "daemon" --include="*.vue" | grep -v "^\s*//" | grep -E "：|。|（"` 逐条人审（模板文本 vs 代码标识符）。
 - **客户可见文案禁暴露技术细节（2026-10-02 用户红笔标注）**：安装路径（`~/.mindx`）、服务名（launchd/systemd/com.mindx.*）、命令行、目录结构等实现细节一律不进 UI 文案与错误消息——客户只需要知道「做什么、结果如何、下一步怎么办」，路径只在诊断详情（原始错误 detail）里保留。写完文案自查：`grep -rn '~\.\|/usr/\|launchd\|systemd\|\.mindx' --include='*.vue' app/src ui-shell/src` 与主进程 humanizeError 类「讲人话」消息函数逐条过。
 
+## 插件装配顺序（2026-10-10 启动崩溃实踩）
+
+- **注册期 `use` 服务的插件必须排在 provide 者之后，排位以 grep 实证为准、不认 main.ts 注释**：`services.use` 非惰性，`createApp` 顺序执行清单，未 provide 即抛「服务缺失：xxx（依赖缺失应在启动期暴露）」整壳崩溃。skills 插件后来加注册期订阅（对齐 oauth 先例）时没同步清单顺序 → 启动即炸（2026-10-10）。main.ts 注释里的依赖清单（当时只写 oauth/metric）与实际代码会漂移。新插件注册期取用服务、或给既有插件加注册期 `use` 时：`grep -n "services.use\|ctx.services.use" plugins/src/*/index.ts` 核对全部注册期消费者，一并排在 provide 者之后；当前注册期消费 `daemon.connection` 的有 skills / oauth / web-viewer / terminal（store 内部懒 use 的不算）。
+
 ## daemon RPC 调用（Go 结构体参数）
 
 - **bool 字段必须显式传值，绝不依赖缺省**：daemon 侧 Go 结构体（如 `goharnessconfig.ModelConfig`）的 bool 字段是普通 `bool` 而非 `*bool`，JSON payload 缺字段 → 反序列化零值 `false` → 落盘即「停用/关闭」。实例：`addOnlineModel` 漏传 `enabled` 导致在线添加的模型全部落盘 `enabled: false`（2026-09-28 修复）。新增 RPC 调用时逐一核对 Go 侧结构体字段，bool 一律显式传。
@@ -54,13 +58,24 @@
 - **多个 CDP 验证脚本进程并发持同一页面连接会交错执行**：后启动脚本的截图会读到前一脚本设置的 DOM 中间态（实例：三个补拍脚本并发时截图主题 light/dark 反复跳变，四点采样探针在 pkill 全部残留 node 进程后立即稳定）。每轮验证前先 `ps aux | grep cdp_` 清残留；脚本必须 `process.exit(0)` 收尾，补拍前确认上一进程已死。
 - **Page.captureScreenshot 在窗口不可见时挂起超时**：electron 窗口最小化/被完全遮挡时 evaluate 一切正常、仅 captureScreenshot 永久超时。截图连续超时先确认窗口可见，不要反复重跑脚本或往页面状态方向猜。
 - **Pinia store Proxy 经 CDP returnByValue 序列化不稳定（2026-09-29）**：`Runtime.evaluate` 返回 `{ ex: pinia._s.get('xxx') }` 这类含 store Proxy 的对象，字段回读全为 undefined——但操作已真实生效（后续诊断探针可见状态已变更），仅序列化丢数据。探针必须在表达式内先提取基本类型字段（`String(ex.rootDir)` 等）组成 plain object 再返回，禁止直接返回 store 引用。
-- **vite dev server 绑定 IPv6 `[::1]`，curl 127.0.0.1 必然连接失败（2026-09-29）**：`curl http://127.0.0.1:5273/` 返回 000 会误判 dev server 已死，实际 `http://localhost:5273/`（解析到 ::1）返回 200。探活一律用 localhost；`lsof -nP -iTCP:5273 -sTCP:LISTEN` 看真实绑定。electron 加载的正是 localhost URL，vite 起来后页面 reload（`Page.reload`）即可恢复，不必重启 electron。
+- **vite dev server 绑定 IPv6 `[::1]`，curl 127.0.0.1 必然连接失败（2026-09-29）**：`curl http://127.0.0.1:5273/` 返回 000 会误判 dev server 已死，实际 `http://localhost:5273/`（解析到 ::1）返回 200。探活一律用 localhost；`lsof -nP -iTCP:5273` 看真实绑定。electron 加载的正是 localhost URL，vite 起来后页面 reload（`Page.reload`）即可恢复，不必重启 electron。
+- **验收 electron 实例用完必须立即杀掉，禁止留后台（2026-10-08 用户发火教训）**：CDP 验收实例（`--remote-debugging-port=9223`）的渲染层会连真实 daemon（1314），多实例并存产生 WS 403/连接挤占，用户在真实使用中撞见连接异常。每轮验收脚本跑完收尾动作 = 卸载验收残留（还原安装根）+ `pkill -f remote-debugging-port=9223`；下一轮验收再起新实例，绝不养常驻。
 - **验证主进程行为（pty 等）前必须核对 electron dist 新鲜度（2026-09-29）**：`electron/src/*.ts` mtime 晚于 `electron/dist/*.js`（`pnpm --filter @mindx-work/electron build` 产物），且长跑 electron 实例加载的是启动时刻的 dist——源码、产物、运行实例三层都可能不同步。实例：dist 落后源码 25 分钟、实例落后 dist 2.5 小时，终端 pty 行为误判排查绕远。改主进程源码后：build → 杀实例重启 → 再验证。
 - **zsh + powerlevel10k 环境 pty 启动需 2-10 秒**：spawn 后 prompt 输出明显滞后（首个采样 2 秒 960 字符、4 秒 4009 字符、完整 prompt 可到 10 秒），短等待窗口会把「启动中」误判为「shell 不存活」（实例：3 秒采样零输出误诊 shell 死亡，延长到 10 秒一切正常）。对 pty 输出做断言前用长度轮询等到输出稳定，不要固定短 sleep 后下结论。
 
 ## Overlay modal 宽度契约（2026-10-02 video-editor 实踩）
 
 - **插件 modal 根元素写死宽度必须配 `max-width: 100%`**：壳层 `.modalCard` 的 `max-width: min(520px, …)` 是 border-box 含自身 `padding: var(--mx-space-6)`，内容区上限实测仅 472px。根元素 `width: 520px`（ImportBrowser）或 `min-width: 560px/480px`（skills 的 EditSkillModal/LicenseModal，存量同病）都会把头部 × 与底部按钮行顶出卡片右缘。正确写法：`width: <期望值>; max-width: 100%`。量测法：CDP 取 `[class*=modalCard]` 与内容根元素的 `getBoundingClientRect()` 对比 right 值。
+
+## Electron 特权协议（2026-10-08 可选件验收实锤）
+
+- **`protocol.registerSchemesAsPrivileged` 全局只允许调用一次，两处模块级声明会互相覆盖**：plugins.ts（mx-plugin）与 file-stream.ts（mx-file）各自在模块顶层声明，后加载者的 scheme 列表覆盖前者 → mx-plugin 失去 standard/supportFetchAPI 特权 → 渲染侧一切 `fetch/import('mx-plugin://…')` 裸报 `TypeError: Failed to fetch`（无状态码、主进程无日志、handler 探针永不命中）。协议 handler 写得再对都白搭。已改为 main.ts 顶部一次性集中注册（`PLUGIN_SCHEMES + FILE_STREAM_SCHEMES`），新增特权 scheme 一律往 main.ts 这一处加；排障时 handler 内先加 `console.log` 探针验证「handler 是否被命中」，未命中 = 注册层问题，命中 = 回读层问题。
+- **协议 handler 必须 `await net.fetch(...)` 再 return**：裸 `return net.fetch(...)` 的 rejection 会穿透 protocol.handle 成为渲染侧网络错误（诊断盲区）；await 后失败进 catch 收敛为 5xx 讲人话回执。
+- **standard scheme 响应必须带 `Access-Control-Allow-Origin`**：页面 origin（dev http / 产物 file）跨源取自定义协议资源，无 ACAO 即被 CORS 层拒（表现同为 Failed to fetch，状态码被吞）。mx-plugin 已统一 withCors 包装（插件资源 = 显式安装即信任，全放行）。
+
+## 单文件打包管线的产物形态断言（2026-10-08 可选件样式全没实锤）
+
+- **vite 默认把 SFC `<style>` 提取为独立 .css asset，单文件打包只携带 entry 时规则本体静默丢失**：可选件 build.mjs 曾只把 entry.mjs 打进 .mindpkg，CSS Modules 类名映射在 JS（元素有类名）而规则本体全丢（样式全没）——manifest 回读自检验不出内容缺失。修复：generateBundle 层收割 .css asset 内联回 entry（style 标签注入，同 id 幂等）+「构建目录残留 .css 即抛错」自检。规律：**对打包产物做形态假设的每一处，都要有产物级断言兜底；清单正确 ≠ 内容完整**。
 
 ## 代码删除纪律（2026-10-08 agents/skills 市场分支剥离实踩）
 

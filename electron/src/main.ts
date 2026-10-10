@@ -8,9 +8,9 @@
  * web 侧由此只需"让开"：页面背景透明（tokens.css darwin 分支），
  * 侧栏只铺半透明染色（SidebarPane darwin 分支），原生 vibrancy 即可透出。
  */
-import { app, BrowserWindow, ipcMain, nativeTheme, Menu, Tray, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, Menu, Tray, nativeImage, protocol } from 'electron'
 import path from 'node:path'
-import { registerPluginBridge, registerPluginProtocol } from './plugins'
+import { registerPluginBridge, registerPluginProtocol, PLUGIN_SCHEMES } from './plugins'
 import { registerPreferencesBridge } from './preferences'
 import { registerDialogBridge } from './dialogs'
 import { registerTerminalBridge } from './terminal'
@@ -18,7 +18,12 @@ import { registerUpdaterBridge, disposeUpdater } from './updater'
 import { registerWizardBridge, maybeShowWizard, setWizardFinishedHandler } from './wizard'
 import { registerDaemonInstallerIpc } from './daemon-installer'
 import { installNavigationGuard, registerOpenExternalBridge, registerOpenPathBridge } from './navigation'
-import { registerFileStreamProtocol } from './file-stream'
+import { registerInAppBridge } from './in-app-window'
+import { registerFileStreamProtocol, FILE_STREAM_SCHEMES } from './file-stream'
+
+// 全部特权协议的一次性注册点：Electron registerSchemesAsPrivileged 全局只允许调用一次，
+// 且必须在 app.ready 前——分散调用会让后一次覆盖前一次（mx-plugin 曾因此静默失联）
+protocol.registerSchemesAsPrivileged([...PLUGIN_SCHEMES, ...FILE_STREAM_SCHEMES])
 
 /** 开发模式连接 Vite 服务（MX_DEV_URL 可覆盖）；产物模式加载 app 构建目录 */
 const DEV_URL = 'http://localhost:5273'
@@ -158,6 +163,7 @@ app.whenReady().then(async () => {
   registerDaemonInstallerIpc()
   registerOpenExternalBridge()
   registerOpenPathBridge()
+  registerInAppBridge()
   // 首启门：四事实全空先弹向导、暂不建主窗；向导关闭经 handler 交接主窗（防双窗同显）
   setWizardFinishedHandler(showMainWindow)
   const wizardShown = await maybeShowWizard()

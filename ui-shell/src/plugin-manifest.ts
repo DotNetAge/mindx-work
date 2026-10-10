@@ -34,7 +34,14 @@ export interface PluginManifest {
   permissions: string[]
   /** 壳契约版本（须等于 MX_API_VERSION） */
   mxApiVersion: string
+  /** 插件唯一指纹（可选存量兼容，新发布必带）：sha256(canonical({author,id,version})) 十六进制，
+   * 版本代际身份标识——同一插件的每个版本指纹唯一且可由身份三元组重算验证，防冒名与篡改 */
+  fingerprint?: string
 }
+
+/** 插件唯一指纹格式：sha256 十六进制 64 位（由打包工具按 canonical({author,id,version}) 计算，
+ * 市场发布管线同口径重算校验；本契约只做格式关，重算校验唯一家在服务端发布管线） */
+const FINGERPRINT_RE = /^[0-9a-f]{64}$/
 
 /** semver 三段（不含通配/范围——插件包版本是精确代际） */
 const SEMVER_RE = /^\d+\.\d+\.\d+$/
@@ -80,6 +87,9 @@ export function manifestIssues(value: unknown): string[] {
   }
   if (m.mxApiVersion !== MX_API_VERSION) {
     issues.push(`mxApiVersion ${String(m.mxApiVersion)} 与壳契约版本 ${MX_API_VERSION} 不匹配`)
+  }
+  if (m.fingerprint !== undefined && (typeof m.fingerprint !== 'string' || !FINGERPRINT_RE.test(m.fingerprint))) {
+    issues.push('fingerprint 必须是 64 位十六进制 sha256（打包工具按身份三元组计算）')
   }
   return issues
 }

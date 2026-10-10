@@ -30,10 +30,22 @@ export interface BundleInstallResult {
   prepares?: SkillPrepareResult[]
 }
 
+/** skill.credential_collect 通知 / skill.prepare collect 响应中的单个待收集变量 */
+export interface SkillEnvCollectItem {
+  /** 环境变量名 */
+  name: string
+  /** 收集说明（去哪申请、贴什么值；daemon 侧 requires.envs.prompt） */
+  prompt?: string
+  /** 凭据申请入口链接（可选） */
+  url?: string
+  /** 敏感凭据：掩码输入 */
+  sensitive?: boolean
+}
+
 /** 技能准备流程状态（安装响应 prepares[] 与 skill.prepare 共用形状） */
 export interface SkillPrepareResult {
   skill: string
-  status: 'ok' | 'oauth_started' | 'needs_confirm' | 'blocked'
+  status: 'ok' | 'oauth_started' | 'collect_started' | 'needs_confirm' | 'blocked'
   /** 环境不满足原因或缺失二进制清单 */
   warnings?: string[]
   /** oauth_started：提供商名与展示名 */
@@ -41,6 +53,8 @@ export interface SkillPrepareResult {
   provider_title?: string
   /** oauth_started：令牌落库的凭据名 */
   env?: string
+  /** collect_started：待收集环境变量（展示字段，凭据值不在此结构） */
+  collect?: SkillEnvCollectItem[]
   /** needs_confirm：本平台待确认安装命令 */
   commands?: string[]
   platform?: string
