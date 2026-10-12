@@ -546,7 +546,7 @@ export function createPluginStore(rootDir: string): PluginStoreApi {
     if (expectedSha256) {
       const expected = expectedSha256.trim().toLowerCase()
       if (expected !== createHash('sha256').update(data).digest('hex')) {
-        throw new Error('插件包完整性校验失败：与市场清单 sha256 不符')
+        throw new Error('插件包完整性校验失败：与进化网络发布的内容不一致')
       }
     }
     return installZipData(data, Number.isFinite(publishedAt) ? publishedAt : undefined)

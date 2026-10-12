@@ -1,39 +1,65 @@
 <script setup lang="ts">
 /**
- * 货架评分显示 + 入口（§2.3，货架卡片与已装行共用）：
- * 有评分时显示 `★4.6 (23)`，无评分时显示空心星标——同一元素即展示即入口。
- * 门槛链：开关关（market.shareRatings）→ 置灰禁用；开关开未绑定 → 打开市场账号
- * Sheet 引导绑定；已绑定 → 打开 1-5 星评分 modal。
+ * 货架行内评分（§2.3，货架卡片与已装行共用）：
+ * 五颗星直接点选提交，不弹窗——点第 n 颗星即提交 n 星评分，成功后
+ * 本地聚合列由 store 同步、货架即时刷新。评分挂包级（kind+name），不区分版本。
+ * 未绑定账号时点击 → 打开 MindX 账号 Sheet 引导绑定（评分行为不设限，
+ * 数据是否上传由「分享我的评分」授权在提交时把关）。
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useShell } from '@mindx-work/ui-shell-vue'
 import { useMarketStore, pkgDisplayName, type MarketPkg } from './store'
-import RatingModal from './overlays/RatingModal.vue'
-import AccountSheet from './overlays/AccountSheet.vue'
-import { MODAL_RATING, SHEET_ACCOUNT } from './ids'
+import { pushNotice } from './notice'
+import { openAccountSheet } from './overlays/accountSheets'
 
 const props = defineProps<{ pkg: MarketPkg }>()
 
 const store = useMarketStore()
 const shell = useShell()
 
+const hoverScore = ref(0)
+const myScore = ref(0)
+const submitting = ref(false)
+
+/** 星星填充：hover 预览优先，落定为已选分 */
+const fill = computed(() => hoverScore.value || myScore.value)
 const rated = computed(() => (props.pkg.rating_count ?? 0) > 0)
 
-const starTitle = computed(() => {
-  if (!store.shareRatings) return '在 设置 → 通用 → 分享我的评分 开启后可评分'
-  if (!store.account?.user) return '绑定市场账号后可评分'
-  return `为「${pkgDisplayName(props.pkg)}」评分`
-})
+/** 回显当前身份已有评分（rated=false 归一为 0 = 未评；回显失败按未评过处理） */
+watch(
+  () => [props.pkg.kind, props.pkg.name] as const,
+  ([kind, name]) => {
+    myScore.value = 0
+    void store.getMyRating(kind, name).then((res) => {
+      myScore.value = res.rated ? res.score : 0
+    }).catch(() => {
+      /* 回显失败不阻断 */
+    })
+  },
+  { immediate: true },
+)
 
-function onClick(): void {
+/** 点星即评分：未绑定拉账号引导，同分不重复提交，成功更新本地回显并推通知 */
+function pick(score: number): void {
+  if (submitting.value) return
   if (!store.account?.user) {
-    if (shell.Sheet.has(SHEET_ACCOUNT)) shell.Sheet.remove(SHEET_ACCOUNT)
-    shell.Sheet.add({ id: SHEET_ACCOUNT, title: '市场账号', component: AccountSheet as never })
+    void openAccountSheet(shell, store)
     return
   }
-  store.requestRatingDialog(props.pkg)
-  if (shell.Overlay.has(MODAL_RATING)) shell.Overlay.remove(MODAL_RATING)
-  shell.Overlay.add({ id: MODAL_RATING, kind: 'modal', component: RatingModal as never })
+  if (score === myScore.value) return
+  const name = pkgDisplayName(props.pkg)
+  submitting.value = true
+  void store.rate(props.pkg.kind, props.pkg.name, score)
+    .then(() => {
+      myScore.value = score
+      pushNotice(shell, 'success', `已为「${name}」评分 ${score} 星`)
+    })
+    .catch((err: unknown) => {
+      pushNotice(shell, 'error', err instanceof Error ? err.message : '评分失败，请重试')
+    })
+    .finally(() => {
+      submitting.value = false
+    })
 }
 
 /** 下载量人性化展示（≥1 万 → x.x 万） */
@@ -44,63 +70,82 @@ function formatCount(n: number): string {
 </script>
 
 <template>
-  <div :class="$style.row">
-    <button
-      type="button"
-      :class="$style.star"
-      :data-rated="rated ? 'true' : 'false'"
-      :disabled="!store.shareRatings"
-      :title="starTitle"
-      @click="onClick"
+  <span :class="$style.rating">
+    <span
+      :class="$style.stars"
+      role="radiogroup"
+      :aria-label="`为「${pkgDisplayName(pkg)}」评分`"
+      :data-busy="submitting ? 'true' : 'false'"
     >
-      <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
-        <path
-          d="M12 2.6l2.9 5.9 6.5.95-4.7 4.58 1.1 6.47L12 17.44 6.2 20.5l1.1-6.47L2.6 9.45l6.5-.95L12 2.6z"
-          :fill="rated ? 'currentColor' : 'none'"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linejoin="round"
-        />
-      </svg>
-      <span v-if="rated">{{ (pkg.rating_avg ?? 0).toFixed(1) }} ({{ pkg.rating_count }})</span>
-    </button>
+      <button
+        v-for="n in 5"
+        :key="n"
+        type="button"
+        role="radio"
+        :aria-checked="fill >= n ? 'true' : 'false'"
+        :aria-label="`${n} 星`"
+        :class="$style.star"
+        :data-on="fill >= n ? 'true' : 'false'"
+        :disabled="submitting"
+        @mouseenter="hoverScore = n"
+        @mouseleave="hoverScore = 0"
+        @click="pick(n)"
+      >
+        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+          <path
+            d="M12 2.6l2.9 5.9 6.5.95-4.7 4.58 1.1 6.47L12 17.44 6.2 20.5l1.1-6.47L2.6 9.45l6.5-.95L12 2.6z"
+            :fill="fill >= n ? 'currentColor' : 'none'"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
+    </span>
+    <span v-if="rated" :class="$style.agg">{{ (pkg.rating_avg ?? 0).toFixed(1) }} ({{ pkg.rating_count }})</span>
     <span v-if="(pkg.download_count ?? 0) > 0" :class="$style.downloads">{{ formatCount(pkg.download_count ?? 0) }} 下载</span>
-  </div>
+  </span>
 </template>
 
 <style module>
-.row {
-  display: flex;
+.rating {
+  display: inline-flex;
   align-items: center;
   gap: var(--mx-space-2);
 }
 
-.star {
+.stars {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 4px;
+  gap: 1px;
+}
+
+.stars[data-busy='true'] {
+  opacity: 0.7;
+}
+
+.star {
+  display: inline-flex;
+  padding: 2px;
   border: none;
   border-radius: 4px;
   background: transparent;
   color: var(--mx-warning);
-  font: var(--mx-font-caption);
-  font-variant-numeric: tabular-nums;
   cursor: pointer;
-  transition: background-color var(--mx-duration-fast) var(--mx-ease-standard);
+  transition: transform var(--mx-duration-fast) var(--mx-ease-standard);
 }
 
-.star[data-rated='false'] {
+.star[data-on='false'] {
   color: var(--mx-text-tertiary);
+  opacity: 0.55;
 }
 
-.star:hover:not(:disabled) {
-  background: var(--mx-hover);
+.star:hover {
+  transform: scale(1.15);
 }
 
 .star:disabled {
   cursor: default;
-  opacity: 0.55;
 }
 
 .star:focus-visible {
@@ -108,6 +153,7 @@ function formatCount(n: number): string {
   outline-offset: 1px;
 }
 
+.agg,
 .downloads {
   font: var(--mx-font-caption);
   color: var(--mx-text-tertiary);

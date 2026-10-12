@@ -1,5 +1,5 @@
 /**
- * 应用内浏览器子窗口（市场账号登录等需用户交互的授权页专用）：
+ * 应用内浏览器子窗口（MindX 账号登录等需用户交互的授权页专用）：
  * GitHub 授权页拒绝 iframe/web-viewer 内嵌（X-Frame-Options），而系统浏览器
  * 会把用户带离应用——独立 BrowserWindow 顶层导航不受限，是两难之间的正解。
  * 480×680 居中于父窗，轻量无桥（不挂 preload，页面不需要任何宿主能力）；
@@ -20,7 +20,7 @@ function isWebUrl(raw: string): boolean {
 /** 打开应用内授权子窗口：同一 URL 已有窗口时唤出复用（防重复登录窗堆积） */
 function openInAppWindow(parent: BrowserWindow, url: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    if (win.title === '市场账号登录' && !win.isDestroyed()) {
+    if (win.title === 'MindX 账号登录' && !win.isDestroyed()) {
       win.show()
       win.focus()
       return
@@ -29,7 +29,7 @@ function openInAppWindow(parent: BrowserWindow, url: string): void {
   const win = new BrowserWindow({
     width: 480,
     height: 680,
-    title: '市场账号登录',
+    title: 'MindX 账号登录',
     parent,
     modal: false,
     center: true,

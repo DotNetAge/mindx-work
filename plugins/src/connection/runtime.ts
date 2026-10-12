@@ -10,7 +10,7 @@
  * 配置有变化即按新端点重连（首启向导完成后的主窗自动接上）。
  */
 
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { DaemonSocket, LOCAL_DAEMON_URL, type ConnectionState } from './daemon'
 
 export type { ConnectionState }
@@ -18,11 +18,21 @@ export type { ConnectionState }
 /** 连接模式：local = 本机 daemon；remote = 远程智能体主机 */
 export type DaemonMode = 'local' | 'remote'
 
+/** 设备接入握手状态（daemon 侧强制闸：未验证连接仅能完成握手） */
+export type PairState =
+  | 'unverified' // 未验证（连接建立前 / 握手未完成）
+  | 'paired' // 已完成接入验证（本机令牌直通或已授权设备）
+  | 'pending' // 等待对方批准（本机作为设备接入远端时的等待态）
+  | 'denied' // 已被对方拒绝
+  | 'closed' // 对方未开启设备接入
+  | 'failed' // 无法完成握手（无宿主桥读取令牌 / daemon 未更新）
+
 /** 服务注册名（消费方以纯字符串引用，插件间禁止 import） */
 export const DAEMON_CONNECTION_SERVICE = 'daemon.connection'
 
 const MODE_KEY = 'mindx.daemon.mode'
 const REMOTE_URL_KEY = 'mindx.daemon.remoteUrl'
+const DEVICE_ID_KEY = 'mindx.device.id'
 
 function readLocalMode(): DaemonMode {
   try {
@@ -57,6 +67,8 @@ export interface DaemonConnection {
   readonly mode: DaemonMode
   /** 远程机器地址（响应式；空 = 尚未配置） */
   readonly remoteUrl: string
+  /** 设备接入握手状态（响应式；连接建立后自动完成本机握手） */
+  readonly pairState: PairState
   /** 切换连接模式：按模式选端点立即重连并持久化；远程未配地址时回落本地端点保持可用 */
   switchMode(mode: DaemonMode): void
   /** 保存远程机器地址并持久化；当前处于远程模式时立即按新地址重连 */
@@ -72,7 +84,71 @@ export interface DaemonConnection {
 export function createDaemonConnection(): DaemonConnection & { dispose(): void } {
   const mode = ref<DaemonMode>('local')
   const remoteUrl = ref('')
+  const pairState = ref<PairState>('unverified')
   const socket = new DaemonSocket(LOCAL_DAEMON_URL)
+
+  // ── 本机设备身份与接入握手 ────────────────────────────────
+  // daemon 侧 RPC 强制闸要求：连接建立后必须完成 device.handshake
+  // （本机令牌直通，无弹窗）。设备标识持久化在 preferences（缺失生成 UUID），
+  // 令牌与主机名经宿主桥读取（~/.mindx/daemon_token 与 os.hostname）。
+  let deviceToken = ''
+  let deviceName = ''
+  let deviceId = ''
+
+  function ensureDeviceId(): string {
+    if (deviceId) return deviceId
+    try {
+      const stored = localStorage.getItem(DEVICE_ID_KEY)
+      if (stored) {
+        deviceId = stored
+        return deviceId
+      }
+    } catch {
+      // 存储不可用：本次会话内生成临时标识（重连不换，刷新后会再生成）
+    }
+    deviceId = crypto.randomUUID()
+    try {
+      localStorage.setItem(DEVICE_ID_KEY, deviceId)
+    } catch {
+      // 持久化失败不影响本次会话握手
+    }
+    return deviceId
+  }
+
+  /** 连接建立后的本机握手（pending/denied/closed 由对方设备场景产生，状态如实呈现） */
+  async function handshake(): Promise<void> {
+    pairState.value = 'unverified'
+    if (!deviceToken) {
+      // 无宿主桥（纯 Web）或令牌缺失：无法完成握手。daemon 未装配闸的旧版本
+      // 仍可用（握手失败不阻塞连接，调用失败时按具体错误提示）
+      pairState.value = 'failed'
+      return
+    }
+    try {
+      const result = await socket.call<{ status: PairState }>(
+        'device.handshake',
+        { device_id: ensureDeviceId(), name: deviceName, platform: 'macos', token: deviceToken },
+        10000,
+      )
+      pairState.value = result?.status === 'paired' ? 'paired' : (result?.status ?? 'failed')
+    } catch (err) {
+      // 旧版 daemon（未装配设备闸）没有握手方法：视为已验证，功能全量可用；
+      // 其余失败（无令牌/被拒）如实标记，由界面提示
+      const msg = err instanceof Error ? err.message : String(err)
+      pairState.value = msg.includes('Method not found') ? 'paired' : 'failed'
+    }
+  }
+
+  watch(socket.state, (st) => {
+    if (st === 'connected') void handshake()
+  })
+
+  /** 本机身份就绪即记录；连接已建立时补一次握手（防桥读取晚于首连的竞态） */
+  void window.mxDesktop?.host?.info?.().then((info) => {
+    deviceToken = info?.token ?? ''
+    deviceName = info?.hostname || '这台 Mac'
+    if (socket.state.value === 'connected') void handshake()
+  })
 
   /** 按 mode/remoteUrl 解析目标端点（远程未配地址时回落本地端点保持可用） */
   function targetUrl(): string {
@@ -123,6 +199,9 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
     get remoteUrl() {
       return remoteUrl.value
     },
+    get pairState() {
+      return pairState.value
+    },
     switchMode(next: DaemonMode): void {
       if (mode.value === next) return
       mode.value = next
@@ -160,5 +239,23 @@ export function stateText(state: ConnectionState): string {
       return '连接出错'
     default:
       return '未连接'
+  }
+}
+
+/** 设备接入握手状态映射为提示文案（设备分组与状态提示共用） */
+export function pairStateText(state: PairState): string {
+  switch (state) {
+    case 'paired':
+      return '已验证'
+    case 'pending':
+      return '等待对方批准'
+    case 'denied':
+      return '对方已拒绝'
+    case 'closed':
+      return '对方未开启设备接入'
+    case 'failed':
+      return '无法完成验证'
+    default:
+      return '验证中'
   }
 }

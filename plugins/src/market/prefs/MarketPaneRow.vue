@@ -23,8 +23,8 @@ import PublishModal from '../overlays/PublishModal.vue'
 import SubmitModal from '../overlays/SubmitModal.vue'
 import InboxModal from '../overlays/InboxModal.vue'
 import RatingEntry from '../RatingEntry.vue'
-import AccountSheet from '../overlays/AccountSheet.vue'
-import { OVERLAY_CONFIRM, MODAL_TEAM_CONFIRM, MODAL_AGENT_CONFIRM, MODAL_SKILL_CONFIRM, MODAL_PAT_CONFIRM, MODAL_PUBLISH, MODAL_SUBMIT, MODAL_INBOX, SHEET_ACCOUNT } from '../ids'
+import { openAccountSheet as openAccountSheets } from '../overlays/accountSheets'
+import { OVERLAY_CONFIRM, MODAL_TEAM_CONFIRM, MODAL_AGENT_CONFIRM, MODAL_SKILL_CONFIRM, MODAL_PAT_CONFIRM, MODAL_PUBLISH, MODAL_SUBMIT, MODAL_INBOX } from '../ids'
 
 type ShelfKey = 'agent' | 'skill' | 'team' | 'plugin' | 'source'
 
@@ -116,7 +116,7 @@ function sourceTitle(s: MarketSourceItem): string {
 function sourceDesc(s: MarketSourceItem): string {
   return s.tier === 'merchant'
     ? '只为特定用户开放的专用源，需要获得专用邀请码'
-    : '官方公开的资源市场，全部用户可用'
+    : '官方公开的进化网络，所有人可用'
 }
 
 /** 卡片「选用」：官方源或已存邀请码的专用源直接换源（daemon 连通探测成功才激活）；
@@ -135,7 +135,7 @@ async function selectSource(sourceID: string): Promise<void> {
   savingSourceId.value = sourceID
   try {
     await store.setSource(sourceID)
-    pushOk('已切换市场来源')
+    pushOk('已切换进化网络来源')
   } catch (err: unknown) {
     pushErr(err)
   } finally {
@@ -151,10 +151,9 @@ function pushErr(err: unknown): void {
 /** 发布/审核等高价值动作的身份门槛：已绑定用户或已配置商户令牌（daemon 双通道） */
 const canPublish = computed(() => store.account?.user != null || store.patSet)
 
-/** 打开市场账号 Sheet（发布/投递/收件箱未绑定时的引导，复用评分入口同款） */
+/** 打开MindX 账号 Sheet（发布/投递/收件箱未绑定时的引导；已登录显账户信息，未登录显登录遮挡页） */
 function openAccountSheet(): void {
-  if (shell.Sheet.has(SHEET_ACCOUNT)) shell.Sheet.remove(SHEET_ACCOUNT)
-  shell.Sheet.add({ id: SHEET_ACCOUNT, title: '市场账号', component: AccountSheet as never })
+  void openAccountSheets(shell, store)
 }
 
 function onOpenPublish(): void {
@@ -483,7 +482,7 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
   <div :class="$style.wrap">
     <!-- ── 标题 ── -->
     <div :class="$style.head">
-      <span :class="$style.title">市场</span>
+      <span :class="$style.title">进化网络</span>
     </div>
 
     <!-- ── 货架分段切换（与团队管理行同款 mx-tabs 分段控件，来源与货架同级） ── -->
@@ -534,9 +533,8 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
             <span :class="$style.itemName">{{ pkgDisplayName(pkg) }}</span>
             <span v-if="pkg.role" class="mx-tag" data-tone="info">{{ pkg.role }}</span>
             <span class="mx-tag" data-tone="neutral">{{ pkg.category || '未分类' }}</span>
+            <RatingEntry :pkg="pkg" />
           </div>
-          <span :class="$style.itemVersion">{{ pkg.name }}</span>
-          <RatingEntry :pkg="pkg" />
           <span v-if="pkg.derived_from" :class="$style.derivedFrom">进化自 {{ pkg.derived_from.name }}</span>
           <div v-if="(pkg.skills ?? []).length" :class="$style.tagRow">
             <span class="mx-tag" data-tone="warning">{{ (pkg.skills ?? []).length }} 项技能装备</span>
@@ -584,9 +582,8 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
             <span :class="$style.itemName">{{ pkg.skillNames?.[pkg.name] || pkgDisplayName(pkg) }}</span>
             <span v-if="pkg.version" class="mx-tag" data-tone="info">v{{ pkg.version }}</span>
             <span class="mx-tag" data-tone="neutral">{{ pkg.category || '未分类' }}</span>
+            <RatingEntry :pkg="pkg" />
           </div>
-          <span :class="$style.itemVersion">{{ pkg.name }}</span>
-          <RatingEntry :pkg="pkg" />
           <span v-if="pkg.derived_from" :class="$style.derivedFrom">进化自 {{ pkg.derived_from.name }}</span>
           <span :class="$style.desc">{{ pkg.description || '暂无描述' }}</span>
         </div>
@@ -632,9 +629,8 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
             <span :class="$style.itemName">{{ pkgDisplayName(pkg) }}</span>
             <span class="mx-tag" data-tone="info">团队</span>
             <span class="mx-tag" data-tone="neutral">{{ pkg.category || '未分类' }}</span>
+            <RatingEntry :pkg="pkg" />
           </div>
-          <span :class="$style.itemVersion">{{ pkg.name }}</span>
-          <RatingEntry :pkg="pkg" />
           <span v-if="pkg.derived_from" :class="$style.derivedFrom">进化自 {{ pkg.derived_from.name }}</span>
           <div :class="$style.tagRow">
             <span class="mx-tag" data-tone="neutral">负责人 {{ pkg.leader || '—' }}</span>
@@ -675,9 +671,8 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
             <span :class="$style.itemName">{{ pkgDisplayName(pkg) }}</span>
             <span class="mx-tag" data-tone="info">插件</span>
             <span v-if="pkg.version" class="mx-tag" data-tone="neutral">v{{ pkg.version }}</span>
+            <RatingEntry :pkg="pkg" />
           </div>
-          <span :class="$style.itemVersion">{{ pkg.name }}</span>
-          <RatingEntry :pkg="pkg" />
           <span v-if="pkg.derived_from" :class="$style.derivedFrom">进化自 {{ pkg.derived_from.name }}</span>
           <div :class="$style.tagRow">
             <span v-if="pkg.author" class="mx-tag" data-tone="neutral">{{ pkg.author }}</span>
@@ -700,7 +695,7 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
         <span v-else-if="store.pluginDone && store.pluginPackages.length > 0">已加载全部插件</span>
       </div>
       <p v-if="store.pluginLoaded && store.pluginPackages.length === 0 && !store.pluginError" :class="$style.hint">
-        插件市场暂无可安装的插件。
+        进化网络暂无可安装的插件。
       </p>
       <p v-if="!store.hasBridge" :class="$style.hint">当前环境不支持安装插件（需要应用宿主）。</p>
     </div>
@@ -873,11 +868,6 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
   font: var(--mx-font-body);
   font-weight: 600;
   color: var(--mx-text);
-}
-
-.itemVersion {
-  font: var(--mx-font-body);
-  color: var(--mx-text-tertiary);
 }
 
 .tagRow {

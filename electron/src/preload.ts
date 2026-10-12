@@ -57,6 +57,11 @@ contextBridge.exposeInMainWorld('mxDesktop', {
     getAll: (): Promise<Record<string, unknown> | null> => ipcRenderer.invoke('mx:preferences-get'),
     set: (key: string, value: unknown): Promise<boolean> => ipcRenderer.invoke('mx:preferences-set', key, value),
   },
+  host: {
+    /** 本机信息（设备接入握手用）：智能主机握手令牌 + 主机名；令牌缺失为 null */
+    info: (): Promise<{ token: string | null; hostname: string } | null> =>
+      ipcRenderer.invoke('mx:host-info'),
+  },
   dialog: {
     saveFile: (defaultName: string): Promise<string | null> =>
       ipcRenderer.invoke('mx:dialog-save-file', defaultName),

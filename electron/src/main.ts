@@ -12,6 +12,7 @@ import { app, BrowserWindow, ipcMain, nativeTheme, Menu, Tray, nativeImage, prot
 import path from 'node:path'
 import { registerPluginBridge, registerPluginProtocol, PLUGIN_SCHEMES } from './plugins'
 import { registerPreferencesBridge } from './preferences'
+import { registerHostInfoBridge } from './host-info'
 import { registerDialogBridge } from './dialogs'
 import { registerTerminalBridge } from './terminal'
 import { registerUpdaterBridge, disposeUpdater } from './updater'
@@ -156,6 +157,7 @@ app.whenReady().then(async () => {
   registerNativeThemeBridge()
   registerPluginBridge()
   registerPreferencesBridge()
+  registerHostInfoBridge()
   registerDialogBridge()
   registerTerminalBridge()
   registerUpdaterBridge()

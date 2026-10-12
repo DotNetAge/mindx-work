@@ -29,8 +29,7 @@
     "./terminal": "./src/terminal/index.ts",
     "./calendar": "./src/calendar/index.ts",
     "./usage": "./src/usage/index.ts",
-    "./diffview": "./src/diffview/index.ts",
-    "./metric": "./src/metric/index.ts"
+    "./diffview": "./src/diffview/index.ts"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.21",

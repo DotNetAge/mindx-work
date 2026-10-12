@@ -26,7 +26,16 @@ onMounted(() => {
   store.loadSkills().catch((err: unknown) => {
     pushNotice(shell, 'error', err instanceof Error ? err.message : '加载技能清单失败')
   })
+  // 市场评分映射（增强信息：市场不可达时留空，不阻断技能管理）
+  store.loadMarketRatings().catch(() => {})
 })
+
+/** 卡片评分展示（市场货架数据；无评分数据返回 null 不渲染） */
+function marketRating(name: string): { avg: number; count: number } | null {
+  const r = store.marketRatings[name]
+  if (!r || !r.count) return null
+  return { avg: r.avg ?? 0, count: r.count }
+}
 
 /** modal 互斥惯例：add 前先 remove 同 id（契约 §6） */
 function openModal(id: string, component: Component) {
@@ -377,7 +386,7 @@ function editFromZoom(target: ZoomTarget) {
           <span :class="$style.avatar"><MxIcon name="lucide:sparkles" :size="20" /></span>
           <div :class="$style.titleCol">
             <span :class="$style.name" :title="skill.name">{{ skillDisplayName(skill) }}</span>
-            <span :class="$style.id">{{ skill.name }}</span>
+            <p :class="$style.desc" :title="skillLocaleDesc(skill)">{{ skillLocaleDesc(skill) || '(无描述)' }}</p>
           </div>
           <span v-if="isThirdParty(skill)" class="mx-tag" data-tone="warning">第三方</span>
           <!-- 操作组右上角（@click.stop 防触发卡片详情弹层） -->
@@ -395,9 +404,10 @@ function editFromZoom(target: ZoomTarget) {
             </button>
           </div>
         </div>
-        <p :class="$style.desc" :title="skillLocaleDesc(skill)">{{ skillLocaleDesc(skill) || '(无描述)' }}</p>
         <div :class="$style.tagRow">
           <span v-if="skill.metadata?.version" class="mx-tag" data-tone="info">v{{ skill.metadata?.version }}</span>
+          <!-- 市场评分（货架聚合；仅在市场有评分数据时显示） -->
+          <span v-if="marketRating(skill.name)" class="mx-tag" data-tone="warning">★ {{ marketRating(skill.name)!.avg.toFixed(1) }}（{{ marketRating(skill.name)!.count }}）</span>
           <span v-if="skill.metadata?.author" class="mx-tag" data-tone="neutral">{{ skill.metadata?.author }}</span>
           <span
             v-if="skill.license"
@@ -406,9 +416,10 @@ function editFromZoom(target: ZoomTarget) {
             :class="$style.licenseTag"
             role="button"
             tabindex="0"
+            :title="`查看许可证 ${skill.license}`"
             @click.stop="onLicense(skill)"
             @keydown.enter.prevent="onLicense(skill)"
-          >许可证</span>
+          >{{ skill.license }}</span>
         </div>
       </div>
     </div>
@@ -572,14 +583,6 @@ function editFromZoom(target: ZoomTarget) {
   font: var(--mx-font-body);
   font-weight: 600;
   color: var(--mx-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.id {
-  font: var(--mx-font-caption);
-  color: var(--mx-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

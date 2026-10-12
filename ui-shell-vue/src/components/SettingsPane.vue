@@ -75,11 +75,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   animation: fade-in var(--mx-duration-motion) var(--mx-ease-standard);
 }
 
-/* 面板（panel L85-94）：800 宽 / min(800, vh-48) 高 / radius 32 / layer-2 底 */
+/* 面板（panel L85-94）：960 宽 / min(860, vh-48) 高 / radius 32 / layer-2 底 */
 .panel {
   display: flex;
-  width: 800px;
-  height: min(800px, calc(100vh - 48px));
+  width: 960px;
+  height: min(860px, calc(100vh - 48px));
   max-width: calc(100vw - 48px);
   background: var(--mx-bg-elevated);
   border-radius: 32px;

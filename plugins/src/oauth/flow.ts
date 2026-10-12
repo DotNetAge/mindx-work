@@ -1,20 +1,14 @@
 /**
  * 授权流程状态单例：daemon 侧 gochat 流程经 oauth.present_* / oauth.flow_*
- * 通知驱动。设置页「去授权」与技能准备流程（阶段五）共用同一通知通道——
- * daemon 先起流程、呈现事件到达即弹授权弹窗，弹窗只是流程状态的视图。
- * 模块级 reactive 单例（对齐 connection/channel.ts 先例），弹窗与行共享。
+ * 通知驱动。技能准备流程（阶段五）发起后呈现事件到达即弹授权弹窗，
+ * 弹窗只是流程状态的视图。
+ * 模块级 reactive 单例（对齐 connection/channel.ts 先例）。
  */
 
-import { reactive, ref } from 'vue'
+import { reactive } from 'vue'
 
 export type OAuthFlowPhase = 'connecting' | 'waiting' | 'success' | 'failed' | 'cancelled'
 export type OAuthInteraction = 'callback' | 'device_code' | 'user_code'
-
-/** 提供商列表版本号：配置弹窗保存后自增，设置行 watch 后刷新（跨组件刷新通道） */
-export const oauthProvidersVersion = ref(0)
-
-/** 配置弹窗目标（第二层模板 client_id 填入） */
-export const oauthConfigureTarget = reactive({ name: '', title: '' })
 
 export interface OAuthFlowState {
   /** 流程在途（弹窗以 phase 呈现各态） */
@@ -49,21 +43,6 @@ export const oauthFlow = reactive<OAuthFlowState>({
 /** 每流程只自动打开一次浏览器（present_* 可能重放，防重复拉起） */
 let openedUrl = ''
 
-/** 重置并进入连接态（行点击「去授权」时调用，弹窗挂载后发起 RPC） */
-export function beginFlow(provider: string, title: string): void {
-  openedUrl = ''
-  oauthFlow.active = true
-  oauthFlow.provider = provider
-  oauthFlow.title = title
-  oauthFlow.interaction = null
-  oauthFlow.authUrl = ''
-  oauthFlow.userCode = ''
-  oauthFlow.verifyUrl = ''
-  oauthFlow.expiresIn = 0
-  oauthFlow.phase = 'connecting'
-  oauthFlow.error = ''
-}
-
 /** 弹窗关闭/流程结束后的状态清理（active=false 使迟到事件被忽略） */
 export function endFlow(): void {
   oauthFlow.active = false
@@ -86,7 +65,7 @@ function openOnce(url: string): void {
 }
 
 function startPresent(provider: string, title: string, interaction: OAuthInteraction): void {
-  // 技能准备流程（阶段五）发起时无 beginFlow 前置：呈现事件即流程在途信号
+  // 技能准备流程（阶段五）发起时无前置状态：呈现事件即流程在途信号
   if (!oauthFlow.active || oauthFlow.provider !== provider) {
     openedUrl = ''
     oauthFlow.active = true

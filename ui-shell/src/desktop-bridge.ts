@@ -131,6 +131,10 @@ export interface MxDesktopBridge {
     /** 合并写单键（原子写由主进程保证） */
     set(key: string, value: unknown): Promise<boolean>
   }
+  host: {
+    /** 本机信息（设备接入握手用）：智能主机握手令牌 + 主机名；令牌缺失为 null */
+    info(): Promise<{ token: string | null; hostname: string } | null>
+  }
   dialog: {
     /** 系统保存文件对话框（defaultName 为缺省文件名）；取消返回 null */
     saveFile(defaultName: string): Promise<string | null>

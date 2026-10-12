@@ -13,7 +13,7 @@ import {
   type InstalledPluginView,
   type MarketRuntime,
 } from '@mindx-work/ui-shell'
-import { useService, type PreferencesController } from '@mindx-work/ui-shell-vue'
+import { useService } from '@mindx-work/ui-shell-vue'
 
 // 服务以纯字符串名消费（插件间禁止 import；契约 §10.2）
 const DAEMON_CONNECTION = 'daemon.connection'
@@ -214,6 +214,21 @@ export interface MarketAccountUser {
   nick_name: string
   avatar_url: string
   points: number
+  /** 账号机制字段（用户名密码登录 + Profile 四字段） */
+  username: string
+  job_title: string
+  phone: string
+  github: string
+}
+
+/** market.account.devices 设备条目（服务端 clients 表行，设备列表定案） */
+export interface MarketDeviceItem {
+  client_id: string
+  device_name: string
+  platform: string
+  bound_at: string
+  last_seen_at: string
+  is_current: boolean
 }
 
 /** market.account.get 结果：user 非空 = 已绑定；has_token 且 user 空 = 令牌失效 */
@@ -244,6 +259,8 @@ export const useMarketStore = defineStore('market', () => {
   })()
 
   const installed = ref<InstalledPluginView[]>([])
+  /** BrowserSheet 待展示网页地址（法律文本等内嵌页；组件层写入，BrowserSheet 组件读取） */
+  const browserSheetUrl = ref('')
   /** 官方可选件（发行搭载、未安装的）；bridge 缺失（纯 Web）时空 */
   const optionalPlugins = ref<OptionalPluginItem[]>([])
   const optionalLoading = ref(false)
@@ -1087,7 +1104,7 @@ export const useMarketStore = defineStore('market', () => {
     skillPendingConfirm.value = null
   }
 
-  // ---------- 市场账号（§2.4/2.5：账号状态 + 绑定 + 档案；daemon RPC 归一通道） ----------
+  // ---------- MindX 账号（§2.4/2.5：账号状态 + 绑定 + 档案；daemon RPC 归一通道） ----------
   const account = ref<MarketAccountState | null>(null)
   const accountLoading = ref(false)
   const accountBusy = ref(false)
@@ -1110,7 +1127,7 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  /** 绑定设备到市场账号（device flow）：daemon 打开官网确认页（应用内窗口）并
+  /** 绑定设备到MindX 账号（device flow）：daemon 打开官网确认页（应用内窗口）并
    * 后台轮询；本侧定时查询编排状态，done 即刷新账号（匿名评分已迁移到名下）。
    * 用户只在确认页点一次「授权此设备」，全程无令牌粘贴。 */
   const deviceLoginPhase = ref<'idle' | 'pending' | 'done' | 'error'>('idle')
@@ -1125,7 +1142,7 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   async function startDeviceLogin(): Promise<void> {
-    if (!daemon) throw new Error('登录市场账号需要连接智能主机')
+    if (!daemon) throw new Error('登录MindX 账号需要连接智能主机')
     stopDeviceLoginPolling()
     deviceLoginPhase.value = 'pending'
     deviceLoginError.value = ''
@@ -1163,16 +1180,55 @@ export const useMarketStore = defineStore('market', () => {
     stopDeviceLoginPolling()
   }
 
-  /** 更新显示名（服务端 ≤32 字校验；成功后本地档案即时同步，货架/评分弹窗联动） */
-  async function updateProfile(nickName: string): Promise<void> {
-    if (!daemon) throw new Error('更新市场档案需要连接智能主机')
-    accountBusy.value = true
-    accountError.value = ''
+  // ---------- 账号机制（2026-10-10 定案：用户名密码单一路径；错误走 pushNotice 由组件层处理） ----------
+
+  /** 设备列表（登录用户名下真实设备；Sheet 打开/登录后拉取） */
+  const devices = ref<MarketDeviceItem[]>([])
+  const devicesLoading = ref(false)
+
+  /** 注册（成功即登录并绑定设备，匿名评分自动迁移） */
+  async function registerAccount(username: string, password: string, displayName: string): Promise<void> {
+    if (!daemon) throw new Error('注册MindX 账号需要连接智能主机')
+    await daemon.call('market.account.register', { username, password, display_name: displayName })
+    await fetchAccount()
+  }
+
+  /** 登录（成功即绑定设备；凭据入 daemon 密钥存储供重装恢复） */
+  async function loginAccount(username: string, password: string): Promise<void> {
+    if (!daemon) throw new Error('登录MindX 账号需要连接智能主机')
+    await daemon.call('market.account.login', { username, password })
+    await fetchAccount()
+  }
+
+  /** 退出登录（服务端吊销令牌 + 本地清除凭据；设备归属保留） */
+  async function logoutAccount(): Promise<void> {
+    if (!daemon) throw new Error('退出登录需要连接智能主机')
+    await daemon.call('market.account.logout', {})
+    devices.value = []
+    await fetchAccount()
+  }
+
+  /** Profile 四字段编辑（整表单提交，服务端白名单校验） */
+  async function saveProfile(fields: { nick_name?: string; job_title?: string; phone?: string; github?: string }): Promise<void> {
+    if (!daemon) throw new Error('保存个人信息需要连接智能主机')
+    await daemon.call('market.account.profile.set', fields)
+    await fetchAccount()
+  }
+
+  async function fetchDevices(): Promise<void> {
+    if (!daemon || !account.value?.user) {
+      devices.value = []
+      return
+    }
+    devicesLoading.value = true
     try {
-      await daemon.call('market.updateProfile', { nick_name: nickName })
-      await fetchAccount()
+      const out = await daemon.call<{ devices: MarketDeviceItem[] }>('market.account.devices', {})
+      devices.value = out.devices ?? []
+    } catch {
+      // 设备列表拉取失败不阻塞账号页（分组显示空态）
+      devices.value = []
     } finally {
-      accountBusy.value = false
+      devicesLoading.value = false
     }
   }
 
@@ -1189,20 +1245,17 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  // ---------- 评分（§2.2/2.3：包级 1-5 星；开关 market.shareRatings 为 UI 层门槛） ----------
-  /** 评分弹窗目标包（null = 关闭；评分挂包级 kind+name，不区分版本） */
-  const ratingTarget = ref<MarketPkg | null>(null)
+  // ---------- 评分（§2.2/2.3：包级 1-5 星；唯一开关 = 评分数据分享授权 metric.consent） ----------
+  // 设计定案（2026-10-11）：评分行为不受限——用户想打就打；开关只管「评分数据是否上传分享」。
+  // 旧 market.shareRatings（挡入口的 UI 门槛）废除，daemon metric.consent 为唯一事实源。
+  // 评分入口为货架卡片行内五星（RatingEntry 直接点星提交），弹窗形态已退役。
 
-  function requestRatingDialog(pkg: MarketPkg): void {
-    ratingTarget.value = pkg
-  }
-
-  function cancelRatingDialog(): void {
-    ratingTarget.value = null
-  }
-
-  /** 提交评分并同步本地聚合列（服务端返回重算后的 avg/count，对应货架条目即时刷新） */
+  /** 提交评分并同步本地聚合列（服务端返回重算后的 avg/count，对应货架条目即时刷新）。
+   * 未授权评分分享时拒绝出网：评分行为本身不设限，但数据不上传（Error 文案引导授权） */
   async function rate(kind: MarketPkg['kind'], name: string, score: number): Promise<{ rating_avg?: number; rating_count?: number }> {
+    if (!consentGranted.value) {
+      throw new Error('未开启「分享我的评分」，评分数据不会上传；可在 设置 → 账户 → 数据与隐私 开启')
+    }
     if (!daemon) throw new Error('评分需要连接智能主机')
     const res = await daemon.call<{ rating_avg?: number; rating_count?: number }>('market.rate', { kind, name, score })
     const lists = [agentPackages, skillPackages, teamPackages, pluginPackages]
@@ -1226,25 +1279,37 @@ export const useMarketStore = defineStore('market', () => {
   /** 当前生效市场源的服务根地址（官网侧落地页 base；来自源清单选中项，仅引导跳转用不外显） */
   const marketSite = computed(() => sources.value.find((s) => s.selected)?.base_url || '')
 
-  /** 评分分享开关（market.shareRatings，缺省关；§2.2 UI 层门槛）。
-   * 状态归 store 共享：开关行写、货架评分入口读，同源无漂移 */
-  const preferences = (() => {
-    try {
-      return useService<PreferencesController>('shell.preferences')
-    } catch {
-      return null
-    }
-  })()
-  const shareRatings = ref(preferences?.get<boolean>('market.shareRatings', false) ?? false)
-  if (preferences) {
-    void preferences.ready.then(() => {
-      shareRatings.value = preferences.get<boolean>('market.shareRatings', shareRatings.value)
-    })
-  }
+  /** 评分数据分享授权（daemon metric.consent，kv.db 默认拒绝；唯一开关）。
+   * 状态归 store 共享：账户页开关行写、rate 出网闸读，同源无漂移 */
+  const consentGranted = ref(false)
+  const consentBusy = ref(false)
 
-  function setShareRatings(v: boolean): void {
-    shareRatings.value = v
-    preferences?.set('market.shareRatings', v)
+  /** 拉取授权状态（store 创建即刷；失败保持默认未授权——无法确认授权即按未授权呈现） */
+  async function refreshConsent(): Promise<void> {
+    if (!daemon) return
+    try {
+      const res = await daemon.call<{ granted?: boolean } | null>('metric.consent.get')
+      consentGranted.value = !!res?.granted
+    } catch {
+      /* 保持未授权态 */
+    }
+  }
+  void refreshConsent()
+
+  /** 切换授权（乐观更新，失败回滚并返回错误信息供调用方展示） */
+  async function setConsent(value: boolean): Promise<void> {
+    if (!daemon || consentBusy.value) return
+    consentBusy.value = true
+    const prev = consentGranted.value
+    consentGranted.value = value
+    try {
+      await daemon.call('metric.consent.set', { granted: value })
+    } catch (err: unknown) {
+      consentGranted.value = prev
+      throw err instanceof Error ? err : new Error('授权状态保存失败')
+    } finally {
+      consentBusy.value = false
+    }
   }
 
   // ---------- 发布与衍生谱系（§3/§4：打包预填、发布、投递、包主收件箱） ----------
@@ -1346,6 +1411,7 @@ export const useMarketStore = defineStore('market', () => {
 
   return {
     installed,
+    browserSheetUrl,
     optionalPlugins,
     optionalLoading,
     loadOptionalPlugins,
@@ -1452,7 +1518,7 @@ export const useMarketStore = defineStore('market', () => {
     requestSkillConfirm,
     runSkillConfirm,
     cancelSkillConfirm,
-    // 市场账号（§2.4/2.5：状态/绑定/档案；账户页与账号 Sheet 共用）
+    // MindX 账号（§2.4/2.5：状态/绑定/档案；账户页与账号 Sheet 共用）
     account,
     accountLoading,
     accountBusy,
@@ -1462,18 +1528,22 @@ export const useMarketStore = defineStore('market', () => {
     deviceLoginError,
     startDeviceLogin,
     disposeDeviceLogin,
-    updateProfile,
     uploadAvatar,
-    // 评分（§2.2/2.3：包级 1-5 星；开关门槛在组件层）
-    ratingTarget,
-    requestRatingDialog,
-    cancelRatingDialog,
+    // 账号机制（用户名密码单一路径；设备列表真数据）
+    devices,
+    devicesLoading,
+    registerAccount,
+    loginAccount,
+    logoutAccount,
+    saveProfile,
+    fetchDevices,
+    // 评分（§2.2/2.3：包级 1-5 星，货架行内直接点星提交；开关门槛在组件层）
     rate,
     getMyRating,
     marketSite,
-    // 评分分享开关（通用页行写、货架入口读）
-    shareRatings,
-    setShareRatings,
+    // 评分数据分享授权（账户页开关行写、rate 出网闸读）
+    consentGranted,
+    setConsent,
     // 发布与衍生谱系（§3/§4：打包预填/发布/投递/收件箱）
     publishTarget,
     requestPublishDialog,

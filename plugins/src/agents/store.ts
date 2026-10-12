@@ -218,18 +218,6 @@ export const useAgentsStore = defineStore('agents-store', () => {
     })
   })
 
-  // ---------- 团队编辑器（TeamsRecruitRow / AgentsManagerRow 共用对话框的数据源） ----------
-  /** null = 关闭；mode=create 新建，mode=edit 以 name 预填（profile 经 team.get 回填） */
-  const teamEditor = ref<{ mode: 'create' | 'edit'; name?: string } | null>(null)
-
-  function openTeamEditor(mode: 'create' | 'edit', name?: string): void {
-    teamEditor.value = { mode, name }
-  }
-
-  function closeTeamEditor(): void {
-    teamEditor.value = null
-  }
-
   // ---------- 详情 / 保存 ----------
   /** 拉取员工详情（IDENTITY 正文 = introduction，SOUL 正文 = soul，allows_tools 云技能清单） */
   async function loadAgentDetail(name: string): Promise<AgentDetailResp> {
@@ -271,7 +259,7 @@ export const useAgentsStore = defineStore('agents-store', () => {
     license.value = { title, content }
   }
 
-  // ---------- 确认范式（modal 组件消费；TeamEditorModal 删除确认等共用） ----------
+  // ---------- 确认范式（modal 组件消费；团队删除/成员移除确认共用） ----------
   const pendingConfirm = ref<{ title: string; message: string; confirmText: string; successText: string } | null>(null)
   let confirmAction: (() => Promise<unknown>) | null = null
 
@@ -333,9 +321,6 @@ export const useAgentsStore = defineStore('agents-store', () => {
     // 决策计量：整体评价
     rateSubject,
     ratedToday,
-    teamEditor,
-    openTeamEditor,
-    closeTeamEditor,
     // 详情/保存
     loadAgentDetail,
     updateAgent,

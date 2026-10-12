@@ -7,7 +7,7 @@ const shell = useShell()
 
 /** 固定操作行定义；动作可选——demo 中无目标页的行仅作展示占位 */
 const actions = [
-  { id: 'market', label: '插件市场', icon: 'lucide:store' },
+  { id: 'market', label: '进化网络', icon: 'lucide:store' },
   { id: 'phone', label: '手机连接', icon: 'lucide:smartphone' },
   { id: 'settings', label: '设置', icon: 'lucide:settings' },
 ]

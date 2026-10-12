@@ -14,7 +14,6 @@ import { marketPlugin } from '@mindx-work/plugins'
 import { createMarketRuntime, loadMarketPlugins } from './loader'
 import { connectionPlugin } from '@mindx-work/plugins/connection'
 import { oauthPlugin } from '@mindx-work/plugins/oauth'
-import { metricPlugin } from '@mindx-work/plugins/metric'
 import { modelsPlugin } from '@mindx-work/plugins/models'
 import { connectorsPlugin } from '@mindx-work/plugins/connectors'
 import { skillsPlugin } from '@mindx-work/plugins/skills'
@@ -39,9 +38,9 @@ import { diffviewPlugin } from '@mindx-work/plugins/diffview'
 // demo 插件已下线（源码保留作范式参考）；gitgraph / video-editor / svgboard 已转为官方可选件
 // （源码 .agents/plugins/，发行搭载、用户选择式释放安装——见 docs/插件生命周期规范.md §11）
 // 设置导航顺序由各 Settings.page 的显式 order 决定（通用=壳自带恒居首）：
-// 插件 → 模型 → 团队 → 技能 → 连接器 → 市场 → 远程连接 → OAuth 提供商 → 数据与隐私
-// skills / oauth / metric 消费 daemon.connection 服务，必须排在 connection 之后（use 非惰性，缺失即抛）
-const shell = createApp([marketPlugin, modelsPlugin, agentsPlugin, connectorsPlugin, connectionPlugin, skillsPlugin, oauthPlugin, metricPlugin, phonePairPlugin, shellChromePlugin, chatflowPlugin, explorerPlugin, markdownPlugin, codeEditorPlugin, imageViewerPlugin, docPreviewPlugin, webViewerPlugin, videoViewerPlugin, dashboardPlugin, terminalPlugin, calendarPlugin, usagePlugin, diffviewPlugin])
+// 插件 → 模型 → 团队 → 技能 → 连接器 → 市场（OAuth 提供商设置页已摘除：内部配置不暴露）
+// skills / oauth 消费 daemon.connection 服务，必须排在 connection 之后（use 非惰性，缺失即抛）
+const shell = createApp([marketPlugin, modelsPlugin, agentsPlugin, connectorsPlugin, connectionPlugin, skillsPlugin, oauthPlugin, phonePairPlugin, shellChromePlugin, chatflowPlugin, explorerPlugin, markdownPlugin, codeEditorPlugin, imageViewerPlugin, docPreviewPlugin, webViewerPlugin, videoViewerPlugin, dashboardPlugin, terminalPlugin, calendarPlugin, usagePlugin, diffviewPlugin])
 
 // 运行期桥：官方可选件（.agents/plugins 构建）激活前必须挂好——动态加载模块经桥
 // 共享壳的 Vue/Pinia 与绑定壳实例的 reactivity API（避免双实例响应式断裂）

@@ -192,7 +192,7 @@ function fmtDate(ts?: number): string {
         </div>
       </div>
       <p v-if="store.installed.length === 0" :class="$style.hint">
-        尚未安装在线插件；可在「市场」页的插件货架安装，或从「可选」页安装官方可选件。
+        尚未安装在线插件；可在「进化网络」页的插件货架安装，或从「可选」页安装官方可选件。
       </p>
     </section>
 

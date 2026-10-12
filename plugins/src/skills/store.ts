@@ -59,6 +59,25 @@ export const useSkillsStore = defineStore('skills-store', () => {
   const loading = ref(false)
   const loaded = ref(false)
 
+  // ---------- 市场评分映射（技能管理卡展示用；增强信息，市场不可达时留空不阻断） ----------
+  /** 技能名 → 市场货架评分聚合（market.list kind=skill 全量一页） */
+  const marketRatings = ref<Record<string, { avg?: number; count?: number }>>({})
+  const marketRatingsLoaded = ref(false)
+
+  async function loadMarketRatings(): Promise<void> {
+    if (marketRatingsLoaded.value) return
+    const res = await daemon.call<{ packages?: Array<{ name?: string; rating_avg?: number; rating_count?: number }> } | null>(
+      'market.list',
+      { kind: 'skill', page_size: 500 },
+    )
+    const map: Record<string, { avg?: number; count?: number }> = {}
+    for (const p of res?.packages || []) {
+      if (p && typeof p.name === 'string') map[p.name] = { avg: p.rating_avg, count: p.rating_count }
+    }
+    marketRatings.value = map
+    marketRatingsLoaded.value = true
+  }
+
   async function refresh(): Promise<void> {
     skills.value = await daemon.call<SkillInfo[]>('skill.list', {})
     loaded.value = true
@@ -362,6 +381,9 @@ export const useSkillsStore = defineStore('skills-store', () => {
     loaded,
     loadSkills,
     reloadLocal,
+    // 市场评分映射
+    marketRatings,
+    loadMarketRatings,
     // 删除
     requestRemove,
     // 导出
