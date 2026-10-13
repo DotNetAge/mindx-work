@@ -12,11 +12,11 @@ import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import { useSkillsStore, skillDisplayName, skillLocaleDesc, isThirdParty, SkillExistsError } from '../store'
 import MetricRateButtons from './MetricRateButtons.vue'
 import { pushNotice } from '../notice'
-import { MODAL_SKILLS_CONFIRM, MODAL_SKILL_EDIT, MODAL_SKILL_LICENSE } from '../ids'
+import { MODAL_SKILLS_CONFIRM, MODAL_SKILL_LICENSE } from '../ids'
 import { renderMarkdown } from '../markdown'
 import type { SkillInfo } from '../types'
 import ConfirmModal from '../overlays/ConfirmModal.vue'
-import EditSkillModal from '../overlays/EditSkillModal.vue'
+import { openMarkdownSheet } from '../../markdown/sheetEditor'
 import LicenseModal from '../overlays/LicenseModal.vue'
 
 const store = useSkillsStore()
@@ -72,13 +72,20 @@ function onExport(skill: SkillInfo) {
     })
 }
 
-/** 打开 SKILL.md 编辑 modal */
-function onEdit(skill: SkillInfo) {
-  if (!store.openEdit(skill)) {
-    pushNotice(shell, 'error', '该技能无文件系统路径，无法编辑')
-    return
+/** 修改 SKILL.md：markdown 插件的 Sheet 编辑器（工具栏 + CodeMirror），保存失败 Sheet 保持打开 */
+async function onEdit(skill: SkillInfo) {
+  try {
+    const content = await store.loadSkillMd(skill)
+    openMarkdownSheet(shell, {
+      id: 'skills-edit',
+      title: `修改 ${skillDisplayName(skill)}`,
+      value: content,
+      placeholder: '输入 Markdown 内容',
+      onSave: (v) => store.saveSkillMd(skill, v),
+    })
+  } catch (err: unknown) {
+    pushNotice(shell, 'error', err instanceof Error ? err.message : '读取 SKILL.md 失败')
   }
-  openModal(MODAL_SKILL_EDIT, EditSkillModal)
 }
 
 function onDelete(skill: SkillInfo) {
@@ -347,7 +354,7 @@ onUnmounted(() => {
   disposeZoomOverlay()
 })
 
-/** 弹层内修改（本地技能）：先硬关弹层再进编辑 modal（壳 modal z 序低于 Teleport 层） */
+/** 弹层内修改（本地技能）：先收详情弹层，再拉起 markdown Sheet 编辑器（同为壳层，无 z 序冲突） */
 function editFromZoom(target: ZoomTarget) {
   const skill = target.skill
   disposeZoomOverlay()

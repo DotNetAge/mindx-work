@@ -162,18 +162,13 @@ export const AGENT_TOOLS: ToolDef[] = [
   { name: 'TaskGet', desc: 'Get detailed information about a specific task' },
   { name: 'TaskUpdate', desc: 'Advance a task through its lifecycle or update its metadata' },
   { name: 'SubAgent', desc: 'Spawn a sub-agent for a task and collect results later' },
-  { name: 'TeamCreate', desc: 'Create a team of agents that work together on a task' },
-  { name: 'TeamDelete', desc: 'Delete a team and clean up its associated data' },
-  { name: 'TeamList', desc: 'List all teams with their members and status' },
-  { name: 'TeamGetTasks', desc: 'Get all tasks assigned to a team' },
   { name: 'Cron', desc: 'Schedule tasks to run at specified times using cron expressions' },
   { name: 'SendMessage', desc: 'Send notifications or messages to users' },
 ]
 
-/** 工具组（任务分解 / 团队合作 / 工作分发） */
+/** 工具组（任务分解 / 工作分发） */
 export const AGENT_TOOL_GROUPS: ToolGroupDef[] = [
   { key: 'task', members: ['TaskCreate', 'TaskList', 'TaskGet', 'TaskUpdate'] },
-  { key: 'team', members: ['TeamCreate', 'TeamDelete', 'TeamList', 'TeamGetTasks'] },
   { key: 'subagent', members: ['SubAgent', 'CollectResults'] },
 ]
 
@@ -204,10 +199,6 @@ export const TOOL_LABELS: Record<string, string> = {
   TaskGet: '获取任务',
   TaskUpdate: '更新任务',
   SubAgent: '工作分发',
-  TeamCreate: '创建团队',
-  TeamDelete: '删除团队',
-  TeamList: '团队列表',
-  TeamGetTasks: '团队任务',
   AgentTalk: 'Agent 对话',
   Cron: '计划任务',
   SendMessage: '发送通知',
@@ -230,10 +221,6 @@ export const TOOL_DESCS: Record<string, string> = {
   TaskGet: '获取特定任务的详细信息',
   TaskUpdate: '推进任务生命周期或更新其元数据',
   SubAgent: '将工作分发给其他员工或者创建一个分身共同完成，复杂的工作会完成得更好',
-  TeamCreate: '创建一组 Agent 协作处理任务',
-  TeamDelete: '删除团队并清理相关数据',
-  TeamList: '列出所有团队及其成员和状态',
-  TeamGetTasks: '获取分配给团队的所有任务',
   Cron: '按指定的 cron 表达式定时执行任务',
   SendMessage: '向用户发送通知或消息',
 }
@@ -241,12 +228,10 @@ export const TOOL_DESCS: Record<string, string> = {
 /** 工具组展示名与描述（内置中文文案，源自 mindx-desktop i18n） */
 export const GROUP_LABELS: Record<string, string> = {
   task: '任务分解',
-  team: '团队合作',
   subagent: '工作分发',
 }
 
 export const GROUP_DESCS: Record<string, string> = {
   task: '可将复杂任务分解为多个具体工作项逐项完成',
-  team: '临时建立专家团协作完成的复杂任务',
   subagent: '将子任务分发给其他数字员工处理',
 }

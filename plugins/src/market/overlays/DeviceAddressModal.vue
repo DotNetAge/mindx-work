@@ -11,11 +11,16 @@ import { useService, useShell } from '@mindx-work/ui-shell-vue'
 import { pushNotice } from '../notice'
 import { MODAL_DEVICE_ADDRESS } from '../ids'
 
-/** 地址规范化：去空白与尾斜杠；缺少协议前缀时补 ws://（原 phoneChannel 同款，单处使用故内联） */
+/** 地址规范化：用户只输「地址:端口」，格式由这里拼——
+ * 去空白与尾斜杠；缺协议补 ws://；缺路径补 daemon 端点 /ws
+ * （与附近设备自动扫描直连同款拼接，AccountSheet deviceUrl；
+ * 已带路径的完整地址沿用用户写的路径） */
 function normalizeWsUrl(raw: string): string {
   let url = (raw || '').trim().replace(/\/+$/, '')
   if (!url) return ''
   if (!/^wss?:\/\//i.test(url)) url = 'ws://' + url
+  const rest = url.replace(/^wss?:\/\//i, '')
+  if (!rest.includes('/')) url += '/ws'
   return url
 }
 
@@ -56,12 +61,12 @@ async function confirm(): Promise<void> {
 <template>
   <div :class="$style.body">
     <span :class="$style.title">添加连接</span>
-    <p :class="$style.desc">请输入另一台设备的地址（ws:// 或 wss://），保存后将立即尝试连接。</p>
+    <p :class="$style.desc">输入另一台设备的地址即可（例如 192.168.1.100:1314），保存后将立即尝试连接。</p>
     <input
       v-model="urlInput"
       :class="$style.input"
       type="text"
-      placeholder="ws://192.168.1.100:1314/ws"
+      placeholder="192.168.1.100:1314"
       spellcheck="false"
       @keydown.enter.prevent="confirm()"
     />

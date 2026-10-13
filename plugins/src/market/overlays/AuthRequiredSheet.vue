@@ -39,7 +39,7 @@ async function openLegal(page: 'tos' | 'privacy'): Promise<void> {
   }
   const base = store.marketSite
   if (!base) {
-    pushNotice(shell, 'error', '暂时连不上进化网络，无法打开文档')
+    pushNotice(shell, 'error', '暂时连不上社区，无法打开文档')
     return
   }
   const url = `${base.replace(/\/$/, '')}/${page}`
@@ -113,7 +113,7 @@ onMounted(() => {
       </div>
 
       <p :class="$style.introNote">
-        注册并不是强制的——即使不注册，也不会影响你的使用。只是，如果你想保存点赞的记录、让你下载的员工、团队、技能、插件能随同更新，或者希望将你的成果分享到进化网络，那就需要注册成为 MindX 的一员。
+        注册并不是强制的——即使不注册，也不会影响你的使用。只是，如果你想保存点赞的记录、让你下载的员工、团队、技能、插件能随同更新，或者希望将你的成果分享到社区，那就需要注册成为 MindX 的一员。
       </p>
 
       <!-- 登录视图 -->

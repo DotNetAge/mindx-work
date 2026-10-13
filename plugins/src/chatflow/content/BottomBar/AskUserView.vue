@@ -21,22 +21,6 @@ function renderMd(text: string): string {
   return md.render(text)
 }
 
-/** 去除 Markdown 标记，保留纯文本用于预览 */
-function stripMd(text: string): string {
-  if (!text) return ''
-  return text
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/~~(.+?)~~/g, '$1')
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/\*(.+?)\*/g, '$1')
-    .replace(/`(.+?)`/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/>\s+/g, '')
-    .replace(/[-*+]\s+/g, '')
-    .replace(/\n{2,}/g, ' ')
-}
-
 const props = defineProps({
   formData: {
     type: Object as () => Record<string, any>,
@@ -52,8 +36,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits<{ (e: 'submitted'): void }>()
-
-const isExpanded = ref(true)
 
 // 已提交状态：提交后立即禁用组件内全部输入控件并锁存，
 // 给用户明确的「已发送」反馈，避免误以为点击无响应
@@ -229,41 +211,11 @@ const SKIP_ANSWER_TEXT = '（用户跳过了这组提问。请基于已有信息
 function skipQuestions() {
   submitAnswer(SKIP_ANSWER_TEXT)
 }
-
-function toggleExpand() {
-  isExpanded.value = !isExpanded.value
-}
 </script>
 
 <template>
   <div class="ask-user-view" :class="{ submitted }" v-if="hasQuestions">
-    <button type="button" class="au-header" @click="toggleExpand">
-      <div class="au-header-left">
-        <div class="au-icon">
-          <MxIcon name="lucide:message-square" :size="16" />
-        </div>
-        <div class="au-title-section">
-          <h4 class="au-title">需要澄清</h4>
-          <p class="au-subtitle">
-            {{ questions.length > 1
-              ? `${questions.length} 个问题待回答`
-              : stripMd(questions[0]?.question || '').slice(0, 60)
-            }}{{ (questions[0]?.question?.length ?? 0) > 60 ? '...' : '' }}
-          </p>
-        </div>
-      </div>
-      <div class="au-header-right">
-        <MxIcon
-          name="lucide:chevron-down"
-          :size="14"
-          class="au-chevron"
-          :class="{ rotated: isExpanded }"
-        />
-      </div>
-    </button>
-
-    <transition name="expand-au">
-      <div class="au-body" v-show="isExpanded">
+    <div class="au-body">
         <div
           v-for="(q, idx) in questions"
           :key="q.index"
@@ -370,8 +322,7 @@ function toggleExpand() {
             {{ submitted ? '已提交' : '提交回复' }}
           </el-button>
         </div>
-      </div>
-    </transition>
+    </div>
   </div>
 </template>
 
@@ -397,89 +348,8 @@ function toggleExpand() {
   opacity: 0.55;
 }
 
-.au-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: var(--mx-space-3) var(--mx-space-4);
-  cursor: pointer;
-  user-select: none;
-  gap: var(--mx-space-3);
-  background: transparent;
-  border: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-}
-.au-header:hover {
-  background: color-mix(in srgb, var(--mx-accent) 4%, transparent);
-}
-.au-header:active {
-  background: color-mix(in srgb, var(--mx-accent) 8%, transparent);
-}
-.au-header:focus-visible {
-  outline: 2px solid var(--mx-accent);
-  outline-offset: -2px;
-}
-
-.au-header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--mx-space-3);
-  flex: 1;
-  min-width: 0;
-}
-
-.au-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, var(--mx-accent), color-mix(in srgb, var(--mx-accent) 55%, black));
-  color: var(--mx-text-on-accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.au-title-section {
-  min-width: 0;
-}
-
-.au-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--mx-text);
-  letter-spacing: -0.2px;
-  margin: 0 0 2px;
-}
-
-.au-subtitle {
-  font-size: 12px;
-  color: var(--mx-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin: 0;
-}
-
-.au-header-right {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.au-chevron {
-  color: var(--mx-text-tertiary);
-  transition: transform 0.2s ease;
-}
-.au-chevron.rotated {
-  transform: rotate(180deg);
-}
-
 .au-body {
-  padding: 0 var(--mx-space-4) var(--mx-space-4);
+  padding: var(--mx-space-4);
   display: flex;
   flex-direction: column;
   gap: var(--mx-space-3);
@@ -579,6 +449,15 @@ function toggleExpand() {
   transition: all 0.2s ease;
   margin: 0;
 }
+
+/* el-radio 不带文本时 EP 仍渲染空 label（含内边距）——隐藏空占位，
+   圆点与文本的间距完全交给 .au-option 的 gap */
+.au-option :deep(.el-radio__label) {
+  display: none;
+}
+.au-option :deep(.el-radio) {
+  margin-right: 0;
+}
 .au-option:hover {
   border-color: var(--mx-accent);
   background: color-mix(in srgb, var(--mx-accent) 6%, transparent);
@@ -625,16 +504,4 @@ function toggleExpand() {
   color: var(--mx-text-secondary);
 }
 
-.expand-au-enter-active,
-.expand-au-leave-active {
-  transition: all 0.25s ease;
-  overflow: hidden;
-}
-.expand-au-enter-from,
-.expand-au-leave-to {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-}
 </style>

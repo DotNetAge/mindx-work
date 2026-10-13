@@ -22,10 +22,10 @@ const marketPlugin: VuePlugin = (app) => {
   })
   app.Settings.row({ id: 'account-pane', page: 'account', component: AccountPaneRow })
 
-  // 市场聚合页：显式 order 排在连接器之后（设置导航定稿顺序：插件→模型→团队→技能→连接器→市场）
+  // 市场聚合页：显式 order 排在连接器之后（设置导航定稿顺序：插件→模型→团队→技能→连接器→资源社区）
   app.Settings.page({
     id: 'market',
-    title: '进化网络',
+    title: '资源社区',
     icon: 'lucide:store',
     order: 106,
     // 契约要求 component 必填；设置页的行由壳渲染，页组件 v1 不消费

@@ -21,6 +21,7 @@ import {
 } from '../store'
 import { pushNotice } from '../notice'
 import { MODAL_AGENTS_LICENSE } from '../ids'
+import { openMarkdownSheet } from '../../markdown/sheetEditor'
 import MetricRateButtons from './MetricRateButtons.vue'
 import LicenseModal from '../overlays/LicenseModal.vue'
 import type { AgentMeta, SkillInfo, TeamMeta, TeamUpdateParams } from '../types'
@@ -158,7 +159,6 @@ const teamForm = ref({
   nick_name: '',
   description: '',
   category: '',
-  profile: '',
   leader: '',
   members: [] as string[],
 })
@@ -170,7 +170,6 @@ function startTeamEditing(): void {
     nick_name: t.nick_name || '',
     description: t.description || '',
     category: t.category || '',
-    profile: t.profile || '',
     leader: t.leader || '',
     members: [...(t.members || [])]
   }
@@ -190,7 +189,6 @@ function saveTeamEdits(): void {
     nick_name: t.nick_name || '',
     description: t.description || '',
     category: t.category || '',
-    profile: t.profile || '',
     leader: t.leader || '',
     members: t.members || []
   }
@@ -199,7 +197,7 @@ function saveTeamEdits(): void {
     nick_name: teamForm.value.nick_name.trim(),
     category: teamForm.value.category.trim()
   }
-  for (const key of ['nick_name', 'description', 'category', 'profile', 'leader'] as const) {
+  for (const key of ['nick_name', 'description', 'category', 'leader'] as const) {
     if (next[key] !== cur[key]) patch[key] = next[key]
   }
   if (JSON.stringify(next.members) !== JSON.stringify(cur.members)) patch.members = next.members
@@ -329,8 +327,6 @@ function initEditor(name: string): void {
 const activeChip = ref<'identity' | 'soul'>('identity')
 const identityBody = ref('')
 const soulBody = ref('')
-const identityDirty = ref(false)
-const soulDirty = ref(false)
 const detailLoading = ref(false)
 /** 请求序号：快速切换员工时丢弃过期响应 */
 let detailReqSeq = 0
@@ -339,8 +335,6 @@ async function loadAgentBodies(name: string): Promise<void> {
   const seq = ++detailReqSeq
   identityBody.value = ''
   soulBody.value = ''
-  identityDirty.value = false
-  soulDirty.value = false
   if (!name) {
     allowedBaseline.value = new Set()
     localAllowedServers.value = new Set()
@@ -378,7 +372,7 @@ watch(selectedName, (name) => {
   void nextTick(() => syncIndicator(configTabsRef.value))
 })
 
-// ── 指令保存（身份写 identity_body，行为准则写 soul；独立于全局编辑态） ──
+// ── 指令保存（身份写 identity_body，行为准则写 soul；由 Sheet 编辑器回调触发） ──
 async function saveBody(section: 'identity' | 'soul'): Promise<void> {
   const name = selectedName.value
   if (!name) return
@@ -386,12 +380,40 @@ async function saveBody(section: 'identity' | 'soul'): Promise<void> {
   const value = section === 'identity' ? identityBody.value : soulBody.value
   try {
     await store.updateAgent({ name, [field]: value })
-    if (section === 'identity') identityDirty.value = false
-    else soulDirty.value = false
     pushNotice(shell, 'success', 'Agent 保存成功')
   } catch (err: unknown) {
     pushNotice(shell, 'error', err instanceof Error ? err.message : 'Agent 保存失败')
+    throw err // Sheet 编辑器契约：保存失败保持 Sheet 打开
   }
+}
+
+/** 指令正文 Markdown 渲染（marked + DOMPurify，空正文返回空串走「暂无内容」分支） */
+function renderMd(raw: string): string {
+  if (!raw) return ''
+  const html = marked.parse(raw, { gfm: true, async: false }) as string
+  return DOMPurify.sanitize(html)
+}
+
+const identityHtml = computed(() => renderMd(identityBody.value))
+const soulHtml = computed(() => renderMd(soulBody.value))
+
+/** 拉起 Sheet 内 Markdown 编辑器：当前哪个页（档案/准则）就编辑哪个页的正文 */
+function openInstructionEditor(): void {
+  const name = selectedName.value
+  if (!name) return
+  const section = activeChip.value
+  const isIdentity = section === 'identity'
+  openMarkdownSheet(shell, {
+    id: 'agents-instruction-editor',
+    title: isIdentity ? '编辑员工档案' : '编辑行为准则',
+    value: isIdentity ? identityBody.value : soulBody.value,
+    placeholder: '输入 Markdown 内容',
+    onSave: async (v) => {
+      if (isIdentity) identityBody.value = v
+      else soulBody.value = v
+      await saveBody(section)
+    },
+  })
 }
 
 // ── 编辑态切换与保存（技能 / 云技能 / 工具共用一次 agent.update） ──
@@ -618,6 +640,110 @@ async function saveNick(): Promise<void> {
   }
 }
 
+// ── 团队名双态：点击 inline 编辑（team.update nick_name，空串清空，展示回退原名） ──
+const editingTeamNick = ref(false)
+const teamNickDraft = ref('')
+const teamNickInputEl = ref<HTMLInputElement | null>(null)
+
+function startTeamNickEdit(): void {
+  const t = selectedTeam.value
+  if (!t || store.teamOperating === t.name) return
+  teamNickDraft.value = t.nick_name || ''
+  editingTeamNick.value = true
+  nextTick(() => teamNickInputEl.value?.focus())
+}
+
+function cancelTeamNick(): void {
+  editingTeamNick.value = false
+}
+
+async function saveTeamNick(): Promise<void> {
+  if (!editingTeamNick.value || !selectedTeam.value) return
+  const t = selectedTeam.value
+  const next = teamNickDraft.value.trim()
+  if (next === (t.nick_name || '')) {
+    editingTeamNick.value = false // 未变化直接退出编辑
+    return
+  }
+  editingTeamNick.value = false
+  try {
+    await store.updateTeam({ name: t.name, nick_name: next })
+    pushNotice(shell, 'success', next ? `团队名已更新为「${next}」` : '团队名已清除')
+  } catch (err: unknown) {
+    pushNotice(shell, 'error', err instanceof Error ? err.message : '团队名更新失败')
+  }
+}
+
+// ── 描述双态（成员/团队同构）：点击 inline 编辑，回车或失焦保存，Esc 取消 ──
+const editingDesc = ref(false)
+const descDraft = ref('')
+const descInputEl = ref<HTMLInputElement | null>(null)
+
+function startDescEdit(): void {
+  const cur = selectedKind.value === 'team' ? selectedTeam.value?.description : selectedAgent.value?.description
+  descDraft.value = cur || ''
+  editingDesc.value = true
+  nextTick(() => descInputEl.value?.focus())
+}
+
+function cancelDescEdit(): void {
+  editingDesc.value = false
+}
+
+async function saveDesc(): Promise<void> {
+  if (!editingDesc.value) return
+  const team = selectedKind.value === 'team' ? selectedTeam.value : null
+  const agent = team ? null : selectedAgent.value
+  const target = team ?? agent
+  if (!target) {
+    editingDesc.value = false
+    return
+  }
+  const next = descDraft.value.trim()
+  const origin = team ? team.description || '' : agent?.description || ''
+  if (next === origin) {
+    editingDesc.value = false // 未变化直接退出编辑
+    return
+  }
+  editingDesc.value = false
+  if (team) {
+    try {
+      await store.updateTeam({ name: team.name, description: next })
+      pushNotice(shell, 'success', '描述已更新')
+    } catch (err: unknown) {
+      pushNotice(shell, 'error', err instanceof Error ? err.message : '描述更新失败')
+    }
+    return
+  }
+  if (!agent) return
+  store.operating = agent.name
+  try {
+    await store.updateAgent({ name: agent.name, description: next })
+    await store.refreshAgents()
+    pushNotice(shell, 'success', '描述已更新')
+  } catch (err: unknown) {
+    pushNotice(shell, 'error', err instanceof Error ? err.message : '描述更新失败')
+  } finally {
+    store.operating = ''
+  }
+}
+
+// ── 团队档案：拉起 Sheet 内 Markdown 编辑器编辑 TEAM.md 正文（team.update profile） ──
+function openTeamProfileEditor(): void {
+  const t = selectedTeam.value
+  if (!t) return
+  openMarkdownSheet(shell, {
+    id: 'agents-team-profile-editor',
+    title: '编辑团队档案',
+    value: t.profile || '',
+    placeholder: '输入 Markdown 内容',
+    onSave: async (v) => {
+      await store.updateTeam({ name: t.name, profile: v })
+      pushNotice(shell, 'success', `已保存团队「${teamDisplayName(t)}」档案`)
+    },
+  })
+}
+
 // ── 团队（配置头部）：成员头像堆叠与「管理团队」入口基于一等 Team 实体
 // （team.list，leader === 当前员工的团队）；非负责人行不再提供组队入口 ──
 interface TeamStackAvatar {
@@ -780,15 +906,46 @@ onMounted(() => {
           <span v-else :class="$style.cfgAvatar">{{ (teamDisplayName(selectedTeam) || '?').charAt(0).toUpperCase() }}</span>
           <div :class="$style.cfgMain">
             <div :class="$style.cfgNameRow">
-              <h3 :class="$style.cfgName">{{ teamDisplayName(selectedTeam) }}</h3>
+              <!-- 团队名双态：点击 inline 编辑（team.update nick_name，空串清空，展示回退原名） -->
+              <input
+                v-if="editingTeamNick"
+                ref="teamNickInputEl"
+                v-model="teamNickDraft"
+                :class="$style.cfgNickInput"
+                :disabled="store.teamOperating === selectedTeam.name"
+                placeholder="设置团队名，留空清除"
+                @keydown.enter.prevent="saveTeamNick"
+                @keydown.esc.prevent="cancelTeamNick"
+                @blur="saveTeamNick"
+              />
+              <h3
+                v-else
+                :class="[$style.cfgName, $style.cfgNameEditable]"
+                title="点击修改团队名"
+                @click="startTeamNickEdit"
+              >{{ teamDisplayName(selectedTeam) }}</h3>
               <span class="mx-tag" :data-tone="selectedTeam.hired ? 'success' : 'warning'">
                 {{ selectedTeam.hired ? '已雇佣' : '未雇佣' }}
               </span>
               <!-- 决策计量：团队整体评价双指（agent.rate subject_type=team） -->
               <MetricRateButtons subject-type="team" :name="selectedTeam.name" />
             </div>
-            <span :class="$style.cfgRole">{{ selectedTeam.name }}</span>
-            <p :class="$style.cfgDesc">{{ selectedTeam.description || '暂无描述' }}</p>
+            <input
+              v-if="editingDesc && selectedKind === 'team'"
+              ref="descInputEl"
+              v-model="descDraft"
+              :class="$style.cfgDescInput"
+              placeholder="团队一句话定位（回车保存，Esc 取消）"
+              @keydown.enter.prevent="saveDesc"
+              @keydown.esc.prevent="cancelDescEdit"
+              @blur="saveDesc"
+            />
+            <p
+              v-else
+              :class="[$style.cfgDesc, $style.cfgDescEditable]"
+              title="点击修改描述"
+              @click="startDescEdit"
+            >{{ selectedTeam.description || '暂无描述' }}</p>
           </div>
           <div :class="$style.cfgActions">
             <button
@@ -834,7 +991,7 @@ onMounted(() => {
           />
           <p v-else :class="$style.teamProfileEmpty">暂无内容</p>
           <div :class="$style.teamReadActions">
-            <button type="button" class="mx-btn mx-btn--primary" @click="startTeamEditing()">编辑</button>
+            <button type="button" class="mx-btn mx-btn--primary" @click="openTeamProfileEditor">编辑</button>
           </div>
         </div>
 
@@ -891,10 +1048,6 @@ onMounted(() => {
             <label :class="$style.teamFieldRow">
               <span :class="$style.teamFieldLabel">描述</span>
               <textarea v-model="teamForm.description" class="mx-input" rows="2" placeholder="团队一句话定位" />
-            </label>
-            <label :class="$style.teamFieldRow">
-              <span :class="$style.teamFieldLabel">Profile</span>
-              <textarea v-model="teamForm.profile" class="mx-input" rows="6" placeholder="暂无内容" />
             </label>
             <div :class="$style.teamFormActions">
             <button type="button" class="mx-btn" :class="$style.teamDeleteBtn" @click="requestTeamDelete">删除团队</button>
@@ -976,7 +1129,23 @@ onMounted(() => {
               <!-- 决策计量：整体评价双指（agent.rate，同对象每日一次） -->
               <MetricRateButtons subject-type="agent" :name="selectedAgent.name" />
             </div>
-            <p :class="$style.cfgDesc">{{ selectedAgent.description || '暂无描述' }}</p>
+            <input
+              v-if="editingDesc && selectedKind !== 'team'"
+              ref="descInputEl"
+              v-model="descDraft"
+              :class="$style.cfgDescInput"
+              :disabled="store.operating === selectedAgent.name"
+              placeholder="一句话介绍（回车保存，Esc 取消）"
+              @keydown.enter.prevent="saveDesc"
+              @keydown.esc.prevent="cancelDescEdit"
+              @blur="saveDesc"
+            />
+            <p
+              v-else
+              :class="[$style.cfgDesc, $style.cfgDescEditable]"
+              title="点击修改描述"
+              @click="startDescEdit"
+            >{{ selectedAgent.description || '暂无描述' }}</p>
           </div>
           <!-- 团队区（负责人行专属）：成员头像堆叠（紧密排列，前一个覆盖后一个左边一半）
                +「管理团队」入口（跳转团队页选中，内联编辑与成员页使用方式一致） -->
@@ -1035,7 +1204,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- 区：指令（档案/准则 chips 切换 + textarea 编辑，独立保存） -->
+        <!-- 区：指令（档案/准则 chips 切换 + Markdown 渲染，点「编辑」拉起 Sheet 内编辑器） -->
         <div v-show="editorTab === 'instructions'" :class="$style.tabPanel">
           <div :class="$style.chipRow">
             <button
@@ -1054,32 +1223,21 @@ onMounted(() => {
             >
               行为准则
             </button>
+            <button type="button" class="mx-btn" :class="$style.chipEdit" @click="openInstructionEditor">编辑</button>
           </div>
           <p v-if="detailLoading" :class="[$style.hint, 'mx-text-loading']">正在加载指令正文…</p>
           <template v-else>
             <div v-show="activeChip === 'identity'" :class="$style.instructionBlock">
-              <textarea
-                v-model="identityBody"
-                :class="$style.area"
-                rows="8"
-                placeholder="暂无内容"
-                @input="identityDirty = true"
-              ></textarea>
-              <div :class="$style.instructionFoot">
-                <button type="button" class="mx-btn mx-btn--primary" :disabled="!identityDirty" @click="saveBody('identity')">保存</button>
-              </div>
+              <!-- 内容经 DOMPurify 消毒后注入 -->
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div v-if="identityBody" :class="$style.teamProfilePreview" v-html="identityHtml" />
+              <p v-else :class="$style.hint">暂无内容</p>
             </div>
             <div v-show="activeChip === 'soul'" :class="$style.instructionBlock">
-              <textarea
-                v-model="soulBody"
-                :class="$style.area"
-                rows="8"
-                placeholder="暂无内容"
-                @input="soulDirty = true"
-              ></textarea>
-              <div :class="$style.instructionFoot">
-                <button type="button" class="mx-btn mx-btn--primary" :disabled="!soulDirty" @click="saveBody('soul')">保存</button>
-              </div>
+              <!-- 内容经 DOMPurify 消毒后注入 -->
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div v-if="soulBody" :class="$style.teamProfilePreview" v-html="soulHtml" />
+              <p v-else :class="$style.hint">暂无内容</p>
             </div>
           </template>
         </div>
@@ -1365,10 +1523,6 @@ onMounted(() => {
   color: var(--mx-text);
   line-height: 1.6;
   word-break: break-word;
-  background: var(--mx-bg-surface);
-  border: 0.5px solid var(--mx-separator-soft);
-  border-radius: var(--mx-radius-card);
-  padding: var(--mx-space-3) var(--mx-space-4);
 }
 /* v-html 注入的 Markdown 内容：style module 无 scoped 属性隔离，后代选择器直接命中 */
 .teamProfilePreview h1,
@@ -1694,6 +1848,25 @@ onMounted(() => {
   color: var(--mx-text);
 }
 
+.cfgDescEditable {
+  cursor: pointer;
+}
+
+.cfgDescEditable:hover {
+  color: var(--mx-accent);
+}
+
+.cfgDescInput {
+  width: 100%;
+  padding: 0 var(--mx-space-1);
+  border: none;
+  border-bottom: 1px solid var(--mx-accent);
+  background: transparent;
+  outline: none;
+  font: var(--mx-font-body);
+  color: var(--mx-text);
+}
+
 /* 团队成员头像堆叠：紧密排列，前一个覆盖后一个左边一半（负 margin 叠加） */
 .teamStack {
   display: flex;
@@ -1759,6 +1932,10 @@ onMounted(() => {
   gap: var(--mx-space-2);
 }
 
+.chipEdit {
+  margin-left: auto;
+}
+
 .chip {
   height: 24px;
   padding: 0 12px;
@@ -1794,37 +1971,6 @@ onMounted(() => {
 .instructionBlock {
   display: flex;
   flex-direction: column;
-  gap: var(--mx-space-2);
-}
-
-.area {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 160px;
-  resize: vertical;
-  padding: 8px 10px;
-  background: var(--mx-module);
-  border: 0.5px solid var(--mx-separator-soft);
-  border-radius: var(--mx-radius-control);
-  font: var(--mx-font-body);
-  line-height: 1.6;
-  color: var(--mx-text);
-  transition: border-color var(--mx-duration-fast) var(--mx-ease-standard);
-}
-
-.area::placeholder {
-  color: var(--mx-text-tertiary);
-}
-
-.area:focus {
-  outline: none;
-  border-color: var(--mx-accent);
-}
-
-.instructionFoot {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
   gap: var(--mx-space-2);
 }
 

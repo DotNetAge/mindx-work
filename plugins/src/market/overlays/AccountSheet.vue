@@ -431,7 +431,7 @@ watch(
           <span :class="$style.rowIcon"><MxIcon name="lucide:star" :size="16" /></span>
           <span :class="$style.rowMain">
             <span :class="$style.rowTitle">分享我的评分</span>
-            <span :class="$style.rowSub">允许把你对团队、员工、技能、插件在日常使用时的进化评分共享至进化网络；关闭也能正常打分，只是评分不会上传。评价内容与对话记录始终保存在本机。</span>
+            <span :class="$style.rowSub">允许把你对团队、员工、技能、插件在日常使用时的进化评分共享至社区；关闭也能正常打分，只是评分不会上传。评价内容与对话记录始终保存在本机。</span>
           </span>
           <button
             class="mx-switch" role="switch" :aria-checked="store.consentGranted"

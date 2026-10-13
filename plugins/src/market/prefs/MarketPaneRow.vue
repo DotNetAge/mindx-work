@@ -11,7 +11,7 @@
  * 插件货架安装经宿主桥下载落盘（installFromUrl + sha256 校验），覆盖/安装确认走壳 Overlay modal。
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useShell } from '@mindx-work/ui-shell-vue'
+import { useShell, MxIcon } from '@mindx-work/ui-shell-vue'
 import { useMarketStore, pkgDisplayName, type MarketPkg, type MarketSourceItem, AgentExistsError as AgentExistsErrorCls, SkillExistsError as SkillExistsErrorCls, TeamExistsError as TeamExistsErrorCls } from '../store'
 import { pushNotice } from '../notice'
 import InstallConfirmModal from '../overlays/InstallConfirmModal.vue'
@@ -109,14 +109,14 @@ const savingSourceId = ref('')
 
 /** 源卡片标题（tier → 固定文案；服务端 name 为内部标识不外显） */
 function sourceTitle(s: MarketSourceItem): string {
-  return s.tier === 'merchant' ? '专用源' : 'MindX 官方源'
+  return s.tier === 'merchant' ? '专用源' : 'MindX 官方社区'
 }
 
 /** 源卡片描述（tier → 固定文案；邀请码是商户访问令牌的消费者称呼） */
 function sourceDesc(s: MarketSourceItem): string {
   return s.tier === 'merchant'
     ? '只为特定用户开放的专用源，需要获得专用邀请码'
-    : '官方公开的进化网络，所有人可用'
+    : '官方维护的公共资源，供所有成员分享、下载'
 }
 
 /** 卡片「选用」：官方源或已存邀请码的专用源直接换源（daemon 连通探测成功才激活）；
@@ -135,7 +135,7 @@ async function selectSource(sourceID: string): Promise<void> {
   savingSourceId.value = sourceID
   try {
     await store.setSource(sourceID)
-    pushOk('已切换进化网络来源')
+    pushOk('已切换社区来源')
   } catch (err: unknown) {
     pushErr(err)
   } finally {
@@ -480,9 +480,9 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
 
 <template>
   <div :class="$style.wrap">
-    <!-- ── 标题 ── -->
+    <!-- ── 标题（与设置导航同名） ── -->
     <div :class="$style.head">
-      <span :class="$style.title">进化网络</span>
+      <span :class="$style.title">资源社区</span>
     </div>
 
     <!-- ── 货架分段切换（与团队管理行同款 mx-tabs 分段控件，来源与货架同级） ── -->
@@ -576,7 +576,8 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
       <p v-if="store.skillError" :class="$style.error">{{ store.skillError }}</p>
       <p v-if="store.skillLoading && !store.skillLoaded" :class="[$style.hint, 'mx-text-loading']">正在加载技能货架…</p>
       <div v-for="pkg in domainFiltered(store.skillPackages)" :key="pkg.name" :class="$style.marketItem">
-        <span :class="$style.avatar">{{ pkgDisplayName(pkg).charAt(0).toUpperCase() }}</span>
+        <!-- 技能占位头像：统一技能图标（同本仓技能插件），不用字母 -->
+        <span :class="$style.avatar"><MxIcon name="lucide:sparkles" :size="20" /></span>
         <div :class="$style.itemText">
           <div :class="$style.nameRow">
             <span :class="$style.itemName">{{ pkg.skillNames?.[pkg.name] || pkgDisplayName(pkg) }}</span>
@@ -695,7 +696,7 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
         <span v-else-if="store.pluginDone && store.pluginPackages.length > 0">已加载全部插件</span>
       </div>
       <p v-if="store.pluginLoaded && store.pluginPackages.length === 0 && !store.pluginError" :class="$style.hint">
-        进化网络暂无可安装的插件。
+        社区暂无可安装的插件。
       </p>
       <p v-if="!store.hasBridge" :class="$style.hint">当前环境不支持安装插件（需要应用宿主）。</p>
     </div>

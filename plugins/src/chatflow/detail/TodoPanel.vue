@@ -192,8 +192,13 @@ const props = defineProps({
 /** 独立用法内部折叠（hideHeader 时由外部 el-collapse 接管，内容直显） */
 const collapsed = ref(true)
 
+/** 已完成不占主列表（批注定案）：默认只列未完成项，已完成收进末尾折叠组，点击展开 */
+const doneOpen = ref(false)
+const pendingItems = computed(() => items.value.filter((i) => !i.done))
+const doneItems = computed(() => items.value.filter((i) => i.done))
+
 /** 段头徽章：未完成条数（空清单不显示）——defineExpose 供外部 el-collapse 标题使用 */
-const pendingCount = computed(() => items.value.filter((i) => !i.done).length)
+const pendingCount = computed(() => pendingItems.value.length)
 const totalCount = computed(() => items.value.length)
 
 defineExpose({ pendingCount, totalCount })
@@ -222,10 +227,12 @@ defineExpose({ pendingCount, totalCount })
         <p v-if="!todoPath" :class="$style.empty">暂无工作目录</p>
         <template v-else>
           <p v-if="items.length === 0" :class="$style.empty">暂无待办</p>
+        <template v-else>
+          <!-- 主列表：只列未完成项（已完成不占屏，勾选即移入末尾折叠组） -->
           <div
-            v-for="item in items"
+            v-for="item in pendingItems"
             :key="item.idx"
-            :class="[$style.todoRow, { [$style.done]: item.done, [$style.child]: item.level > 0 }]"
+            :class="[$style.todoRow, { [$style.child]: item.level > 0 }]"
             :style="{ '--lv': item.level }"
           >
             <el-checkbox
@@ -259,12 +266,61 @@ defineExpose({ pendingCount, totalCount })
               <MxIcon name="lucide:x" :size="16" />
             </button>
           </div>
+          <!-- 已完成折叠组：默认收起，仅计数；展开可回看/取消勾选 -->
+          <button
+            v-if="doneItems.length > 0"
+            type="button"
+            :class="$style.doneHead"
+            @click="doneOpen = !doneOpen"
+          >
+            <MxIcon
+              name="lucide:chevron-right"
+              :size="16"
+              :class="[$style.chevron, { [$style.chevronOpen]: doneOpen }]"
+            />
+            <span>已完成 {{ doneItems.length }}</span>
+          </button>
+          <template v-if="doneOpen">
+            <div
+              v-for="item in doneItems"
+              :key="item.idx"
+              :class="[$style.todoRow, $style.done, { [$style.child]: item.level > 0 }]"
+              :style="{ '--lv': item.level }"
+            >
+              <el-checkbox
+                :model-value="item.done"
+                :class="$style.check"
+                @change="toggle(item)"
+              />
+              <span
+                v-if="editingIdx !== item.idx"
+                :class="$style.todoText"
+                title="双击编辑"
+                @dblclick="startEdit(item)"
+              >
+                <span :class="$style.todoLabel">{{ item.text }}</span>
+              </span>
+              <el-input
+                v-else
+                ref="editInputRef"
+                v-model="editText"
+                :class="$style.editInput"
+                @keyup.enter="commitEdit(item)"
+                @blur="commitEdit(item)"
+                @keydown.esc.prevent="cancelEdit"
+              />
+              <button type="button" :class="$style.todoDel" title="删除" @click="remove(item)">
+                <MxIcon name="lucide:x" :size="16" />
+              </button>
+            </div>
+          </template>
           <el-input
             v-model="draft"
             :class="$style.addRow"
             placeholder="添加待办，回车确认"
             @keyup.enter="addTodo"
           />
+        </template>
         </template>
       </template>
     </div>
@@ -308,6 +364,25 @@ defineExpose({ pendingCount, totalCount })
 }
 .chevronOpen {
   transform: rotate(90deg);
+}
+
+/* 已完成折叠头：轻量小字行（弱于段头层级，仅计数与展开入口） */
+.doneHead {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-1);
+  padding: var(--mx-space-1) var(--mx-space-2);
+  border: none;
+  border-radius: var(--mx-radius-control);
+  background: transparent;
+  color: var(--mx-text-tertiary);
+  font: var(--mx-font-micro);
+  cursor: pointer;
+  text-align: left;
+}
+.doneHead:hover {
+  background: var(--mx-hover);
+  color: var(--mx-text-secondary);
 }
 .headTitle {
   font: var(--mx-font-caption);

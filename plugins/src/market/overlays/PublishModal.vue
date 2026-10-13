@@ -151,7 +151,7 @@ function close(): void {
   <div v-if="visible" :class="$style.body">
     <!-- ── 步骤 1：选择本地包 ── -->
     <template v-if="step === 'select'">
-      <span :class="$style.title">发布到进化网络</span>
+      <span :class="$style.title">发布到社区</span>
       <p :class="$style.desc">选择要发布的本地包。发布需要先绑定MindX 账号，包名遵循先到先得。</p>
 
       <div class="mx-tabs" :class="$style.kindTabs">

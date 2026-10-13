@@ -2,13 +2,14 @@
 /**
  * markdown 详情面板：头部（文件名 + 脏标记 + 模式切换 + 保存）+ 预览/编辑双态。
  * 预览 = marked 解析 + DOMPurify 消毒（同包依赖直接消费，非跨插件 import）；
- * 编辑 = CodeMirror 6 源码（共用内核 CodeMirrorPane）+ 顶部插入元素工具栏，
+ * 编辑 = CodeMirror 6 源码（共用件 MarkdownEditorBody：工具栏 + CodeMirrorPane），
  * Cmd/Ctrl+S 保存（fs.write 写回）。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { CodeMirrorPane, MxIcon } from '@mindx-work/ui-shell-vue'
+import { MxIcon } from '@mindx-work/ui-shell-vue'
+import MarkdownEditorBody from './MarkdownEditorBody.vue'
 import { useMarkdownStore } from './store'
 
 const store = useMarkdownStore()
@@ -84,49 +85,7 @@ const renderedHtml = computed(() => {
   return DOMPurify.sanitize(raw)
 })
 
-// ── 插入元素工具栏（仅编辑态）：三类操作 = 包裹 / 行前缀 / 新块 ──────────────
-interface PaneCommands {
-  wrapSelection(before: string, after?: string): void
-  insertLinePrefix(prefix: string): void
-  insertBlock(text: string): void
-}
-
-interface MdTool {
-  icon: string
-  label: string
-  apply: (pane: PaneCommands) => void
-}
-
-const TOOLS: MdTool[] = [
-  { icon: 'lucide:heading-1', label: '一级标题', apply: (p) => p.insertLinePrefix('# ') },
-  { icon: 'lucide:heading-2', label: '二级标题', apply: (p) => p.insertLinePrefix('## ') },
-  { icon: 'lucide:heading-3', label: '三级标题', apply: (p) => p.insertLinePrefix('### ') },
-  { icon: 'lucide:bold', label: '粗体', apply: (p) => p.wrapSelection('**') },
-  { icon: 'lucide:italic', label: '斜体', apply: (p) => p.wrapSelection('*') },
-  { icon: 'lucide:strikethrough', label: '删除线', apply: (p) => p.wrapSelection('~~') },
-  { icon: 'lucide:code', label: '行内代码', apply: (p) => p.wrapSelection('`') },
-  { icon: 'lucide:square-code', label: '代码块', apply: (p) => p.wrapSelection('```\n', '\n```') },
-  { icon: 'lucide:link', label: '链接', apply: (p) => p.wrapSelection('[', '](https://)') },
-  { icon: 'lucide:image', label: '图片', apply: (p) => p.insertBlock('![图片描述](图片路径)\n') },
-  { icon: 'lucide:quote', label: '引用', apply: (p) => p.insertLinePrefix('> ') },
-  { icon: 'lucide:list', label: '无序列表', apply: (p) => p.insertLinePrefix('- ') },
-  { icon: 'lucide:list-ordered', label: '有序列表', apply: (p) => p.insertLinePrefix('1. ') },
-  { icon: 'lucide:list-todo', label: '任务列表', apply: (p) => p.insertLinePrefix('- [ ] ') },
-  {
-    icon: 'lucide:table',
-    label: '表格',
-    apply: (p) => p.insertBlock('| 列一 | 列二 | 列三 |\n| --- | --- | --- |\n|  |  |  |\n'),
-  },
-  { icon: 'lucide:minus', label: '分割线', apply: (p) => p.insertBlock('---\n') },
-]
-
-const paneRef = ref<InstanceType<typeof CodeMirrorPane> | null>(null)
-
-function applyTool(tool: MdTool): void {
-  const pane = paneRef.value
-  if (!pane) return
-  tool.apply(pane)
-}
+// ── 插入元素工具栏与 CodeMirror 编辑已抽至 MarkdownEditorBody（Sheet 编辑器共用） ──
 
 // ── Cmd/Ctrl+S 保存（编辑模式时拦截浏览器默认保存）──────────────────────────
 function onKeydown(e: KeyboardEvent): void {
@@ -193,23 +152,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       <div class="md-preview" v-html="renderedHtml"></div>
     </div>
 
-    <!-- 编辑态：插入元素工具栏 + CodeMirror 源码编辑（共用内核） -->
+    <!-- 编辑态：插入元素工具栏 + CodeMirror 源码编辑（共用内核 MarkdownEditorBody） -->
     <div v-else :class="$style.editArea">
-      <div :class="$style.toolbar" role="toolbar" aria-label="Markdown 插入工具栏">
-        <button
-          v-for="tool in TOOLS"
-          :key="tool.icon"
-          type="button"
-          :class="$style.toolBtn"
-          :title="tool.label"
-          :aria-label="tool.label"
-          @click="applyTool(tool)"
-        >
-          <MxIcon :name="tool.icon" :size="16" />
-        </button>
-      </div>
-      <CodeMirrorPane
-        ref="paneRef"
+      <MarkdownEditorBody
         :value="store.draft"
         lang="md"
         placeholder="输入 Markdown 内容"
@@ -485,51 +430,5 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   display: flex;
   flex-direction: column;
   gap: var(--mx-space-2);
-}
-
-/* 插入元素工具栏：横排图标钮，超出横向滚动（Detail 面板窄空间兜底）；
-   与编辑区之间以分隔线区隔 */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: var(--mx-space-2);
-  border-bottom: 1px solid var(--mx-separator);
-}
-
-.toolbar::-webkit-scrollbar {
-  display: none;
-}
-
-.toolBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: var(--mx-radius-control);
-  background: transparent;
-  color: var(--mx-text-tertiary);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.toolBtn:hover {
-  background: var(--mx-hover);
-  color: var(--mx-text);
-}
-
-.toolBtn:active {
-  background: var(--mx-hover);
-  color: var(--mx-accent);
-}
-
-.toolBtn:focus-visible {
-  outline: 2px solid var(--mx-border-strong);
-  outline-offset: 1px;
 }
 </style>

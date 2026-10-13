@@ -153,33 +153,20 @@ export const useSkillsStore = defineStore('skills-store', () => {
     return `已导出「${skillDisplayName(skill)}」到 ${outPath}`
   }
 
-  // ---------- 修改 SKILL.md ----------
-  const editingSkill = ref<SkillInfo | null>(null)
-  const editContent = ref('')
-
-  /** 打开编辑：root_dir 缺失返回 false（调用方提示"无文件系统路径"） */
-  function openEdit(skill: SkillInfo): boolean {
-    if (!skill.root_dir) return false
-    editingSkill.value = skill
-    editContent.value = ''
-    return true
-  }
-
-  /** 读取 SKILL.md 正文（编辑 modal 挂载后调用） */
-  async function loadEditContent(): Promise<void> {
-    const skill = editingSkill.value
-    if (!skill?.root_dir) return
-    editContent.value = (await daemon.call<{ content: string }>('fs.read', { path: skill.root_dir + '/SKILL.md' })).content
+  // ---------- 修改 SKILL.md（Markdown 插件 Sheet 编辑器承载，此处只管读写） ----------
+  /** 读取 SKILL.md 正文（Sheet 挂起前取初始内容） */
+  async function loadSkillMd(skill: SkillInfo): Promise<string> {
+    if (!skill.root_dir) throw new Error('该技能无文件系统路径，无法编辑')
+    return (await daemon.call<{ content: string }>('fs.read', { path: skill.root_dir + '/SKILL.md' })).content
   }
 
   /** 保存 SKILL.md 写回并刷新清单 */
-  async function saveEdit(): Promise<void> {
-    const skill = editingSkill.value
-    if (!skill?.root_dir) return
+  async function saveSkillMd(skill: SkillInfo, content: string): Promise<void> {
+    if (!skill.root_dir) throw new Error('该技能无文件系统路径，无法编辑')
     // fs.write 返回 { status: 'ok' }（daemon 实证）；失败经 RPC error 抛出
     await daemon.call<{ status: string }>('fs.write', {
       path: skill.root_dir + '/SKILL.md',
-      content: editContent.value,
+      content,
     })
     await refresh()
   }
@@ -388,12 +375,9 @@ export const useSkillsStore = defineStore('skills-store', () => {
     requestRemove,
     // 导出
     exportSkill,
-    // 编辑
-    editingSkill,
-    editContent,
-    openEdit,
-    loadEditContent,
-    saveEdit,
+    // SKILL.md 编辑（Sheet 编辑器承载，此处只管读写）
+    loadSkillMd,
+    saveSkillMd,
     // 许可证
     license,
     openLicense,

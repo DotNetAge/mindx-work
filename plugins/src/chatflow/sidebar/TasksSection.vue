@@ -365,7 +365,8 @@ watch(
       </button>
       <template #dropdown>
         <el-dropdown-menu class="chatflow-agent-menu">
-          <!-- 团队条目（已雇佣）：command 带 team: 前缀，选中即团队会话 -->
+          <!-- 团队分组头 + 团队条目（已雇佣）：command 带 team: 前缀，选中即团队会话 -->
+          <li v-if="hiredTeams.length" class="chatflow-agent-menu-group">团队</li>
           <el-dropdown-item
             v-for="t in hiredTeams"
             :key="'team-' + t.name"
@@ -377,7 +378,8 @@ watch(
             <span class="chatflow-agent-item-name">{{ teamNameOf(t) }}</span>
             <span class="chatflow-agent-item-role">团队</span>
           </el-dropdown-item>
-          <!-- 个人条目：已雇佣团队负责人已去重（只出现团队条目） -->
+          <!-- 成员分组头 + 个人条目：已雇佣团队负责人已去重（只出现团队条目） -->
+          <li v-if="personalAgents.length" class="chatflow-agent-menu-group">成员</li>
           <el-dropdown-item
             v-for="a in personalAgents"
             :key="a.name"
@@ -1159,6 +1161,32 @@ watch(
   border: none;
   padding: 0;
   box-shadow: none;
+  /* 固定最大高度：条目超限内滚动（细滚动条，hover 才显）；少量条目时高度自适应 */
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--mx-text-tertiary) 40%, transparent) transparent;
+}
+.el-dropdown__popper.chatflow-agent-menu .el-dropdown-menu::-webkit-scrollbar {
+  width: 6px;
+}
+.el-dropdown__popper.chatflow-agent-menu .el-dropdown-menu::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--mx-text-tertiary) 40%, transparent);
+  border-radius: 3px;
+}
+.el-dropdown__popper.chatflow-agent-menu .el-dropdown-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 分组头（团队 / 成员）：小字浅色、不可交互，上下留白撑开分组感 */
+.chatflow-agent-menu-group {
+  list-style: none;
+  font: var(--mx-font-micro);
+  font-weight: 600;
+  color: var(--mx-text-tertiary);
+  padding: var(--mx-space-2) var(--mx-space-3) var(--mx-space-1);
+  cursor: default;
+  user-select: none;
 }
 
 .chatflow-agent-menu .el-dropdown-menu__item {
