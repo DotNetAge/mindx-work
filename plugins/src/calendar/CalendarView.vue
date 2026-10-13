@@ -111,10 +111,10 @@ const saving = ref(false)
 const dialogDate = ref('')
 const CRON_OPTIONS = [
   { label: '不重复', value: '' },
-  { label: '每小时', value: '0 * * * *' },
-  { label: '每天', value: '0 0 * * *' },
-  { label: '每周', value: '0 0 * * 0' },
-  { label: '每月', value: '0 0 1 * *' },
+  { label: '每小时', value: '0 0 * * * *' },
+  { label: '每天', value: '0 0 0 * * *' },
+  { label: '每周', value: '0 0 0 * * 0' },
+  { label: '每月', value: '0 0 0 1 * *' },
   { label: '自定义', value: '__custom__' },
 ]
 const formModel = ref({
@@ -181,26 +181,55 @@ async function handleSubmit() {
     await loadSchedules()
   } catch (err) {
     console.error('[Calendar] 创建计划失败:', err)
-    ElMessage({ message: '创建计划失败', type: 'error', duration: 2000 })
+    const message = (err as { message?: string })?.message || '创建计划失败'
+    ElMessage({ message, type: 'error', duration: 3000 })
   } finally {
     saving.value = false
   }
 }
 
+// ── 一次性任务的识别与目标时刻还原 ──
+// 后端为一次性任务生成 6 字段全数字、周位固定 * 的 cron 表达式；
+// 循环任务至少含一个通配或范围段。表达式为空属历史数据。
+
+function isOneShotCron(expr: string): boolean {
+  const fields = expr.trim().split(/\s+/)
+  return fields.length === 6 && fields[5] === '*' && fields.slice(0, 5).every((f) => /^\d+$/.test(f))
+}
+
+// cron 中不含年份：按创建时间所在年还原，若目标已早于创建时刻则顺延一年。
+function oneShotTarget(expr: string, createdAt: string): Date | null {
+  const fields = expr.trim().split(/\s+/)
+  if (fields.length !== 6 || !fields.slice(0, 5).every((f) => /^\d+$/.test(f))) return null
+  const [sec = 0, min = 0, hour = 0, day = 1, month = 1] = fields.slice(0, 5).map(Number)
+  const base = new Date(createdAt)
+  if (Number.isNaN(base.getTime())) return null
+  let target = new Date(base.getFullYear(), month - 1, day, hour, min, sec)
+  if (target.getTime() < base.getTime()) {
+    target = new Date(base.getFullYear() + 1, month - 1, day, hour, min, sec)
+  }
+  return target
+}
+
 // ── 日历事件 ──
 const calendarEvents = computed(() => {
   return filteredSchedules.value.map((s) => {
-    const hasCron = !!s.cron_expr
+    const oneShot = isOneShotCron(s.cron_expr)
+    // 单次任务定位在目标时刻（执行过则用真实执行时刻），循环任务沿用现状
+    const oneShotAt = s.last_run_at || oneShotTarget(s.cron_expr, s.created_at)?.toISOString() || s.created_at
+    const start = oneShot ? oneShotAt : s.created_at
+    const end = oneShot ? oneShotAt : s.last_run_at || s.created_at
     return {
       id: s.id,
       title: `[${agentDisplayName(s.agent)}] ${s.content}`,
-      start: hasCron ? s.created_at : s.last_run_at || s.created_at,
-      end: s.last_run_at || s.created_at,
+      start,
+      end,
       extendedProps: {
         agent: s.agent,
         content: s.content,
         cron: s.cron_expr,
         enabled: s.enabled,
+        oneShot,
       },
       classNames: s.enabled ? ['cal-event-enabled'] : ['cal-event-disabled'],
       display: 'auto' as const,
@@ -412,7 +441,7 @@ watch(
               <el-input
                 v-if="formModel.cronPreset === '__custom__'"
                 v-model="formModel.cronCustom"
-                placeholder="cron 表达式，如 0 9 * * 1-5"
+                placeholder="cron 表达式（6 字段：秒 分 时 日 月 周），如 0 0 9 * * 1-5"
                 class="cal-field"
                 style="margin-top: 8px"
               />
