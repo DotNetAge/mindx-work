@@ -2,6 +2,7 @@
 export { default as demoPlugin } from './demo/index'
 export { default as marketPlugin } from './market/index'
 export { useMarketStore } from './market/store'
+export { default as experiencePlugin } from './experience/index'
 export { connectionPlugin } from './connection/index'
 export { modelsPlugin } from './models/index'
 export { connectorsPlugin } from './connectors/index'
