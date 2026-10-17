@@ -3,6 +3,7 @@
  * 经验页（整页主体）：Agent 经验库阅读视图（会员全量库视角，与官网只看精选分流）。
  * 数据源走 daemon 服务 market.experience.*（daemon 携带登录态代理，前端不持 token）。
  * 未登录时显示引导文案（指向「资源社区」页登录），不复制登录流程。
+ * 样式纪律（uikit）：控件走壳原语（mx-btn/mx-input），取色/字阶/间距全部语义 token。
  */
 import { onMounted, ref } from 'vue'
 import { marked } from 'marked'
@@ -96,7 +97,10 @@ onMounted(() => void load())
   <div :class="$style.wrap">
     <!-- 详情视图 -->
     <template v-if="detail">
-      <button :class="$style.back" class="mx-text-btn" @click="backToList">← 返回列表</button>
+      <div :class="$style.toolbar">
+        <button type="button" class="mx-btn" @click="backToList">← 返回列表</button>
+        <span v-if="detailLoading" class="mx-text-loading">正在载入全文…</span>
+      </div>
       <header :class="$style.detailHead">
         <h2 :class="$style.detailTitle">{{ detail.item.title }}</h2>
         <p :class="$style.meta">
@@ -119,14 +123,16 @@ onMounted(() => void load())
       <div :class="$style.searchRow">
         <input
           v-model="keyword"
+          type="text"
+          class="mx-input"
           :class="$style.searchInput"
           placeholder="搜索经验：标题或摘要里的关键词"
           @keydown.enter="onSearch"
         />
-        <button class="mx-text-btn" :disabled="loading" @click="onSearch">搜索</button>
+        <button type="button" class="mx-btn" :disabled="loading" @click="onSearch">搜索</button>
       </div>
 
-      <p v-if="loading" class="mx-text-loading">正在载入经验列表…</p>
+      <p v-if="loading"><span class="mx-text-loading">正在载入经验列表…</span></p>
 
       <p v-else-if="notLoggedIn" :class="$style.hint">
         经验库只对已登录的用户开放。请先到「资源社区」页登录账号，再回来看大家的经验。
@@ -140,7 +146,7 @@ onMounted(() => void load())
         </p>
         <ul v-else :class="$style.list">
           <li v-for="e in items" :key="e.id">
-            <button :class="$style.entry" @click="openDetail(e)">
+            <button type="button" :class="$style.entry" @click="openDetail(e)">
               <img
                 v-if="e.author_avatar"
                 :src="e.author_avatar"
@@ -168,13 +174,19 @@ onMounted(() => void load())
 .wrap {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--mx-space-4);
   padding: var(--mx-space-4) 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--mx-space-3);
 }
 
 .searchRow {
   display: flex;
-  gap: 8px;
+  gap: var(--mx-space-2);
   align-items: center;
 }
 
@@ -191,42 +203,57 @@ onMounted(() => void load())
 }
 
 .list > li + li {
-  border-top: 1px solid var(--mx-color-border, rgba(128, 128, 128, 0.2));
+  border-top: 0.5px solid var(--mx-separator);
 }
 
 .entry {
   display: flex;
-  gap: 12px;
+  gap: var(--mx-space-3);
   width: 100%;
-  padding: 12px 4px;
+  padding: var(--mx-space-3) var(--mx-space-1);
   text-align: left;
   background: none;
   border: none;
+  border-radius: var(--mx-radius-control);
   cursor: pointer;
 }
 
-.entry:hover .entryTitle {
-  color: var(--mx-color-accent, var(--mx-color-primary, #4b8bbe));
+.entry:hover {
+  background: var(--mx-hover);
+}
+
+.entry:active {
+  background: var(--mx-active);
+}
+
+.entry:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mx-accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.entry:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .entryMain {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--mx-space-1);
 }
 
 .entryTitle {
-  font-size: 14px;
-  font-weight: 600;
+  font: var(--mx-font-heading);
+  color: var(--mx-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .entrySummary {
-  font-size: 12px;
-  color: var(--mx-color-text-muted, #888);
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -235,9 +262,9 @@ onMounted(() => void load())
 .meta {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--mx-color-text-muted, #888);
+  gap: var(--mx-space-1);
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
 }
 
 .avatar {
@@ -249,21 +276,23 @@ onMounted(() => void load())
 }
 
 .detailHead {
-  margin-top: 4px;
+  margin-top: var(--mx-space-1);
 }
 
 .detailTitle {
-  font-size: 20px;
+  font: var(--mx-font-title);
+  color: var(--mx-text);
   margin: 0;
 }
 
 .body {
-  font-size: 13px;
-  line-height: 1.7;
+  font: var(--mx-font-body);
+  color: var(--mx-text);
   overflow-wrap: break-word;
 }
 
 .hint {
-  color: var(--mx-color-text-muted, #888);
+  font: var(--mx-font-body);
+  color: var(--mx-text-tertiary);
 }
 </style>

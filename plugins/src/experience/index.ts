@@ -7,7 +7,7 @@
  */
 
 import type { VuePlugin } from '@mindx-work/ui-shell-vue'
-import ExperiencePane from './ExperiencePane.vue'
+import ExperiencePane from './prefs/ExperiencePane.vue'
 
 const experiencePlugin: VuePlugin = (app) => {
   // 经验页：排在资源社区之后（设置导航定稿顺序：…→连接器→资源社区→经验）
