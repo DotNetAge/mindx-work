@@ -10,6 +10,7 @@
 
 import type { VuePlugin } from '@mindx-work/ui-shell-vue'
 import AgentsManagerRow from './prefs/AgentsManagerRow.vue'
+import MailManagerRow from './prefs/MailManagerRow.vue'
 
 /** agents.registry 服务名（消费方以纯字符串名引用，插件间禁止 import） */
 export const AGENTS_REGISTRY_SERVICE = 'agents.registry'
@@ -51,6 +52,8 @@ export const agentsPlugin: VuePlugin = (ctx) => {
     component: AgentsManagerRow,
   })
   ctx.Settings.row({ id: 'agents-manager', page: 'agents', component: AgentsManagerRow })
+  // 组织信箱：跨机器派工与汇报的收发视图（团队成员页第二行）
+  ctx.Settings.row({ id: 'mail-manager', page: 'agents', component: MailManagerRow })
   // 团队管理已融合进 agents-manager 行（成员与团队同列表混排、同配置面板骨架），
   // 独立"团队招聘"行按 2026-10-06 用户定稿删除
 
@@ -62,6 +65,7 @@ export const agentsPlugin: VuePlugin = (ctx) => {
 
   // 停用清理：席位移除（对齐 skills 插件先例）
   return () => {
+    ctx.Settings.remove('mail-manager')
     ctx.Settings.remove('agents-manager')
     ctx.Settings.remove('teams-recruit')
     ctx.Settings.remove('agents')

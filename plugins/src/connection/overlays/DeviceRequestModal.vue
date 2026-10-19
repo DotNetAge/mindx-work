@@ -1,8 +1,12 @@
 <script setup lang="ts">
 /**
  * 设备接入请求弹窗（纯内容组件，卡片壳由 Overlay 容器提供）。
- * 展示请求接入的设备名，批准/拒绝。批准后该设备在接入列表登记长期凭据（重连免确认）；
- * 拒绝后请求在短时间内失效。动作失败停留本弹窗（行内错误），成功即关。
+ * 展示请求接入的设备名，三个动作：
+ *  - 同意：该设备在接入列表登记长期凭据（重连免确认）；
+ *  - 拒绝：请求短时间内失效，对方可再次申请；
+ *  - 拒绝且不再询问：该设备进入「已拒绝」名单，此后重试静默拒绝不再弹窗，
+ *    可在账户面板的已拒绝分组里解除。
+ * 动作失败停留本弹窗（行内错误），成功即关。
  * Esc/遮罩关闭 = 暂不处理（请求超时后自动失效），引擎不重复弹。
  * 2026-10-11 新建：设备接入闸（Mac 间互连）的桌面端审批入口，范式同 phone-pair PairRequestModal。
  */
@@ -26,13 +30,18 @@ function close(): void {
   shell.Overlay.remove(MODAL_DEVICE_REQUEST)
 }
 
-/** 批准/拒绝（approve=true 同意）：成功关弹窗并消费请求，失败停留行内提示 */
-async function decide(approve: boolean): Promise<void> {
+/** 处理请求（approve=true 同意；block=true 拒绝且不再询问）：
+ *  成功关弹窗并消费请求，失败停留行内提示 */
+async function decide(approve: boolean, block = false): Promise<void> {
   if (!req || busy.value) return
   busy.value = true
   errorText.value = ''
   try {
-    await conn.call(approve ? 'device.approve' : 'device.deny', { request_id: req.request_id }, 10000)
+    if (approve) {
+      await conn.call('device.approve', { request_id: req.request_id }, 10000)
+    } else {
+      await conn.call('device.deny', { request_id: req.request_id, block }, 10000)
+    }
     close()
     clearPairRequest(req.request_id)
   } catch (err) {
@@ -51,6 +60,7 @@ async function decide(approve: boolean): Promise<void> {
     </p>
     <p v-if="errorText" :class="$style.error">{{ errorText }}</p>
     <div :class="$style.actions">
+      <button type="button" class="mx-btn" :disabled="busy" @click="decide(false, true)">拒绝且不再询问</button>
       <button type="button" class="mx-btn" :disabled="busy" @click="decide(false)">拒绝</button>
       <button type="button" class="mx-btn mx-btn--primary" :disabled="busy" @click="decide(true)">
         <span v-if="busy" class="mx-text-loading">处理中…</span>

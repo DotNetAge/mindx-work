@@ -13,7 +13,7 @@ export const MODAL_AGENT_CONFIRM = 'market-agent-confirm'
 export const MODAL_SKILL_CONFIRM = 'market-skill-confirm'
 
 /** 专用源邀请码输入 modal 的 Overlay 条目 id（区内唯一，带插件前缀） */
-export const MODAL_PAT_CONFIRM = 'market-pat-confirm'
+export const MODAL_INVITE_CONFIRM = 'market-invite-confirm'
 
 /** 发布 modal 的 Overlay 条目 id（§3：本地包打包发布/衍生改名发布，区内唯一） */
 export const MODAL_PUBLISH = 'market-publish'

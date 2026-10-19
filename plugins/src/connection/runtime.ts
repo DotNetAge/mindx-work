@@ -33,6 +33,9 @@ export const DAEMON_CONNECTION_SERVICE = 'daemon.connection'
 const MODE_KEY = 'mindx.daemon.mode'
 const REMOTE_URL_KEY = 'mindx.daemon.remoteUrl'
 const DEVICE_ID_KEY = 'mindx.device.id'
+// 远端 daemon 批准接入后下发的设备令牌（按端点各存一份）：重连握手回传即免配对，
+// 不回传则每次重连都会在对方机器重新弹审批（devgate 会话登记不跨连接存活）
+const DEVICE_TOKENS_KEY = 'mindx.device.tokens'
 
 function readLocalMode(): DaemonMode {
   try {
@@ -69,10 +72,13 @@ export interface DaemonConnection {
   readonly remoteUrl: string
   /** 设备接入握手状态（响应式；连接建立后自动完成本机握手） */
   readonly pairState: PairState
+  /** 最近一次握手拒绝原因（人话，供设备行提示；无则为空） */
+  readonly pairMessage: string
   /** 切换连接模式：按模式选端点立即重连并持久化；远程未配地址时回落本地端点保持可用 */
   switchMode(mode: DaemonMode): void
-  /** 保存远程机器地址并持久化；当前处于远程模式时立即按新地址重连 */
-  setRemoteUrl(url: string): void
+  /** 保存远程机器地址并持久化；pairCode 为一次性配对码（可选，远程首连无凭据时
+   *  携带——对应主机上 mindx pair 生成的码）。当前处于远程模式时立即按新地址重连 */
+  setRemoteUrl(url: string, pairCode?: string): void
   /** JSON-RPC 调用 */
   call<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
   /** JSON-RPC 通知发送（无 id 无响应；user.message 发消息等通知型通道用）。未连接返回 false */
@@ -85,7 +91,16 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
   const mode = ref<DaemonMode>('local')
   const remoteUrl = ref('')
   const pairState = ref<PairState>('unverified')
+  const pairMessage = ref('')
   const socket = new DaemonSocket(LOCAL_DAEMON_URL)
+  // 远程连接首条消息认证失败时，主机回告原因并断开——如实呈现给用户
+  // （设备未建立信任/配对码已过期等，用户按提示重新配对）
+  socket.onUnhandledError = (message) => {
+    if (mode.value === 'remote' && remoteUrl.value) {
+      pairState.value = 'failed'
+      pairMessage.value = message
+    }
+  }
 
   // ── 本机设备身份与接入握手 ────────────────────────────────
   // daemon 侧 RPC 强制闸要求：连接建立后必须完成 device.handshake
@@ -94,6 +109,30 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
   let deviceToken = ''
   let deviceName = ''
   let deviceId = ''
+  /** 各远端下发的设备令牌表：端点 → 令牌（本机直通路径不会下发，故 local 端点天然无条目） */
+  let deviceTokens: Record<string, string> = {}
+  /** 一次性配对码（远程首连无凭据时用，对应主机上 mindx pair 生成的码）：
+   *  只在内存里活到握手消费成功，刷新/切换即失效（重新生成再填） */
+  let pendingPairCode = ''
+
+  /** 读回持久化的设备令牌表（preferences 存 JSON 字符串；纯 Web 直接存字符串） */
+  function loadDeviceTokens(raw: unknown): void {
+    if (typeof raw !== 'string' || !raw) return
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        deviceTokens = parsed as Record<string, string>
+      }
+    } catch {
+      // 数据损坏：忽略，走既有审批流程重新领取
+    }
+  }
+
+  function persistDeviceTokens(): void {
+    const json = JSON.stringify(deviceTokens)
+    if (bridge) void bridge.set(DEVICE_TOKENS_KEY, json)
+    else persistLocal(DEVICE_TOKENS_KEY, json)
+  }
 
   function ensureDeviceId(): string {
     if (deviceId) return deviceId
@@ -115,21 +154,41 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
     return deviceId
   }
 
-  /** 连接建立后的本机握手（pending/denied/closed 由对方设备场景产生，状态如实呈现） */
+  /** 连接建立后的接入握手（pending/denied/closed 由对方设备场景产生，状态如实呈现）。
+   *  凭据优先级：当前端点已领取的设备令牌（重连免配对）→ 本机令牌（本机直通；
+   *  跨 Mac 首连必然不匹配，走对方审批）→ 一次性配对码（远程首连，对方视同
+   *  批准直接签发设备令牌）。 */
   async function handshake(): Promise<void> {
     pairState.value = 'unverified'
-    if (!deviceToken) {
-      // 无宿主桥（纯 Web）或令牌缺失：无法完成握手。daemon 未装配闸的旧版本
-      // 仍可用（握手失败不阻塞连接，调用失败时按具体错误提示）
+    pairMessage.value = ''
+    const base = baseEndpoint()
+    const stored = deviceTokens[base] || deviceToken
+    if (!stored && !pendingPairCode) {
+      // 无宿主桥（纯 Web）且无已领取设备令牌、也无配对码：无法完成握手。
+      // daemon 未装配闸的旧版本仍可用（握手失败不阻塞连接，调用失败时按具体错误提示）
       pairState.value = 'failed'
       return
     }
     try {
-      const result = await socket.call<{ status: PairState }>(
+      const result = await socket.call<{ status: PairState; token?: string; message?: string }>(
         'device.handshake',
-        { device_id: ensureDeviceId(), name: deviceName, platform: 'macos', token: deviceToken },
+        {
+          device_id: ensureDeviceId(),
+          name: deviceName,
+          platform: 'macos',
+          token: stored,
+          pair_code: pendingPairCode || undefined,
+        },
         10000,
       )
+      // 首连获批（对方批准或配对码）会下发设备令牌：按端点持久化，
+      // 断线重连时首条消息直接携带该令牌（重连免配对）
+      if (result?.token) {
+        deviceTokens[base] = result.token
+        persistDeviceTokens()
+        pendingPairCode = ''
+      }
+      pairMessage.value = result?.message ?? ''
       pairState.value = result?.status === 'paired' ? 'paired' : (result?.status ?? 'failed')
     } catch (err) {
       // 旧版 daemon（未装配设备闸）没有握手方法：视为已验证，功能全量可用；
@@ -150,14 +209,30 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
     if (socket.state.value === 'connected') void handshake()
   })
 
-  /** 按 mode/remoteUrl 解析目标端点（远程未配地址时回落本地端点保持可用） */
-  function targetUrl(): string {
+  /** 按 mode/remoteUrl 解析基础端点（远程未配地址时回落本地端点保持可用） */
+  function baseEndpoint(): string {
     return mode.value === 'remote' && remoteUrl.value ? remoteUrl.value : LOCAL_DAEMON_URL
+  }
+
+  /** 连接建立后的首条消息设备认证（仅远程端点）：浏览器 WebSocket 无法
+   *  自定义请求头，设备令牌/一次性配对码改由连接后首条消息携带——本机
+   *  端点走环回直通，无需认证。凭证缺失也照发（由主机回告具体原因，
+   *  认证失败主机会断开连接，原因经 onUnhandledError 呈现）。 */
+  function sendFirstMessageAuth(): void {
+    if (mode.value !== 'remote' || !remoteUrl.value) return
+    const token = deviceTokens[baseEndpoint()] || deviceToken
+    if (!socket.notify('device.auth', {
+      token: token || undefined,
+      pair_code: !token && pendingPairCode ? pendingPairCode : undefined,
+    })) {
+      // 发送失败（连接刚被断开）：交由重连机制重试
+    }
   }
 
   /** reconnectTo 幂等（同端点在途/已连时不重连）：首连与重连同路 */
   function start(): void {
-    socket.reconnectTo(targetUrl())
+    socket.onOpen = sendFirstMessageAuth
+    socket.reconnectTo(baseEndpoint())
   }
 
   const bridge = window.mxDesktop?.preferences
@@ -167,6 +242,7 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
     void bridge.getAll().then((all) => {
       mode.value = all?.[MODE_KEY] === 'remote' ? 'remote' : 'local'
       remoteUrl.value = typeof all?.[REMOTE_URL_KEY] === 'string' ? (all[REMOTE_URL_KEY] as string) : ''
+      loadDeviceTokens(all?.[DEVICE_TOKENS_KEY])
       start()
     })
     window.mxDesktop?.wizard.onFinished(() => {
@@ -183,6 +259,11 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
     // 纯 Web 无宿主桥：同步读 localStorage 立即连接（旧路径）
     mode.value = readLocalMode()
     remoteUrl.value = readLocalRemoteUrl()
+    try {
+      loadDeviceTokens(localStorage.getItem(DEVICE_TOKENS_KEY))
+    } catch {
+      // 存储不可用：无已领取令牌，握手按无令牌路径处理
+    }
     start()
   }
 
@@ -202,19 +283,23 @@ export function createDaemonConnection(): DaemonConnection & { dispose(): void }
     get pairState() {
       return pairState.value
     },
+    get pairMessage() {
+      return pairMessage.value
+    },
     switchMode(next: DaemonMode): void {
       if (mode.value === next) return
       mode.value = next
       if (bridge) void bridge.set(MODE_KEY, next)
       else persistLocal(MODE_KEY, next)
-      socket.reconnectTo(targetUrl())
+      socket.reconnectTo(baseEndpoint())
     },
-    setRemoteUrl(url: string): void {
+    setRemoteUrl(url: string, pairCode?: string): void {
       remoteUrl.value = url
+      pendingPairCode = pairCode || ''
       if (bridge) void bridge.set(REMOTE_URL_KEY, url)
       else persistLocal(REMOTE_URL_KEY, url)
       if (mode.value === 'remote') {
-        socket.reconnectTo(targetUrl())
+        socket.reconnectTo(baseEndpoint())
       }
     },
     call: <T,>(method: string, params?: unknown, timeoutMs?: number) =>

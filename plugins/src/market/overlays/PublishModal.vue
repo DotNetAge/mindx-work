@@ -34,6 +34,8 @@ const preview = ref<MarketPackPreview | null>(null)
 // 表单状态
 const version = ref('0.1.0')
 const license = ref('')
+// 发布位置（M7 组织源）：空 = 公共资源社区；非空 = 该组织专属空间（仅组织成员可见）
+const publishOrgSlug = ref('')
 const derived = ref(false)
 const derivedKind = ref('')
 const derivedName = ref('')
@@ -52,6 +54,9 @@ const kindLabels: Record<string, string> = { agent: '成员', skill: '技能', t
 
 const derivedInvalid = computed(() => derived.value && (!derivedKind.value.trim() || !derivedName.value.trim()))
 
+/** 可选发布位置的组织（冻结组织不可选） */
+const publishableOrgs = computed(() => store.myOrgs.filter((o) => o.status !== 'frozen'))
+
 /** 打开时重置到选择步骤（kind 按入口预选） */
 watch(visible, (v) => {
   if (!v) return
@@ -61,6 +66,8 @@ watch(visible, (v) => {
   preview.value = null
   packError.value = ''
   submitError.value = ''
+  publishOrgSlug.value = '' // 每次打开默认公共资源社区
+  void store.fetchMyOrgs()
   void store.fetchLocalPackages()
 })
 
@@ -116,6 +123,7 @@ function publish(): void {
       ...(publishNameEditable.value && targetName ? { publish_name: targetName } : {}),
       version: version.value.trim(),
       ...(license.value.trim() ? { license: license.value.trim() } : {}),
+      ...(publishOrgSlug.value ? { org_slug: publishOrgSlug.value } : {}),
       ...(derived.value
         ? {
             derived_kind: derivedKind.value.trim(),
@@ -125,8 +133,9 @@ function publish(): void {
         : {}),
     })
     .then((res) => {
+      const where = publishOrgSlug.value ? `至「${publishableOrgs.value.find((o) => o.slug === publishOrgSlug.value)?.name || '组织专属空间'}」` : ''
       const suffix = (res.warnings ?? []).length > 0 ? `（${(res.warnings ?? []).length} 条打包告警）` : ''
-      pushNotice(shell, 'success', `已发布「${targetName}」v${res.version}${suffix}`)
+      pushNotice(shell, 'success', `已发布「${targetName}」v${res.version}${where}${suffix}`)
       close()
     })
     .catch((err: unknown) => {
@@ -221,6 +230,15 @@ function close(): void {
       <label :class="$style.field">
         <span :class="$style.fieldLabel">版本号</span>
         <input v-model="version" class="mx-input" placeholder="0.1.0" spellcheck="false" />
+      </label>
+
+      <!-- 发布位置（M7 组织源）：默认公共资源社区，全员可见；组织专属空间仅组织成员可见 -->
+      <label v-if="publishableOrgs.length > 0" :class="$style.field">
+        <span :class="$style.fieldLabel">发布位置</span>
+        <select v-model="publishOrgSlug" class="mx-input">
+          <option value="">公共资源社区（所有用户可见）</option>
+          <option v-for="o in publishableOrgs" :key="o.slug" :value="o.slug">{{ o.name }}（仅组织成员可见）</option>
+        </select>
       </label>
 
       <label :class="$style.field">

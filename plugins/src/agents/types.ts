@@ -1,6 +1,6 @@
 /**
  * agents 插件数据契约（移植自 mindx-desktop types/websocket.ts 与 agentTools.ts；
- * 与 daemon agent.* / mcp.server.* / skill.list RPC 返回结构逐字段对齐，
+ * 与 daemon agent.* / skill.list RPC 返回结构逐字段对齐，
  * 形状经 daemon 实测双证：agent.list/agent.get/hire/fire/update 均为顶层字段）。
  */
 
@@ -125,14 +125,6 @@ export interface SkillInfo {
   license?: string
 }
 
-/** mcp.server.list 条目（仅保留云技能勾选所需字段） */
-export interface CloudConnectorEntry {
-  name: string
-  enabled?: boolean
-  title?: string
-  description?: string
-}
-
 /** 工具定义（name/desc 为 Go 侧工具源码原文；展示名与描述走内置中文文案） */
 export interface ToolDef {
   name: string
@@ -232,6 +224,40 @@ export const GROUP_LABELS: Record<string, string> = {
 }
 
 export const GROUP_DESCS: Record<string, string> = {
-  task: '可将复杂任务分解为多个具体工作项逐项完成',
+  task: '任务分解',
   subagent: '将子任务分发给其他数字员工处理',
+}
+
+// ── 组织信箱（M9：跨机器派工与汇报的载体） ─────────────────────
+
+/** 来信条目（mail.inbox 返回的 daemon 留档视图，字段对齐 snake_case） */
+export interface OrgMailRow {
+  uid: string
+  org_slug: string
+  from_persona: number
+  from_name: string
+  subject: string
+  body: string
+  in_reply_to: string
+  received_at: string
+}
+
+/** 去信条目（mail.list 返回的服务端对账视图） */
+export interface SentMailRow {
+  uid: string
+  to_persona: number
+  subject: string
+  in_reply_to: string
+  /** sent 已寄出（对方未取）/ delivered 对方已取 */
+  status: string
+  created_at: string
+  reply_count: number
+}
+
+/** 组织成员名片（mail.members：写信收件人下拉的数据源） */
+export interface MailMemberCard {
+  persona_id: number
+  display_name: string
+  job_title: string
+  org_role: string
 }

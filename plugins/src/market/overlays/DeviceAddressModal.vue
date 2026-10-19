@@ -1,10 +1,13 @@
 <script setup lang="ts">
 /**
  * 添加连接 modal（纯内容组件，卡片壳由 Overlay 容器提供）。
- * 手动输入另一台设备的地址（发现列表扫不到时的兜底入口，如跨网段或 mDNS 被禁）。
- * 确认时规范化地址（补 ws:// 前缀、去尾斜杠）并保存——切到该设备并立即尝试连接；
- * 连接是异步过程，结果由设备行的状态（已连接/离线）实时反映，本 modal 保存即关。
- * 2026-10-11 新建：原 connection 插件「远程机器地址」modal 的设备分组变体。
+ * 手动输入另一台设备的地址（发现列表扫不到时的兜底入口，如跨网段、
+ * 云服务器等无屏幕主机）。确认时规范化地址（补 ws:// 前缀、去尾斜杠）保存——
+ * 切到该设备并立即尝试连接；结果由设备行的状态实时反映，本 modal 保存即关。
+ * 配对码（可选）：对方是无屏幕主机（没有界面可以点「允许」）时，先在那台
+ * 机器上运行 mindx pair 生成一次性配对码，连同地址一起填写——校验通过即
+ * 完成接入，此后重连不再需要任何确认。同一网络的设备在列表点「连接」即可，
+ * 无需配对码。
  */
 import { ref } from 'vue'
 import { useService, useShell } from '@mindx-work/ui-shell-vue'
@@ -30,10 +33,11 @@ const conn = useService<{
   readonly mode: 'local' | 'remote'
   readonly remoteUrl: string
   switchMode(mode: 'local' | 'remote'): void
-  setRemoteUrl(url: string): void
+  setRemoteUrl(url: string, pairCode?: string): void
 }>('daemon.connection')
 
 const urlInput = ref(conn.remoteUrl)
+const pairInput = ref('')
 const errorText = ref('')
 
 function close(): void {
@@ -48,7 +52,7 @@ async function confirm(): Promise<void> {
     return
   }
   try {
-    conn.setRemoteUrl(url)
+    conn.setRemoteUrl(url, pairInput.value.trim() || undefined)
     conn.switchMode('remote')
     close()
     pushNotice(shell, 'success', '正在连接该设备，连接结果将在设备列表中显示')
@@ -61,12 +65,27 @@ async function confirm(): Promise<void> {
 <template>
   <div :class="$style.body">
     <span :class="$style.title">添加连接</span>
-    <p :class="$style.desc">输入另一台设备的地址即可（例如 192.168.1.100:1314），保存后将立即尝试连接。</p>
+    <p :class="$style.desc">输入另一台设备的地址（例如 192.168.1.100:1314），保存后立即尝试连接。</p>
     <input
       v-model="urlInput"
       :class="$style.input"
       type="text"
       placeholder="192.168.1.100:1314"
+      spellcheck="false"
+      @keydown.enter.prevent="confirm()"
+    />
+    <p :class="$style.desc">
+      对方是无屏幕的主机（如服务器）？先在那台机器上运行
+      <code :class="$style.cmd">mindx pair</code>
+      生成配对码，填在下面。同一网络的设备直接在列表点连接，不用填。
+    </p>
+    <input
+      v-model="pairInput"
+      :class="$style.input"
+      type="text"
+      inputmode="numeric"
+      maxlength="6"
+      placeholder="配对码（可选，6 位数字）"
       spellcheck="false"
       @keydown.enter.prevent="confirm()"
     />
@@ -95,6 +114,11 @@ async function confirm(): Promise<void> {
   font: var(--mx-font-body);
   color: var(--mx-text-secondary);
   line-height: 1.6;
+}
+
+.cmd {
+  font-family: var(--mx-font-mono);
+  color: var(--mx-text);
 }
 
 .input {

@@ -43,6 +43,13 @@ export class DaemonSocket {
   readonly state = ref<ConnectionState>('disconnected')
   readonly lastError = ref<string | null>(null)
 
+  /** 连接建立后的首条消息钩子（可选）：远程连接的设备认证在此发出——
+   *  浏览器 WebSocket 无法自定义请求头，凭证改由连接后首条消息携带，
+   *  且必须先于一切业务消息（认证通过前主机不受理其他消息）。 */
+  onOpen?: () => void
+  /** 服务端主动下发的错误（无匹配请求的 Error 响应，如首条消息认证失败原因） */
+  onUnhandledError?: (message: string) => void
+
   constructor(url: string) {
     this.url = url
   }
@@ -91,8 +98,11 @@ export class DaemonSocket {
       return
     }
     this.ws.onopen = () => {
-      this.state.value = 'connected'
       this.reconnectAttempts = 0
+      // 首条消息钩子先于状态翻转执行：认证消息必须在任何业务消息（含
+      // watch(state) 触发的握手调用）之前发出
+      if (this.onOpen) this.onOpen()
+      this.state.value = 'connected'
       this.startHeartbeat()
     }
     this.ws.onmessage = (event) => this.handleMessage(event.data)
@@ -190,7 +200,11 @@ export class DaemonSocket {
           continue
         }
         const pending = this.pending.get(String(message.id))
-        if (!pending) continue
+        if (!pending) {
+          // 无匹配请求的服务端 Error（如首条消息认证失败）：回调给消费方呈现原因
+          if (message.error && this.onUnhandledError) this.onUnhandledError(message.error.message)
+          continue
+        }
         this.pending.delete(String(message.id))
         if (message.error) pending.reject(new Error(message.error.message))
         else pending.resolve(message.result)

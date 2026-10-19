@@ -15,7 +15,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { MxIcon, useService, useShell } from '@mindx-work/ui-shell-vue'
 import { useMarketStore } from '../store'
 import { pushNotice } from '../notice'
-import { openAuthRequiredSheet } from './accountSheets'
+import { openAuthRequiredSheet, openLegalDoc } from './accountSheets'
 import DeviceAddressModal from './DeviceAddressModal.vue'
 import { MODAL_DEVICE_ADDRESS } from '../ids'
 
@@ -144,6 +144,11 @@ function gateIcon(platform: string): string {
 
 // ── 数据与隐私（单开关并入账户页；评分行为不设限，开关只管数据是否上传分享） ──
 // 状态与切换逻辑归 market store（consentGranted/setConsent）：账户页写、rate 出网闸读。
+
+/** 打开隐私政策：共享法律文本编排（内嵌文档页，与官网公示同源一致） */
+function openPrivacy(): void {
+  void openLegalDoc(shell, store, 'privacy')
+}
 async function toggleConsent(value: boolean): Promise<void> {
   try {
     await store.setConsent(value)
@@ -160,11 +165,19 @@ interface GateDevice {
   id: string
   name: string
   platform: string
+  scope: string
   approved_at: string
+}
+interface GateBlocked {
+  device_id: string
+  name: string
+  platform: string
+  blocked_at: string
 }
 interface GateStatus {
   allowed: boolean
   devices: GateDevice[]
+  blocked?: GateBlocked[]
 }
 interface FoundDevice {
   instance: string
@@ -185,6 +198,7 @@ const conn = useService<{
 
 const gateAllowed = ref(true)
 const gateDevices = ref<GateDevice[]>([])
+const gateBlocked = ref<GateBlocked[]>([])
 const scanning = ref(false)
 const foundDevices = ref<FoundDevice[]>([])
 const scanError = ref('')
@@ -195,6 +209,7 @@ async function refreshGate(): Promise<void> {
     const st = await conn.call<GateStatus>('device.status', {}, 10000)
     gateAllowed.value = st.allowed
     gateDevices.value = st.devices ?? []
+    gateBlocked.value = st.blocked ?? []
   } catch {
     // daemon 未连接：保留现值，通知到达或重挂载时再刷
   }
@@ -216,6 +231,21 @@ async function revokeDevice(dev: GateDevice): Promise<void> {
     pushNotice(shell, 'success', `已移除「${dev.name}」，它将无法再访问这台 Mac`)
   } catch (err) {
     pushNotice(shell, 'error', err instanceof Error ? err.message : '移除设备失败，请稍后重试')
+  }
+}
+
+/** 设备权限的人话说明：ask = 查询级（能对话、查资料，不能改本机管理设置） */
+function scopeText(scope: string): string {
+  return scope === 'local' ? '拥有本机全部权限' : '可对话与查资料，不含本机管理'
+}
+
+/** 解除拒绝：该设备恢复「申请 → 确认」的正常流程 */
+async function unblockDevice(dev: GateBlocked): Promise<void> {
+  try {
+    await conn.call('device.unblock', { device_id: dev.device_id }, 10000)
+    pushNotice(shell, 'success', `已解除对「${dev.name}」的拒绝，它可以再次请求连接`)
+  } catch (err) {
+    pushNotice(shell, 'error', err instanceof Error ? err.message : '解除失败，请稍后重试')
   }
 }
 
@@ -386,14 +416,25 @@ watch(
           </button>
         </div>
 
-        <!-- 已授权设备：批准过的设备可凭凭据重连，此处可移除 -->
+        <!-- 已授权设备：批准过的设备可凭凭据重连，此处可移除；
+             权限标注说明该设备能做什么（对话/查资料 = 查询级，不含本机管理） -->
         <div v-for="dev in gateDevices" :key="dev.id" :class="$style.row">
           <span :class="$style.rowIcon"><MxIcon :name="gateIcon(dev.platform)" :size="16" /></span>
           <span :class="$style.rowMain">
             <span :class="$style.rowTitle">{{ dev.name }}</span>
-            <span :class="$style.rowSub">已授权<template v-if="dev.approved_at"> · {{ new Date(dev.approved_at).toLocaleDateString() }} 批准</template></span>
+            <span :class="$style.rowSub">已授权<template v-if="dev.approved_at"> · {{ new Date(dev.approved_at).toLocaleDateString() }} 批准</template> · {{ scopeText(dev.scope) }}</span>
           </span>
           <button type="button" :class="$style.minorBtn" @click="revokeDevice(dev)">移除</button>
+        </div>
+
+        <!-- 已拒绝：点过「拒绝且不再询问」的设备，重试不再弹窗，此处可解除 -->
+        <div v-for="dev in gateBlocked" :key="dev.device_id" :class="$style.row">
+          <span :class="$style.rowIcon"><MxIcon :name="gateIcon(dev.platform)" :size="16" /></span>
+          <span :class="$style.rowMain">
+            <span :class="$style.rowTitle">{{ dev.name }}</span>
+            <span :class="$style.rowSub">已拒绝 · 它的连接请求不会再打扰你</span>
+          </span>
+          <button type="button" :class="$style.minorBtn" @click="unblockDevice(dev)">解除拒绝</button>
         </div>
 
         <!-- 附近设备：打开此页自动扫描（mDNS 尽力而为），发现即列出，无需手动触发 -->
@@ -440,6 +481,15 @@ watch(
             <span class="mx-switch-thumb" />
           </button>
         </div>
+
+        <!-- 隐私政策：与官网 /privacy 同一文本（账户页与登录页两处公示，内容一致） -->
+        <button type="button" :class="$style.row" @click="openPrivacy()">
+          <span :class="$style.rowIcon"><MxIcon name="lucide:shield-check" :size="16" /></span>
+          <span :class="$style.rowMain">
+            <span :class="$style.rowTitle">隐私政策</span>
+            <span :class="$style.rowSub">了解我们如何收集、使用与保护你的个人信息</span>
+          </span>
+        </button>
       </div>
 
       <!-- 退出登录：离开性操作放页面最底部（2026-10-11 定案），两段式确认防误触 -->

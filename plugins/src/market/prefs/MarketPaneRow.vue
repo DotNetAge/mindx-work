@@ -24,7 +24,7 @@ import SubmitModal from '../overlays/SubmitModal.vue'
 import InboxModal from '../overlays/InboxModal.vue'
 import RatingEntry from '../RatingEntry.vue'
 import { openAccountSheet as openAccountSheets } from '../overlays/accountSheets'
-import { OVERLAY_CONFIRM, MODAL_TEAM_CONFIRM, MODAL_AGENT_CONFIRM, MODAL_SKILL_CONFIRM, MODAL_PAT_CONFIRM, MODAL_PUBLISH, MODAL_SUBMIT, MODAL_INBOX } from '../ids'
+import { OVERLAY_CONFIRM, MODAL_TEAM_CONFIRM, MODAL_AGENT_CONFIRM, MODAL_SKILL_CONFIRM, MODAL_INVITE_CONFIRM, MODAL_PUBLISH, MODAL_SUBMIT, MODAL_INBOX } from '../ids'
 
 type ShelfKey = 'agent' | 'skill' | 'team' | 'plugin' | 'source'
 
@@ -112,7 +112,7 @@ function sourceTitle(s: MarketSourceItem): string {
   return s.tier === 'merchant' ? '专用源' : 'MindX 官方社区'
 }
 
-/** 源卡片描述（tier → 固定文案；邀请码是商户访问令牌的消费者称呼） */
+/** 源卡片描述（tier → 固定文案；邀请码是专用源访问令牌（AT）的消费者称呼） */
 function sourceDesc(s: MarketSourceItem): string {
   return s.tier === 'merchant'
     ? '只为特定用户开放的专用源，需要获得专用邀请码'
@@ -122,12 +122,12 @@ function sourceDesc(s: MarketSourceItem): string {
 /** 卡片「选用」：官方源或已存邀请码的专用源直接换源（daemon 连通探测成功才激活）；
  * 专用源未存邀请码时弹出邀请码对话框 */
 function onPickSource(s: MarketSourceItem): void {
-  if (s.tier !== 'merchant' || store.patSet) {
+  if (s.tier !== 'merchant' || store.inviteCodeSet) {
     void selectSource(s.id)
     return
   }
-  store.requestPatDialog(s.id)
-  openOverlay(MODAL_PAT_CONFIRM, InviteCodeModal)
+  store.requestInviteDialog(s.id)
+  openOverlay(MODAL_INVITE_CONFIRM, InviteCodeModal)
 }
 
 /** 换源写 user.config，daemon 重建客户端并广播（货架经 sourceEpoch 重置重拉） */
@@ -147,9 +147,14 @@ function pushErr(err: unknown): void {
   pushNotice(shell, 'error', err instanceof Error ? err.message : '操作失败')
 }
 
+/** 切换货架所在源：公共资源社区（空值）或我的组织专属空间（switchOrg 递增 epoch，货架自动重拉） */
+function onSwitchOrg(event: Event): void {
+  store.switchOrg((event.target as HTMLSelectElement).value)
+}
+
 // ── 发布 / 投递 / 收件箱（§3/§4）：身份门槛（未绑定 → 账号 Sheet）+ Overlay modal ──
-/** 发布/审核等高价值动作的身份门槛：已绑定用户或已配置商户令牌（daemon 双通道） */
-const canPublish = computed(() => store.account?.user != null || store.patSet)
+/** 发布/审核等高价值动作的身份门槛：已绑定用户或已存专用源邀请码（daemon 双通道） */
+const canPublish = computed(() => store.account?.user != null || store.inviteCodeSet)
 
 /** 打开MindX 账号 Sheet（发布/投递/收件箱未绑定时的引导；已登录显账户信息，未登录显登录遮挡页） */
 function openAccountSheet(): void {
@@ -191,6 +196,7 @@ onMounted(() => {
   void store.fetchSource()
   // 账号状态（评分入口的绑定判断依据）+ 货架懒加载：仅拉当前激活货架，其余切换时按 loaded 标记补拉
   void store.fetchAccount()
+  void store.fetchMyOrgs()
   void loadActive()
   // 分段指示器首帧定位（布局稳定后测量）
   void nextTick(() => syncIndicator(marketTabsRef.value))
@@ -502,6 +508,19 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
     <!-- ── 共用搜索行 + 分类过滤胶囊（全部货架共用，随激活货架切换数据源；来源视图不显示） ── -->
     <template v-if="activeShelf !== 'source'">
       <div :class="$style.toolbar">
+        <!-- 组织源切换（M7）：我所在组织非空才显示；冻结组织置灰不可选 -->
+        <select
+          v-if="store.myOrgs.length > 0"
+          class="mx-input"
+          :class="$style.orgSelect"
+          :value="store.activeOrgSlug"
+          @change="onSwitchOrg"
+        >
+          <option value="">公共资源社区</option>
+          <option v-for="o in store.myOrgs" :key="o.slug" :value="o.slug" :disabled="o.status === 'frozen'">
+            {{ o.name }}{{ o.status === 'frozen' ? '（已冻结）' : '' }}
+          </option>
+        </select>
         <input v-model="searchModel" class="mx-input" :class="$style.search" :placeholder="searchPlaceholder" spellcheck="false" />
         <!-- 发布 / 收件箱（§3/§4）：身份门槛在 handler 内（未绑定 → 账号 Sheet） -->
         <button type="button" class="mx-btn" @click="onOpenPublish">发布</button>
@@ -786,6 +805,12 @@ watch(pluginSentinel, (el, _prev, onCleanup) => {
   align-items: center;
   gap: var(--mx-space-2);
   margin-bottom: var(--mx-space-2);
+}
+
+/* 组织源切换（M7）：宽度随内容自适应，不与搜索框抢空间 */
+.orgSelect {
+  flex: none;
+  max-width: 180px;
 }
 
 .search {

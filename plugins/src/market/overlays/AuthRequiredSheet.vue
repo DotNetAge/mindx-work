@@ -1,17 +1,19 @@
 <script setup lang="ts">
 /**
  * 登录遮挡 Sheet（AuthRequiredSheet）：需要 MindX 账号身份的插件拉起它，
- * 全屏登录/注册表单集中注意力；登录/注册成功自动切到账户信息页（AccountSheet）。
- * 布局仿 Apple 登录页：大标题 + 框内嵌 label 大输入框 + 大圆角主按钮 + 底部切换链接。
- * 自动注册常态下用户已登录，本页只在自动注册失败（如服务端不可达）或用户退出登录后露面。
+ * 全屏登录集中注意力；登录成功自动切到账户信息页（AccountSheet）。
+ * 主入口是社区登录（第三方账号 + 设备授权流）：daemon 发起 device flow 打开
+ * 系统浏览器授权页，用户在网页点一次「授权此设备」，本页轮询状态自动继续，
+ * 全程无令牌粘贴。账密表单保留代码暂不渲染（手机验证码登录开通后启用）。
+ * 布局仿 Apple 登录页：大标题 + 大圆角主按钮 + 底部切换链接。
  * 错误一律 pushNotice 人话呈现，禁止开终端窗口甩 JSON。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { MxIcon, useShell } from '@mindx-work/ui-shell-vue'
 import { useMarketStore } from '../store'
 import { pushNotice } from '../notice'
-import { SHEET_ACCOUNT, SHEET_AUTH_REQUIRED, SHEET_BROWSER } from '../ids'
-import BrowserSheet from './BrowserSheet.vue'
+import { SHEET_ACCOUNT, SHEET_AUTH_REQUIRED } from '../ids'
+import { openLegalDoc } from './accountSheets'
 
 const store = useMarketStore()
 const shell = useShell()
@@ -20,7 +22,11 @@ const user = computed(() => store.account?.user ?? null)
 /** 令牌失效：已录过令牌但服务端校验不过（文案改「登录已失效」） */
 const tokenStale = computed(() => !!store.account && store.account.has_token && !user.value)
 
-/** 登录/注册成功：Sheet 形态时本 Sheet 替换为账户信息页；
+/** 账密表单开关（2026-10-16 定案：社区登录为主入口，账密表单保留代码不渲染，
+ * 手机验证码登录开通后置 true 启用） */
+const legacyAuthEnabled = false
+
+/** 登录成功：Sheet 形态时本 Sheet 替换为账户信息页；
  * 设置页内嵌形态（不在 Sheet 中）不动壳，交由宿主响应式分流 */
 async function showAccount(): Promise<void> {
   if (!shell.Sheet.has(SHEET_AUTH_REQUIRED)) return
@@ -29,31 +35,33 @@ async function showAccount(): Promise<void> {
   shell.Sheet.add({ id: SHEET_ACCOUNT, title: 'MindX 账号', component: AccountSheet as never })
 }
 
-/** 打开法律文本：内嵌 BrowserSheet（不开系统浏览器）。
- * 市场站点地址唯一来源 = 选中源 base_url（store.marketSite）；未加载先刷源目录，
- * 仍缺失则提示（不硬编码兜底地址——市场地址只允许在源目录一处修改）。
- * Sheet 互斥：先移除在场条目（本 Sheet 自身）再拉起文档页 */
-async function openLegal(page: 'tos' | 'privacy'): Promise<void> {
-  if (!store.marketSite && store.sources.length === 0) {
-    await store.fetchSource().catch(() => {})
-  }
-  const base = store.marketSite
-  if (!base) {
-    pushNotice(shell, 'error', '暂时连不上社区，无法打开文档')
-    return
-  }
-  const url = `${base.replace(/\/$/, '')}/${page}`
-  const current = shell.Sheet.entries[0]
-  if (current) shell.Sheet.remove(current.id)
-  store.browserSheetUrl = url
-  shell.Sheet.add({
-    id: SHEET_BROWSER,
-    title: page === 'tos' ? '服务条款' : '隐私声明',
-    component: BrowserSheet as never,
+// ── 社区登录（主入口）：device flow 编排状态由 store 承载 ─────────
+const devicePhase = computed(() => store.deviceLoginPhase)
+const deviceError = computed(() => store.deviceLoginError)
+
+/** 发起社区登录：daemon 打开系统浏览器授权页并后台轮询，本页进入等待态 */
+function startCommunityLogin(): void {
+  void store.startDeviceLogin().catch((err: unknown) => {
+    pushNotice(shell, 'error', err instanceof Error ? err.message : '无法发起社区登录，请稍后重试')
   })
 }
 
-// ── 登录 / 注册（内联表单，视图切换） ─────────────────────────
+// 授权完成（daemon 轮询 done 后已刷新账号）→ 切账户信息页
+watch(devicePhase, (phase) => {
+  if (phase === 'done') void showAccount()
+})
+
+// 关 Sheet / 组件卸载停轮询（后台编排继续，重开可恢复观察）
+onBeforeUnmount(() => {
+  store.disposeDeviceLogin()
+})
+
+/** 打开法律文本：薄包装转调共享编排（accountSheets.openLegalDoc） */
+function openLegal(page: 'tos' | 'privacy'): void {
+  void openLegalDoc(shell, store, page)
+}
+
+// ── 登录 / 注册（账密内联表单，暂不渲染，保留待手机验证码登录开通） ─────────
 const authMode = ref<'login' | 'register'>('login')
 const authForm = reactive({ username: '', password: '', confirm: '', display_name: '' })
 const authBusy = ref(false)
@@ -116,53 +124,74 @@ onMounted(() => {
         注册并不是强制的——即使不注册，也不会影响你的使用。只是，如果你想保存点赞的记录、让你下载的员工、团队、技能、插件能随同更新，或者希望将你的成果分享到社区，那就需要注册成为 MindX 的一员。
       </p>
 
-      <!-- 登录视图 -->
-      <form v-if="authMode === 'login'" :class="$style.authForm" @submit.prevent="submitAuth">
-        <div :class="$style.bigField">
-          <span :class="$style.bigLabel">用户名</span>
-          <input v-model="authForm.username" :class="$style.bigInput" type="text" autocomplete="username" spellcheck="false" />
+      <!-- 社区登录主入口：daemon 打开系统浏览器授权页，等待态自动继续 -->
+      <div :class="$style.communityArea">
+        <button
+          v-if="devicePhase === 'idle' || devicePhase === 'done'"
+          type="button"
+          :class="$style.bigBtn"
+          @click="startCommunityLogin"
+        >使用第三方账号登录</button>
+        <div v-else-if="devicePhase === 'pending'" :class="$style.waitCard">
+          <span :class="$style.waitTitle">已在浏览器打开社区登录页</span>
+          <p :class="$style.waitNote">在网页上选择一种账号完成授权后，这里会自动继续。浏览器没有打开？<button type="button" :class="$style.noteLink" @click="startCommunityLogin">重新打开</button></p>
         </div>
-        <div :class="$style.bigField">
-          <span :class="$style.bigLabel">密码</span>
-          <input v-model="authForm.password" :class="$style.bigInput" type="password" autocomplete="current-password" />
-        </div>
-        <button type="submit" :class="$style.bigBtn" :disabled="authBusy">
-          {{ authBusy ? '请稍候…' : '登录' }}
-        </button>
-      </form>
-      <p v-else-if="authMode === 'register'" :class="$style.authFormTitle">创建你的 MindX 账号</p>
+        <template v-else>
+          <p :class="$style.error">{{ deviceError || '社区登录未完成，请重试' }}</p>
+          <button type="button" :class="$style.bigBtn" @click="startCommunityLogin">重试</button>
+        </template>
+      </div>
 
-      <!-- 注册视图 -->
-      <form v-if="authMode === 'register'" :class="$style.authForm" @submit.prevent="submitAuth">
-        <div :class="$style.bigField">
-          <span :class="$style.bigLabel">用户名</span>
-          <input v-model="authForm.username" :class="$style.bigInput" type="text" autocomplete="username" spellcheck="false" />
-        </div>
-        <div :class="$style.bigField">
-          <span :class="$style.bigLabel">您的称呼（可选）</span>
-          <input v-model="authForm.display_name" :class="$style.bigInput" type="text" maxlength="32" spellcheck="false" />
-        </div>
-        <div :class="$style.bigField">
-          <span :class="$style.bigLabel">密码</span>
-          <input v-model="authForm.password" :class="$style.bigInput" type="password" autocomplete="new-password" placeholder="至少 8 位" />
-        </div>
-        <div :class="$style.bigField">
-          <span :class="$style.bigLabel">确认密码</span>
-          <input v-model="authForm.confirm" :class="$style.bigInput" type="password" autocomplete="new-password" />
-        </div>
-        <button type="submit" :class="$style.bigBtn" :disabled="authBusy">
-          {{ authBusy ? '请稍候…' : '创建账号' }}
-        </button>
-        <p :class="$style.tosNote">注册即表示你已阅读并同意<button type="button" :class="$style.noteLink" @click="openLegal('tos')">服务条款</button>与<button type="button" :class="$style.noteLink" @click="openLegal('privacy')">隐私声明</button>；历史匿名评分将迁移到账号名下。</p>
-      </form>
+      <p :class="$style.note">登录后本设备自动绑定到账号；凭据保存在本机密钥存储中，重装应用后自动恢复登录。</p>
 
-      <!-- 底部切换链接（仿 Apple「没有 Apple 账户？立即创建」） -->
-      <p :class="$style.authSwitch">
-        <template v-if="authMode === 'login'">还没有账号？<button type="button" :class="$style.switchLink" @click="authMode = 'register'">创建一个</button></template>
-        <template v-else>已有账号？<button type="button" :class="$style.switchLink" @click="authMode = 'login'">直接登录</button></template>
-      </p>
+      <!-- 账密登录/注册（暂不渲染：社区登录为主入口，手机验证码登录开通后启用） -->
+      <template v-if="legacyAuthEnabled">
+        <!-- 登录视图 -->
+        <form v-if="authMode === 'login'" :class="$style.authForm" @submit.prevent="submitAuth">
+          <div :class="$style.bigField">
+            <span :class="$style.bigLabel">用户名</span>
+            <input v-model="authForm.username" :class="$style.bigInput" type="text" autocomplete="username" spellcheck="false" />
+          </div>
+          <div :class="$style.bigField">
+            <span :class="$style.bigLabel">密码</span>
+            <input v-model="authForm.password" :class="$style.bigInput" type="password" autocomplete="current-password" />
+          </div>
+          <button type="submit" :class="$style.bigBtn" :disabled="authBusy">
+            {{ authBusy ? '请稍候…' : '登录' }}
+          </button>
+        </form>
+        <p v-else-if="authMode === 'register'" :class="$style.authFormTitle">创建你的 MindX 账号</p>
 
-      <p v-if="authMode === 'login'" :class="$style.note">登录后本设备自动绑定到账号；凭据保存在本机密钥存储中，重装应用后自动恢复登录。</p>
+        <!-- 注册视图 -->
+        <form v-if="authMode === 'register'" :class="$style.authForm" @submit.prevent="submitAuth">
+          <div :class="$style.bigField">
+            <span :class="$style.bigLabel">用户名</span>
+            <input v-model="authForm.username" :class="$style.bigInput" type="text" autocomplete="username" spellcheck="false" />
+          </div>
+          <div :class="$style.bigField">
+            <span :class="$style.bigLabel">您的称呼（可选）</span>
+            <input v-model="authForm.display_name" :class="$style.bigInput" type="text" maxlength="32" spellcheck="false" />
+          </div>
+          <div :class="$style.bigField">
+            <span :class="$style.bigLabel">密码</span>
+            <input v-model="authForm.password" :class="$style.bigInput" type="password" autocomplete="new-password" placeholder="至少 8 位" />
+          </div>
+          <div :class="$style.bigField">
+            <span :class="$style.bigLabel">确认密码</span>
+            <input v-model="authForm.confirm" :class="$style.bigInput" type="password" autocomplete="new-password" />
+          </div>
+          <button type="submit" :class="$style.bigBtn" :disabled="authBusy">
+            {{ authBusy ? '请稍候…' : '创建账号' }}
+          </button>
+          <p :class="$style.tosNote">注册即表示你已阅读并同意<button type="button" :class="$style.noteLink" @click="openLegal('tos')">服务条款</button>与<button type="button" :class="$style.noteLink" @click="openLegal('privacy')">隐私声明</button>；历史匿名评分将迁移到账号名下。</p>
+        </form>
+
+        <!-- 底部切换链接（仿 Apple「没有 Apple 账户？立即创建」） -->
+        <p :class="$style.authSwitch">
+          <template v-if="authMode === 'login'">还没有账号？<button type="button" :class="$style.switchLink" @click="authMode = 'register'">创建一个</button></template>
+          <template v-else>已有账号？<button type="button" :class="$style.switchLink" @click="authMode = 'login'">直接登录</button></template>
+        </p>
+      </template>
     </template>
   </div>
 </template>
@@ -227,6 +256,37 @@ onMounted(() => {
   color: var(--mx-text-tertiary);
   line-height: 1.7;
   text-align: center;
+}
+
+/* ── 社区登录主入口：竖排大按钮 / 等待态卡片 ── */
+.communityArea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-4);
+}
+
+/* 等待态卡片：轻背景 + 提示文案，与底层视觉分离但不用强边框卡片 */
+.waitCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-2);
+  padding: var(--mx-space-4) var(--mx-space-4);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--mx-accent) 7%, transparent);
+}
+
+.waitTitle {
+  font: var(--mx-font-body);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--mx-text);
+}
+
+.waitNote {
+  margin: 0;
+  font: var(--mx-font-caption);
+  color: var(--mx-text-tertiary);
+  line-height: 1.7;
 }
 
 /* ── 登录/注册表单（仿 Apple 登录页：大输入框框内嵌 label + 大圆角主按钮） ── */

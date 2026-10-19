@@ -92,3 +92,9 @@
 - **Vue 受控 checkbox 在 `click()` 后同步读 `.checked` 是 patch 前旧值**：change → toggle → ref 更新 → DOM 回写走微任务，同步读数是假象；断言勾选态要 sleep 后重读或读按钮计数文案。
 - **向导「已导入」语义 = 验证通过 + 查重命中**：provider/model 已存在时跳过创建同样标记 imported（幂等语义），providers.yml/models.yml mtime 不变不代表导入失败；验证失败（401/403）则不落盘不回显 key。
 - **key 直连供应商 403 不一定是 verify 实现错**：先拿 shell 里的 key 手动 curl 供应商端点（不回显明文，只看状态码）交叉验证——本机 Anthropic/OpenRouter key 直连即 403（key 本身当前网络环境不可用），verify 判定正确。
+
+## 样式 token 与原语类猜测纪律（2026-10-17 经验插件 uikit 对齐实锤）
+
+- **CSS 类名/token 名也是 API，typecheck 不查、错得静默**：experience 插件首版写了不存在的 `--mx-color-border/--mx-color-accent/--mx-color-text-muted`（真实 token 无 `-color-` 中缀：`--mx-separator/--mx-text-tertiary/--mx-accent`）与全仓无定义的 `mx-text-btn`——`var()` 靠回退字面值苟活、按钮直接裸奔，vue-tsc 全绿毫无感知。写界面前先 grep `ui-shell-vue/src/styles/tokens.css`（token）与 `controls.css`（原语类）确认真实名字，有代码依据才落笔（mx-plugin-dev 军规 9 对样式同样适用）。
+- **字体/间距禁裸 px**：字号只许 `--mx-font-*` 七档、间距只许 `--mx-space-1..7`（4pt 网格），`font-size: 14px`、`gap: 12px` 这类裸值都违规；交互控件伪类四件套（hover/active/focus-visible/disabled）全量显式。
+- **mx-plugin-dev 技能先于手写**：插件开发先加载 `mindx/runtime/skills/mx-plugin-dev`（席位映射/军规/uikit 全在里面），参照既有插件范式不等于对齐规范——本轮参照 market 插件手写，仍漏了目录席位归属（Settings.page 组件应在 `prefs/`）与 uikit 两大项。

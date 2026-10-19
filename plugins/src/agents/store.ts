@@ -12,8 +12,10 @@ import type {
   AgentDetailResp,
   AgentMeta,
   AgentUpdateParams,
-  CloudConnectorEntry,
   HireResult,
+  MailMemberCard,
+  OrgMailRow,
+  SentMailRow,
   SkillInfo,
   TeamDetail,
   TeamMeta,
@@ -219,7 +221,7 @@ export const useAgentsStore = defineStore('agents-store', () => {
   })
 
   // ---------- 详情 / 保存 ----------
-  /** 拉取员工详情（IDENTITY 正文 = introduction，SOUL 正文 = soul，allows_tools 云技能清单） */
+  /** 拉取员工详情（IDENTITY 正文 = introduction，SOUL 正文 = soul） */
   async function loadAgentDetail(name: string): Promise<AgentDetailResp> {
     return daemon.call<AgentDetailResp>('agent.get', { name })
   }
@@ -227,29 +229,6 @@ export const useAgentsStore = defineStore('agents-store', () => {
   /** 保存员工配置（agent.update；失败抛错由调用方呈现） */
   async function updateAgent(params: AgentUpdateParams): Promise<void> {
     await daemon.call('agent.update', params)
-  }
-
-  // ---------- 云技能（技能连接器：enabled=true 的 MCP 服务，勾选写入 allows_tools） ----------
-  const connectors = ref<CloudConnectorEntry[]>([])
-  const cloudLoading = ref(false)
-  const cloudLoaded = ref(false)
-
-  /** 拉取启用的技能连接器清单（title 优先为展示名，描述降级为空串） */
-  async function loadConnectors(): Promise<void> {
-    cloudLoading.value = true
-    try {
-      const list = await daemon.call<CloudConnectorEntry[]>('mcp.server.list', {})
-      connectors.value = (list || [])
-        .filter((s) => s.enabled)
-        .map((s) => ({
-          name: String(s.name || ''),
-          title: String(s.title || '').trim() || String(s.name || ''),
-          description: String(s.description || '').trim(),
-        }))
-      cloudLoaded.value = true
-    } finally {
-      cloudLoading.value = false
-    }
   }
 
   // ---------- 许可证阅读 ----------
@@ -289,6 +268,76 @@ export const useAgentsStore = defineStore('agents-store', () => {
     pendingConfirm.value = null
   }
 
+  // ---------- 组织信箱（来信/去信/成员名片；M9 跨机器派工与汇报） ----------
+  const inbox = ref<OrgMailRow[]>([])
+  const inboxLoading = ref(false)
+  const inboxLoaded = ref(false)
+
+  async function loadInbox(): Promise<void> {
+    inboxLoading.value = true
+    try {
+      const res = await daemon.call<{ mails: OrgMailRow[] }>('mail.inbox', {})
+      inbox.value = res.mails || []
+      inboxLoaded.value = true
+    } finally {
+      inboxLoading.value = false
+    }
+  }
+
+  const sent = ref<SentMailRow[]>([])
+  const sentOrg = ref('')
+  const sentLoading = ref(false)
+  const sentLoaded = ref(false)
+
+  async function loadSent(): Promise<void> {
+    sentLoading.value = true
+    try {
+      const res = await daemon.call<{ org_slug: string; mails: SentMailRow[] }>('mail.list', {})
+      sent.value = res.mails || []
+      sentOrg.value = res.org_slug || ''
+      sentLoaded.value = true
+    } finally {
+      sentLoading.value = false
+    }
+  }
+
+  const mailMembers = ref<MailMemberCard[]>([])
+  const mailMePersona = ref(0)
+
+  async function loadMailMembers(): Promise<void> {
+    const res = await daemon.call<{ members: MailMemberCard[]; me_persona: number }>('mail.members', {})
+    mailMembers.value = res.members || []
+    mailMePersona.value = res.me_persona || 0
+  }
+
+  /** 寄新信（收件人为成员显示名）；成功后后台刷新去信对账 */
+  async function sendMail(
+    to: string,
+    subject: string,
+    body: string,
+  ): Promise<{ uid: string; delivered_directly: boolean }> {
+    const res = await daemon.call<{ uid: string; delivered_directly: boolean }>('mail.send', {
+      to,
+      subject,
+      body,
+    })
+    void loadSent().catch(() => {})
+    return res
+  }
+
+  /** 按信件编号回信；成功后后台刷新去信对账 */
+  async function replyMail(
+    uid: string,
+    body: string,
+  ): Promise<{ uid: string; in_reply_to: string; delivered_directly: boolean }> {
+    const res = await daemon.call<{ uid: string; in_reply_to: string; delivered_directly: boolean }>(
+      'mail.reply',
+      { uid, body },
+    )
+    void loadSent().catch(() => {})
+    return res
+  }
+
   return {
     // 员工清单
     agents,
@@ -324,11 +373,6 @@ export const useAgentsStore = defineStore('agents-store', () => {
     // 详情/保存
     loadAgentDetail,
     updateAgent,
-    // 云技能
-    connectors,
-    cloudLoading,
-    cloudLoaded,
-    loadConnectors,
     // 许可证
     license,
     openLicense,
@@ -337,5 +381,20 @@ export const useAgentsStore = defineStore('agents-store', () => {
     requestConfirm,
     runConfirm,
     cancelConfirm,
+    // 组织信箱
+    inbox,
+    inboxLoading,
+    inboxLoaded,
+    loadInbox,
+    sent,
+    sentOrg,
+    sentLoading,
+    sentLoaded,
+    loadSent,
+    mailMembers,
+    mailMePersona,
+    loadMailMembers,
+    sendMail,
+    replyMail,
   }
 })

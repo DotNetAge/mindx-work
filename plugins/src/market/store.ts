@@ -116,6 +116,8 @@ export interface MarketPublishInput {
   derived_kind?: string
   derived_name?: string
   derived_version?: string
+  /** 组织源 slug（缺省 = 发布到公共资源社区；非空 = 发布到该组织专属空间） */
+  org_slug?: string
 }
 
 /** market.submit 输入（投递目标 = 原包名，清单身份须与目标一致，§4） */
@@ -199,6 +201,18 @@ export interface MarketSourceItem {
   base_url?: string
   manifest_url: string
   selected: boolean
+}
+
+/** 我所在的组织条目（market.org.list RPC；发布目标选择与货架组织切换的数据源） */
+export interface MarketOrgItem {
+  org_id: number
+  slug: string
+  name: string
+  logo_url?: string
+  org_role: 'owner' | 'admin' | 'member'
+  /** active 正常 / frozen 冻结（冻结组织不可选，置灰展示） */
+  status: 'active' | 'frozen'
+  joined_at: string
 }
 
 /** 团队包展示名（统一显示规则：昵称优先，回退包名） */
@@ -393,6 +407,7 @@ export const useMarketStore = defineStore('market', () => {
       page_size: SHELF_PAGE_SIZE,
       kind: 'plugin',
       ...(q ? { q } : {}),
+      ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
     })
     if (seq !== pluginLoadSeq) return
     pluginPackages.value.push(...filterByKind(res.packages || [], 'plugin'))
@@ -604,12 +619,12 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  // ---------- 市场源（daemon user.config market_source_id/market_pat；列表经 market.sources RPC） ----------
+  // ---------- 市场源（daemon user.config market_source_id/market_pat，market_pat 键名历史沿用；列表经 market.sources RPC） ----------
   const sources = ref<MarketSourceItem[]>([])
   const sourcesLoading = ref(false)
   const sourcesError = ref<string | null>(null)
-  /** 商户访问令牌是否已配置（user.config market_pat_set 布尔，令牌明文不回读） */
-  const patSet = ref(false)
+  /** 专用源邀请码是否已配置（user.config market_pat_set 布尔，键名历史沿用；令牌明文不回读） */
+  const inviteCodeSet = ref(false)
   /** 换源序号：换源动作与 market_changed 广播后递增，货架据此重置重拉 */
   const sourceEpoch = ref(0)
 
@@ -617,7 +632,7 @@ export const useMarketStore = defineStore('market', () => {
   async function fetchSource(): Promise<void> {
     if (!daemon) return
     const cfg = await daemon.call<Record<string, unknown>>('user.config', {})
-    patSet.value = cfg?.market_pat_set === true
+    inviteCodeSet.value = cfg?.market_pat_set === true
     sourcesLoading.value = true
     sourcesError.value = null
     try {
@@ -641,22 +656,22 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   /** 邀请码对话框状态：待连接的专用源 id（空 = 对话框关闭） */
-  const patDialogSourceId = ref('')
+  const inviteDialogSourceId = ref('')
 
-  function requestPatDialog(sourceID: string): void {
-    patDialogSourceId.value = sourceID
+  function requestInviteDialog(sourceID: string): void {
+    inviteDialogSourceId.value = sourceID
   }
 
-  function cancelPatDialog(): void {
-    patDialogSourceId.value = ''
+  function cancelInviteDialog(): void {
+    inviteDialogSourceId.value = ''
   }
 
   /** 连接专用源：邀请码与源 id 一次写入（daemon 连通探测成功才激活，
    * 邀请码无效/源不可达时原样抛错）。成功后重拉源清单与货架 */
-  async function connectMerchant(sourceID: string, pat: string): Promise<void> {
+  async function connectMerchant(sourceID: string, inviteCode: string): Promise<void> {
     if (!daemon) throw new Error('连接专用源需要连接智能主机')
-    await daemon.call('user.config', { market_source_id: sourceID, market_pat: pat })
-    patSet.value = true
+    await daemon.call('user.config', { market_source_id: sourceID, market_pat: inviteCode })
+    inviteCodeSet.value = true
     sourceEpoch.value++
     void fetchSource()
   }
@@ -669,6 +684,33 @@ export const useMarketStore = defineStore('market', () => {
       sourceEpoch.value++
       void fetchSource()
     })
+  }
+
+  // ---------- 组织源（M7 组织化协作：我所在的组织清单 + 货架组织切换） ----------
+  const myOrgs = ref<MarketOrgItem[]>([])
+  const myOrgsLoading = ref(false)
+  /** 当前货架所在源：空 = 公共资源社区；非空 = 组织 slug（浏览/下载均限定该组织专属空间） */
+  const activeOrgSlug = ref('')
+
+  /** 拉取当前账号所在组织清单（未绑定账号返回空清单，不打断货架浏览） */
+  async function fetchMyOrgs(): Promise<void> {
+    if (!daemon) return
+    myOrgsLoading.value = true
+    try {
+      const res = await daemon.call<{ orgs?: MarketOrgItem[] }>('market.org.list', {})
+      myOrgs.value = Array.isArray(res?.orgs) ? res.orgs : []
+    } catch {
+      myOrgs.value = [] // 未绑定或服务不可用：组织入口直接不展示
+    } finally {
+      myOrgsLoading.value = false
+    }
+  }
+
+  /** 切换货架组织源：递增 sourceEpoch 复用换源重拉链路（全部货架重置，激活货架立即重载） */
+  function switchOrg(slug: string): void {
+    if (activeOrgSlug.value === slug) return
+    activeOrgSlug.value = slug
+    sourceEpoch.value++
   }
 
   // ---------- 成员货架（market.list kind=agent；服务端分页 + 服务端 q 搜索） ----------
@@ -727,6 +769,7 @@ export const useMarketStore = defineStore('market', () => {
       page_size: SHELF_PAGE_SIZE,
       kind: 'agent',
       ...(q ? { q } : {}),
+      ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
     })
     if (seq !== agentLoadSeq) return
     agentPackages.value.push(...filterByKind(res.packages || [], 'agent'))
@@ -779,11 +822,17 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  /** 安装市场成员包（market.install kind=agent；同名冲突默认拒绝，错误原样上抛由组件确认后 overwrite 重试） */
+  /** 安装市场成员包（market.install kind=agent；同名冲突默认拒绝，错误原样上抛由组件确认后 overwrite 重试）。
+   * activeOrgSlug 非空时从该组织专属空间下载安装 */
   async function installAgentPackage(pkg: MarketPkg, overwrite = false): Promise<void> {
     if (!daemon) throw new Error('成员安装需要连接智能主机')
     try {
-      await daemon.call('market.install', { kind: 'agent', name: pkg.name, ...(overwrite ? { overwrite: true } : {}) })
+      await daemon.call('market.install', {
+        kind: 'agent',
+        name: pkg.name,
+        ...(overwrite ? { overwrite: true } : {}),
+        ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('已存在同名智能体')) throw new AgentExistsError(msg)
@@ -842,6 +891,7 @@ export const useMarketStore = defineStore('market', () => {
       page_size: SHELF_PAGE_SIZE,
       kind: 'skill',
       ...(q ? { q } : {}),
+      ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
     })
     if (seq !== skillLoadSeq) return
     skillPackages.value.push(...filterByKind(res.packages || [], 'skill'))
@@ -891,11 +941,17 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  /** 安装市场技能包（market.install kind=skill；同名冲突默认拒绝，错误原样上抛） */
+  /** 安装市场技能包（market.install kind=skill；同名冲突默认拒绝，错误原样上抛）。
+   * activeOrgSlug 非空时从该组织专属空间下载安装 */
   async function installSkillPackage(pkg: MarketPkg, overwrite = false): Promise<void> {
     if (!daemon) throw new Error('技能安装需要连接智能主机')
     try {
-      await daemon.call('market.install', { kind: 'skill', name: pkg.name, ...(overwrite ? { overwrite: true } : {}) })
+      await daemon.call('market.install', {
+        kind: 'skill',
+        name: pkg.name,
+        ...(overwrite ? { overwrite: true } : {}),
+        ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('已存在同名技能')) throw new SkillExistsError(msg)
@@ -939,6 +995,7 @@ export const useMarketStore = defineStore('market', () => {
       page_size: TEAM_PAGE_SIZE,
       kind: 'team',
       ...(q ? { q } : {}),
+      ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
     })
     if (seq !== teamLoadSeq) return
     teamPackages.value.push(...filterByKind(res.packages || [], 'team'))
@@ -998,6 +1055,7 @@ export const useMarketStore = defineStore('market', () => {
         kind: 'team',
         name: pkg.name,
         ...(overwrite ? { overwrite: true } : {}),
+        ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -1257,7 +1315,14 @@ export const useMarketStore = defineStore('market', () => {
       throw new Error('未开启「分享我的评分」，评分数据不会上传；可在 设置 → 账户 → 数据与隐私 开启')
     }
     if (!daemon) throw new Error('评分需要连接智能主机')
-    const res = await daemon.call<{ rating_avg?: number; rating_count?: number }>('market.rate', { kind, name, score })
+    // 评分跟随当前货架回路（M8 内容自由原则）：组织货架的包评组织分（实名），
+    // 公共货架的包评公共分；聚合刷新同样命中当前货架条目
+    const res = await daemon.call<{ rating_avg?: number; rating_count?: number }>('market.rate', {
+      kind,
+      name,
+      score,
+      ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
+    })
     const lists = [agentPackages, skillPackages, teamPackages, pluginPackages]
     for (const list of lists) {
       const pkg = list.value.find((p) => p.kind === kind && p.name === name)
@@ -1270,10 +1335,15 @@ export const useMarketStore = defineStore('market', () => {
     return res
   }
 
-  /** 查询当前身份对包的评分（modal 打开时回显；rated=false 即未评过） */
+  /** 查询当前身份对包的评分（modal 打开时回显；rated=false 即未评过）。
+   * 跟随当前货架回路（M8）：组织货架查组织回路评分 */
   async function getMyRating(kind: MarketPkg['kind'], name: string): Promise<{ rated: boolean; score: number }> {
     if (!daemon) throw new Error('评分查询需要连接智能主机')
-    return daemon.call<{ rated: boolean; score: number }>('market.rating.get', { kind, name })
+    return daemon.call<{ rated: boolean; score: number }>('market.rating.get', {
+      kind,
+      name,
+      ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}),
+    })
   }
 
   /** 当前生效市场源的服务根地址（官网侧落地页 base；来自源清单选中项，仅引导跳转用不外显） */
@@ -1442,19 +1512,25 @@ export const useMarketStore = defineStore('market', () => {
     installedPluginIds,
     loadPluginMarket,
     loadPluginMarketMore,
-    // 市场源（换源入口：源列表选择 + 商户访问令牌；货架刷新由广播与本地 epoch 双驱动）
+    // 市场源（换源入口：源列表选择 + 专用源邀请码；货架刷新由广播与本地 epoch 双驱动）
     sources,
     sourcesLoading,
     sourcesError,
-    patSet,
+    inviteCodeSet,
     sourceEpoch,
     fetchSource,
     setSource,
-    patDialogSourceId,
-    requestPatDialog,
-    cancelPatDialog,
+    inviteDialogSourceId,
+    requestInviteDialog,
+    cancelInviteDialog,
     connectMerchant,
     watchMarketChanged,
+    // 组织源（M7：我所在组织清单 + 货架组织切换；切换复用 sourceEpoch 重拉链路）
+    myOrgs,
+    myOrgsLoading,
+    activeOrgSlug,
+    fetchMyOrgs,
+    switchOrg,
     // 成员货架（market.list kind=agent；服务端分页：搜索/追加加载）
     agentPackages,
     agentTotal,

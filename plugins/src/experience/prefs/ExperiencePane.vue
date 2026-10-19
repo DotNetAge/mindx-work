@@ -40,6 +40,34 @@ const keyword = ref('')
 const detail = ref<{ item: ExperienceItem; html: string } | null>(null)
 const detailLoading = ref(false)
 
+// ── 回路切换（M8 内容自由原则：经验阅读也是回路选项）──
+/** 我所在组织（与货架同源 daemon RPC market.org.list；插件间禁 import，自取一份） */
+interface OrgItem {
+  slug: string
+  name: string
+  status: 'active' | 'frozen'
+}
+const myOrgs = ref<OrgItem[]>([])
+/** 空串 = 公共经验库；非空 = 该组织的经验（仅组织成员可见） */
+const activeOrgSlug = ref('')
+
+/** 拉取所在组织清单（未登录/服务不可用静默为空——下拉不出现，不打扰公共阅读） */
+async function loadMyOrgs() {
+  try {
+    const res = await daemon.call<{ orgs?: OrgItem[] }>('market.org.list', {})
+    myOrgs.value = (res.orgs ?? []).filter((o) => o.status !== 'frozen')
+  } catch {
+    myOrgs.value = []
+  }
+}
+
+/** 切换经验回路：清空详情回到列表，重拉当前回路 */
+function switchOrg(event: Event) {
+  activeOrgSlug.value = (event.target as HTMLSelectElement).value
+  detail.value = null
+  void load(keyword.value)
+}
+
 /** 未登录的引导文案（daemon 返回的错误原文即人话，直接透传） */
 async function load(q = '') {
   loading.value = true
@@ -47,7 +75,7 @@ async function load(q = '') {
   try {
     const res = await daemon.call<{ experiences: ExperienceItem[] }>(
       'market.experience.list',
-      { q },
+      { q, ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}) },
     )
     items.value = res.experiences ?? []
     notLoggedIn.value = false
@@ -75,7 +103,7 @@ async function openDetail(item: ExperienceItem) {
   try {
     const res = await daemon.call<{ experience: ExperienceItem & { markdown?: string } }>(
       'market.experience.get',
-      { id: item.id },
+      { id: item.id, ...(activeOrgSlug.value ? { org_slug: activeOrgSlug.value } : {}) },
     )
     const raw = marked.parse(res.experience.markdown ?? '', { async: false }) as string
     detail.value = { item: res.experience, html: DOMPurify.sanitize(raw) }
@@ -90,7 +118,10 @@ function backToList() {
   detail.value = null
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  void loadMyOrgs()
+  void load()
+})
 </script>
 
 <template>
@@ -121,6 +152,17 @@ onMounted(() => void load())
     <!-- 列表视图 -->
     <template v-else>
       <div :class="$style.searchRow">
+        <!-- 经验回路切换（M8）：我所在组织非空才显示；冻结组织不进清单 -->
+        <select
+          v-if="myOrgs.length > 0"
+          class="mx-input"
+          :class="$style.orgSelect"
+          :value="activeOrgSlug"
+          @change="switchOrg"
+        >
+          <option value="">公共经验库</option>
+          <option v-for="o in myOrgs" :key="o.slug" :value="o.slug">{{ o.name }}</option>
+        </select>
         <input
           v-model="keyword"
           type="text"
@@ -188,6 +230,12 @@ onMounted(() => void load())
   display: flex;
   gap: var(--mx-space-2);
   align-items: center;
+}
+
+/* 经验回路切换（M8）：宽度自适应，不与搜索框抢空间 */
+.orgSelect {
+  flex: none;
+  max-width: 180px;
 }
 
 .searchInput {

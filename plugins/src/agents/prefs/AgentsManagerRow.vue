@@ -49,9 +49,6 @@ onMounted(() => {
   store.loadSkills().catch(() => {
     // 技能加载失败仅降级为显示原始技能名，不阻断员工管理
   })
-  store.loadConnectors().catch(() => {
-    // 云技能清单加载失败在云技能区内呈现空态文案
-  })
 })
 
 /** modal 互斥惯例：add 前先 remove 同 id（契约 §6） */
@@ -305,14 +302,11 @@ watch(
   },
 )
 
-// ── 配置区编辑态（技能 / 工具 / 云技能勾选的本地副本，保存时统一写回） ──
-const editorTab = ref<'instructions' | 'skills' | 'cloud' | 'tools'>('instructions')
+// ── 配置区编辑态（技能 / 工具勾选的本地副本，保存时统一写回） ──
+const editorTab = ref<'instructions' | 'skills' | 'tools'>('instructions')
 const isEditing = ref(false)
 const localSkills = ref<string[]>([])
 const localEnabledTools = ref<Set<string>>(new Set())
-const localAllowedServers = ref<Set<string>>(new Set())
-/** 云技能勾选基线（取消编辑时回滚用） */
-const allowedBaseline = ref<Set<string>>(new Set())
 
 function initEditor(name: string): void {
   const a = store.agents.find((x) => x.name === name)
@@ -320,7 +314,6 @@ function initEditor(name: string): void {
   // 工具启用 = 全量 - exclude_tools
   const excluded = new Set(a?.exclude_tools || [])
   localEnabledTools.value = new Set(AGENT_TOOLS.map((t) => t.name).filter((n) => !excluded.has(n)))
-  localAllowedServers.value = new Set(allowedBaseline.value)
 }
 
 // ── 指令正文（agent.get：introduction 即 IDENTITY 正文，soul 即 SOUL 正文） ──
@@ -336,8 +329,6 @@ async function loadAgentBodies(name: string): Promise<void> {
   identityBody.value = ''
   soulBody.value = ''
   if (!name) {
-    allowedBaseline.value = new Set()
-    localAllowedServers.value = new Set()
     return
   }
   detailLoading.value = true
@@ -346,14 +337,6 @@ async function loadAgentBodies(name: string): Promise<void> {
     if (seq !== detailReqSeq || name !== selectedName.value) return
     identityBody.value = String(res?.introduction ?? '')
     soulBody.value = String(res?.soul ?? '')
-    // allows_tools 条目为 "mcp:<server>"，解析出 server 名集合作为云技能勾选基线
-    const allowed = new Set<string>()
-    for (const raw of res?.allows_tools || []) {
-      const m = /^mcp:(.+)$/.exec(String(raw).trim())
-      if (m?.[1]) allowed.add(m[1])
-    }
-    allowedBaseline.value = allowed
-    localAllowedServers.value = new Set(allowed)
   } catch (err: unknown) {
     if (seq === detailReqSeq) {
       pushNotice(shell, 'error', err instanceof Error ? err.message : '加载员工详情失败')
@@ -429,24 +412,20 @@ function cancelEditing(): void {
 async function handleSave(): Promise<void> {
   const name = selectedName.value
   if (!name) return
-  // 计算 exclude_tools = 所有工具 - 启用工具；云技能勾选 → allows_tools（条目 "mcp:<server>"）
+  // 计算 exclude_tools = 所有工具 - 启用工具
   const excludeTools = AGENT_TOOLS.map((t) => t.name).filter((n) => !localEnabledTools.value.has(n))
-  const allowsTools = [...localAllowedServers.value].map((n) => `mcp:${n}`)
   try {
     await store.updateAgent({
       name,
       skills: localSkills.value,
       exclude_tools: excludeTools,
-      allows_tools: allowsTools,
     })
     // 局部同步清单条目（查看态摘要即时一致）
     const a = store.agents.find((x) => x.name === name)
     if (a) {
       a.skills = [...localSkills.value]
       a.exclude_tools = excludeTools
-      a.allows_tools = allowsTools
     }
-    allowedBaseline.value = new Set(localAllowedServers.value)
     isEditing.value = false
     pushNotice(shell, 'success', 'Agent 保存成功')
   } catch (err: unknown) {
@@ -572,23 +551,6 @@ const assignedSkills = computed<SkillInfo[]>(() =>
 function isThirdParty(s: SkillItem): boolean {
   return !!(s.author || s.license)
 }
-
-// ── 云技能勾选 ──
-function toggleConnector(name: string, enable: boolean): void {
-  const next = new Set(localAllowedServers.value)
-  if (enable) next.add(name)
-  else next.delete(name)
-  localAllowedServers.value = next
-}
-
-function toggleAllConnectors(enable: boolean): void {
-  localAllowedServers.value = enable ? new Set(store.connectors.map((c) => c.name)) : new Set()
-}
-
-/** 查看态摘要：已勾选云技能条目 */
-const allowedConnectors = computed(() =>
-  store.connectors.filter((c) => localAllowedServers.value.has(c.name)),
-)
 
 /** 查看态摘要：已启用工具组（全部成员启用才算完整组） */
 const enabledToolGroups = computed(() =>
@@ -1186,9 +1148,6 @@ onMounted(() => {
             <button type="button" class="mx-tab" role="tab" :aria-selected="editorTab === 'skills' ? 'true' : 'false'" @click="editorTab = 'skills'">
               技能<template v-if="isEditing">&nbsp;({{ localSkills.length }}/{{ store.skills.length }})</template>
             </button>
-            <button type="button" class="mx-tab" role="tab" :aria-selected="editorTab === 'cloud' ? 'true' : 'false'" @click="editorTab = 'cloud'">
-              云技能<template v-if="isEditing">&nbsp;({{ localAllowedServers.size }}/{{ store.connectors.length }})</template>
-            </button>
             <button type="button" class="mx-tab" role="tab" :aria-selected="editorTab === 'tools' ? 'true' : 'false'" @click="editorTab = 'tools'">
               工具<template v-if="isEditing">&nbsp;({{ localEnabledTools.size }}/{{ AGENT_TOOLS.length }})</template>
             </button>
@@ -1315,54 +1274,6 @@ onMounted(() => {
                 </span>
               </button>
               <div v-if="store.skills.length === 0" :class="$style.summaryEmpty">暂无可用技能</div>
-            </div>
-          </template>
-        </div>
-
-        <!-- 区：云技能（技能连接器，勾选写入 allows_tools） -->
-        <div v-show="editorTab === 'cloud'" :class="$style.tabPanel">
-          <div v-if="!isEditing" :class="$style.summaryList">
-            <div v-for="c in allowedConnectors" :key="c.name" :class="$style.summaryItem">
-              <div :class="$style.summaryTitle">{{ c.title }} <span :class="$style.monoBadge">mcp:{{ c.name }}</span></div>
-              <div :class="$style.summaryDesc">{{ c.description }}</div>
-            </div>
-            <div v-if="allowedConnectors.length === 0" :class="$style.summaryEmpty">尚未勾选任何云技能；点击「编辑」勾选，或到「技能连接器」开启服务</div>
-          </div>
-          <template v-else>
-            <div :class="$style.checkList">
-              <button
-                v-for="c in store.connectors"
-                :key="c.name"
-                type="button"
-                role="checkbox"
-                :aria-checked="localAllowedServers.has(c.name) ? 'true' : 'false'"
-                :class="$style.checkItem"
-                @click="toggleConnector(c.name, !localAllowedServers.has(c.name))"
-              >
-                <span :class="[$style.box, { [$style.boxChecked]: localAllowedServers.has(c.name) }]">
-                  <MxIcon v-if="localAllowedServers.has(c.name)" name="lucide:check" :size="16" />
-                </span>
-                <span :class="$style.checkBody">
-                  <span :class="$style.checkTitle">{{ c.title }} <span :class="$style.monoBadge">mcp:{{ c.name }}</span></span>
-                  <span :class="$style.checkDesc">{{ c.description }}</span>
-                </span>
-              </button>
-              <div v-if="store.connectors.length === 0" :class="$style.summaryEmpty">暂无启用的技能连接器，请先到「技能连接器」中开启</div>
-            </div>
-            <div v-if="store.connectors.length > 0" :class="$style.checkActions">
-              <button
-                type="button"
-                role="checkbox"
-                :aria-checked="localAllowedServers.size === store.connectors.length ? 'true' : localAllowedServers.size > 0 ? 'mixed' : 'false'"
-                :class="$style.checkItem"
-                @click="toggleAllConnectors(localAllowedServers.size !== store.connectors.length)"
-              >
-                <span :class="[$style.box, { [$style.boxChecked]: localAllowedServers.size === store.connectors.length, [$style.boxIndet]: localAllowedServers.size > 0 && localAllowedServers.size < store.connectors.length }]">
-                  <MxIcon v-if="localAllowedServers.size === store.connectors.length" name="lucide:check" :size="16" />
-                  <MxIcon v-else-if="localAllowedServers.size > 0" name="lucide:minus" :size="16" />
-                </span>
-                <span :class="$style.checkLabel">全选/取消</span>
-              </button>
             </div>
           </template>
         </div>
